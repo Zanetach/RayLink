@@ -9,6 +9,20 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+  <section class="auth-screen" id="admin-auth" aria-labelledby="admin-auth-title">
+    <form class="auth-card" id="admin-login-form">
+      <span class="brand-mark auth-brand">R/</span>
+      <p class="eyebrow">RayLink Control Plane</p>
+      <h1 id="admin-auth-title">登录管理控制台</h1>
+      <p class="auth-copy">管理用户权益、生成配置并安全发布到 sing-box Runtime。</p>
+      <label class="field"><span>管理员用户名</span><input name="username" autocomplete="username" value="admin" required></label>
+      <label class="field"><span>管理员密码</span><input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="auth-error" id="admin-auth-error" role="alert"></p>
+      <button class="button primary auth-submit" type="submit">登录</button>
+      <small class="auth-footnote">凭据只提交到当前 RayLink 服务，不会写入浏览器存储。</small>
+    </form>
+  </section>
+
   <a class="skip-link" href="#main-content">跳到主要内容</a>
 
   <svg class="svg-sprite" aria-hidden="true">
@@ -34,7 +48,7 @@
     <symbol id="i-rollback" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M5.5 16a8 8 0 1 0 .5-9l-3 3"/></symbol>
   </svg>
 
-  <div class="app-shell">
+  <div class="app-shell" id="app-shell" hidden>
     <aside class="rail" id="rail" aria-label="主导航">
       <div class="brand">
         <span class="brand-mark">R/</span>
@@ -280,29 +294,21 @@
         <section class="view" id="view-hosts" data-view="hosts">
           <div class="page-heading">
             <div><p class="eyebrow">基础设施</p><h1>主机</h1><p>监控 sing-box 节点、协议入口和同步状态。</p></div>
-            <button class="button primary" data-open-host="新主机"><svg><use href="#i-plus"/></svg>添加主机</button>
+            <button class="button primary" data-open-host="local"><svg><use href="#i-edit"/></svg>配置 Runtime</button>
           </div>
           <section class="host-map">
-            <div class="map-header"><span>全球节点拓扑</span><span><i></i>4 个节点在线</span></div>
-            <div class="map-stage" aria-label="节点网络拓扑示意">
-              <div class="map-route route-one"></div><div class="map-route route-two"></div><div class="map-route route-three"></div>
-              <button class="map-node tokyo" data-open-host="东京核心"><i></i><span><strong>东京</strong><small>38 ms</small></span></button>
-              <button class="map-node singapore" data-open-host="新加坡边缘"><i></i><span><strong>新加坡</strong><small>63 ms</small></span></button>
-              <button class="map-node frankfurt" data-open-host="法兰克福"><i></i><span><strong>法兰克福</strong><small>186 ms</small></span></button>
-              <button class="map-node losangeles warning" data-open-host="洛杉矶入口"><i></i><span><strong>洛杉矶</strong><small>228 ms</small></span></button>
-              <span class="map-origin">控制面 · 杭州</span>
+            <div class="map-header"><span>单机 Runtime 拓扑</span><span id="host-map-status"><i></i>等待连接</span></div>
+            <div class="map-stage" aria-label="RayLink 控制面到 sing-box Runtime 的拓扑">
+              <div class="map-route route-one"></div>
+              <button class="map-node tokyo" data-open-host="local"><i></i><span><strong id="host-map-name">本机 Runtime</strong><small id="host-map-address">尚未配置</small></span></button>
+              <span class="map-origin">RayLink 控制面</span>
             </div>
           </section>
           <section class="table-panel host-table">
             <div class="table-scroll">
               <table>
                 <thead><tr><th>主机</th><th>状态</th><th>入口协议</th><th>CPU</th><th>吞吐</th><th>最后同步</th><th><span class="sr-only">操作</span></th></tr></thead>
-                <tbody>
-                  <tr><td><button class="identity-link" data-open-host="东京核心"><span class="flag">JP</span><span><strong>东京核心</strong><small>103.45.17.82 · Ubuntu 24.04</small></span></button></td><td><span class="status-badge good"><i></i>在线</span></td><td><span class="tag">VLESS</span><span class="tag">Reality</span></td><td class="numeric">34%</td><td class="numeric">318 Mbps</td><td>8 秒前</td><td><button class="icon-button small" aria-label="编辑东京核心" data-open-host="东京核心"><svg><use href="#i-more"/></svg></button></td></tr>
-                  <tr><td><button class="identity-link" data-open-host="新加坡边缘"><span class="flag">SG</span><span><strong>新加坡边缘</strong><small>18.141.202.73 · Debian 12</small></span></button></td><td><span class="status-badge good"><i></i>在线</span></td><td><span class="tag">HY2</span><span class="tag">TUIC</span></td><td class="numeric">51%</td><td class="numeric">406 Mbps</td><td>11 秒前</td><td><button class="icon-button small" aria-label="编辑新加坡边缘" data-open-host="新加坡边缘"><svg><use href="#i-more"/></svg></button></td></tr>
-                  <tr><td><button class="identity-link" data-open-host="法兰克福"><span class="flag">DE</span><span><strong>法兰克福</strong><small>3.71.186.44 · Ubuntu 24.04</small></span></button></td><td><span class="status-badge good"><i></i>在线</span></td><td><span class="tag">VLESS</span><span class="tag">Trojan</span></td><td class="numeric">27%</td><td class="numeric">174 Mbps</td><td>9 秒前</td><td><button class="icon-button small" aria-label="编辑法兰克福" data-open-host="法兰克福"><svg><use href="#i-more"/></svg></button></td></tr>
-                  <tr><td><button class="identity-link" data-open-host="洛杉矶入口"><span class="flag">US</span><span><strong>洛杉矶入口</strong><small>34.216.88.109 · Debian 12</small></span></button></td><td><span class="status-badge warning"><i></i>延迟偏高</span></td><td><span class="tag">VLESS</span><span class="tag">Reality</span></td><td class="numeric">76%</td><td class="numeric">521 Mbps</td><td>16 秒前</td><td><button class="icon-button small" aria-label="编辑洛杉矶入口" data-open-host="洛杉矶入口"><svg><use href="#i-more"/></svg></button></td></tr>
-                </tbody>
+                <tbody id="host-table-body"></tbody>
               </table>
             </div>
           </section>
@@ -315,14 +321,14 @@
           </div>
           <section class="release-header">
             <div><span class="release-version">v2026.07.25-05</span><span class="status-badge neutral"><i></i>草稿</span></div>
-            <p>添加首尔入口并更新 DNS 分流规则 · 编辑人 周航 · 6 分钟前</p>
+            <p>根据当前用户、方案和 Runtime 主机生成受管配置</p>
           </section>
           <ol class="deploy-trail full" id="publish-trail">
             <li class="current"><span>1</span><strong>草稿</strong><small>3 项变更</small></li>
             <li><span>2</span><strong>校验</strong><small>语法与端口</small></li>
             <li><span>3</span><strong>快照</strong><small>可安全回滚</small></li>
-            <li><span>4</span><strong>分批发布</strong><small>4 个节点</small></li>
-            <li><span>5</span><strong>健康确认</strong><small>连接与延迟</small></li>
+            <li><span>4</span><strong>原子发布</strong><small>单机 Runtime</small></li>
+            <li><span>5</span><strong>运行确认</strong><small>版本与状态</small></li>
           </ol>
           <div class="deploy-layout">
             <section class="config-editor">
@@ -335,14 +341,14 @@
     <span class="code-key">"timestamp"</span>: <span class="code-bool">true</span>
   },
   <span class="code-key">"inbounds"</span>: [{
-    <span class="code-key">"type"</span>: <span class="code-string">"vless"</span>,
-    <span class="code-key">"tag"</span>: <span class="code-string">"in-seoul-reality"</span>,
-    <span class="code-key">"listen_port"</span>: <span class="code-num">443</span>,
-    <span class="code-key">"users"</span>: <span class="code-variable">"$active_users"</span>
+    <span class="code-key">"type"</span>: <span class="code-string">"shadowsocks"</span>,
+    <span class="code-key">"tag"</span>: <span class="code-string">"managed-ss-2022"</span>,
+    <span class="code-key">"listen_port"</span>: <span class="code-num" id="managed-listen-port">8388</span>,
+    <span class="code-key">"method"</span>: <span class="code-string">"2022-blake3-aes-128-gcm"</span>,
+    <span class="code-key">"users"</span>: <span class="code-variable">"$eligible_users"</span>
   }],
   <span class="code-key">"route"</span>: {
-    <span class="code-key">"rules"</span>: <span class="code-variable">"$managed_rules"</span>,
-    <span class="code-key">"final"</span>: <span class="code-string">"proxy"</span>
+    <span class="code-key">"final"</span>: <span class="code-string">"direct"</span>
   }
 }</code></pre>
               </div>
@@ -352,16 +358,16 @@
               <div class="panel-heading"><div><p class="eyebrow">发布前检查</p><h2>3 项变更</h2></div><button class="icon-button small" aria-label="重新检查"><svg><use href="#i-refresh"/></svg></button></div>
               <div class="check-list" id="validation-list">
                 <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>配置语法</strong><small>通过 sing-box check</small></div></div>
-                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>端口冲突</strong><small>443 在目标节点可用</small></div></div>
-                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>证书与密钥</strong><small>Reality 密钥有效</small></div></div>
-                <div class="pending"><span>4</span><div><strong>节点连通性</strong><small>发布时再次确认</small></div></div>
+                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>受管凭据</strong><small>每位有效用户独立生成</small></div></div>
+                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>文件权限</strong><small>配置以 0600 原子写入</small></div></div>
+                <div class="pending"><span>4</span><div><strong>Runtime 状态</strong><small>发布后读取实际版本</small></div></div>
               </div>
               <div class="change-summary">
                 <span><i class="add">+</i><strong>1</strong> 个入站</span>
                 <span><i class="modify">~</i><strong>2</strong> 条路由</span>
                 <span><i class="remove">−</i><strong>0</strong> 个删除</span>
               </div>
-              <div class="target-nodes"><p>目标节点</p><label><input type="checkbox" checked><span>东京核心</span><small>38 ms</small></label><label><input type="checkbox" checked><span>新加坡边缘</span><small>63 ms</small></label><label><input type="checkbox" checked><span>法兰克福</span><small>186 ms</small></label><label><input type="checkbox" checked><span>洛杉矶入口</span><small class="warning-text">228 ms</small></label></div>
+              <div class="target-nodes"><p>目标 Runtime</p><label><input type="checkbox" checked disabled><span id="managed-target-name">CycleLink Runtime</span><small>本机受管</small></label></div>
             </aside>
           </div>
         </section>

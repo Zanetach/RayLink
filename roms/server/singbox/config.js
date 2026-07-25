@@ -1,0 +1,38 @@
+function isEligibleUser(user, hostRegion, now) {
+  if (!["active", "warning"].includes(user.state)) return false;
+  const expiresAt = new Date(`${user.expiresAt}T23:59:59.999Z`);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt < now) return false;
+  return user.nodeScope.includes("all") || user.nodeScope.includes(hostRegion);
+}
+
+export function buildSingBoxConfig(snapshot, options = {}) {
+  const now = options.now || new Date();
+  const listenPort = options.listenPort || 8388;
+  const users = snapshot.users
+    .filter((user) => isEligibleUser(user, snapshot.host.region, now))
+    .map((user) => ({ name: user.email, password: user.runtimePassword }));
+
+  return {
+    log: {
+      level: "info",
+      timestamp: true
+    },
+    inbounds: [{
+      type: "shadowsocks",
+      tag: "managed-shadowsocks",
+      listen: "::",
+      listen_port: listenPort,
+      network: "tcp",
+      method: "2022-blake3-aes-128-gcm",
+      password: snapshot.masterPassword,
+      users
+    }],
+    outbounds: [{
+      type: "direct",
+      tag: "direct"
+    }],
+    route: {
+      final: "direct"
+    }
+  };
+}

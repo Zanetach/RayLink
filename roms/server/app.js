@@ -1,0 +1,319 @@
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { RayLinkStore } from "./database.js";
+import { buildUserClientConfig } from "./singbox/client-config.js";
+import { LocalSingBoxAdapter } from "./singbox/local-adapter.js";
+import { RuntimeManager } from "./singbox/runtime-manager.js";
+
+const SESSION_COOKIE = "raylink_session";
+const PORTAL_SESSION_COOKIE = "raylink_portal_session";
+const defaultWebDir = fileURLToPath(new URL("../web", import.meta.url));
+
+const contentTypes = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml"
+};
+
+function parseCookies(header = "") {
+  return Object.fromEntries(header.split(";").flatMap((entry) => {
+    const separator = entry.indexOf("=");
+    if (separator < 0) return [];
+    return [[entry.slice(0, separator).trim(), decodeURIComponent(entry.slice(separator + 1).trim())]];
+  }));
+}
+
+async function readJson(request, limit = 64 * 1024) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > limit) {
+      const error = new Error("请求内容过大");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  if (!chunks.length) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    const error = new Error("请求不是有效的 JSON");
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function sendJson(response, statusCode, body, headers = {}) {
+  const payload = JSON.stringify(body);
+  response.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(payload),
+    "cache-control": "no-store",
+    ...headers
+  });
+  response.end(payload);
+}
+
+async function sendStatic(response, webDir, pathname) {
+  const relativePath = pathname === "/" ? "index.html" : decodeURIComponent(pathname).replace(/^\/+/, "");
+  const filePath = resolve(webDir, relativePath);
+  if (filePath !== webDir && !filePath.startsWith(`${webDir}${sep}`)) return false;
+  try {
+    const payload = await readFile(filePath);
+    response.writeHead(200, {
+      "content-type": contentTypes[extname(filePath)] || "application/octet-stream",
+      "content-length": payload.length,
+      "cache-control": filePath.endsWith("index.html") ? "no-cache" : "public, max-age=300",
+      "content-security-policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "permissions-policy": "camera=(), microphone=(), geolocation=()"
+    });
+    response.end(payload);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "EISDIR") return false;
+    throw error;
+  }
+}
+
+function sessionCookie(name, secret, expiresAt, secure) {
+  return [
+    `${name}=${encodeURIComponent(secret)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    secure ? "Secure" : "",
+    `Expires=${new Date(expiresAt).toUTCString()}`
+  ].filter(Boolean).join("; ");
+}
+
+export async function createRayLinkApp(options) {
+  const dbPath = options.dbPath || join(options.dataDir, "raylink.db");
+  const publicOrigin = new URL(options.publicOrigin);
+  const proxyHost = options.proxyHost || publicOrigin.hostname;
+  const store = new RayLinkStore({
+    dbPath,
+    adminUsername: options.adminUsername,
+    adminPassword: options.adminPassword,
+    initialHostAddress: proxyHost
+  });
+  const webDir = resolve(options.webDir || defaultWebDir);
+  const listenPort = options.listenPort || 8388;
+  const runtimeAdapter = options.runtimeAdapter || new LocalSingBoxAdapter({
+    dataDir: options.dataDir,
+    binaryPath: options.singBoxBinary || "sing-box",
+    mode: options.runtimeMode || "dry-run",
+    systemdUnit: options.systemdUnit || "sing-box.service"
+  });
+  const runtimeManager = new RuntimeManager({
+    store,
+    adapter: runtimeAdapter,
+    listenPort
+  });
+
+  const server = createServer(async (request, response) => {
+    try {
+      const url = new URL(request.url, publicOrigin);
+
+      if (request.method === "POST" && url.pathname === "/api/auth/login") {
+        const body = await readJson(request);
+        const admin = store.authenticateAdmin(body.username, body.password);
+        if (!admin) {
+          sendJson(response, 401, { error: { code: "INVALID_CREDENTIALS", message: "用户名或密码不正确" } });
+          return;
+        }
+        const session = store.createAdminSession(admin.id);
+        sendJson(
+          response,
+          200,
+          { currentAdmin: admin },
+          { "set-cookie": sessionCookie(SESSION_COOKIE, session.secret, session.expiresAt, publicOrigin.protocol === "https:") }
+        );
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/portal/login") {
+        const body = await readJson(request);
+        const user = store.authenticateUser(body.email, body.password);
+        if (!user) {
+          sendJson(response, 401, { error: { code: "INVALID_CREDENTIALS", message: "邮箱或密码不正确" } });
+          return;
+        }
+        if (user.portalStatus !== "active") {
+          sendJson(response, 403, { error: { code: "ACCOUNT_NOT_ACTIVE", message: "账号尚未完成首次登录激活" } });
+          return;
+        }
+        const profile = store.portalProfile(user.id);
+        if (profile.user.state === "disabled") {
+          sendJson(response, 403, { error: { code: "ACCOUNT_DISABLED", message: "账号已经停用" } });
+          return;
+        }
+        const session = store.createUserSession(user.id);
+        sendJson(
+          response,
+          200,
+          profile,
+          { "set-cookie": sessionCookie(PORTAL_SESSION_COOKIE, session.secret, session.expiresAt, publicOrigin.protocol === "https:") }
+        );
+        return;
+      }
+
+      if (url.pathname.startsWith("/api/portal/")) {
+        const sessionSecret = parseCookies(request.headers.cookie)[PORTAL_SESSION_COOKIE];
+        const sessionUser = store.userForSession(sessionSecret);
+        if (!sessionUser) {
+          sendJson(response, 401, { error: { code: "UNAUTHENTICATED", message: "请先登录用户中心" } });
+          return;
+        }
+        const profile = store.portalProfile(sessionUser.id);
+        if (request.method === "GET" && url.pathname === "/api/portal/me") {
+          sendJson(response, 200, profile);
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/portal/config/sing-box") {
+          const credential = store.clientCredential(sessionUser.id);
+          const runtimeHost = store.getHost("local");
+          const expiresAt = new Date(`${credential.expiresAt}T23:59:59.999Z`);
+          if (!["active", "warning"].includes(credential.state) || expiresAt < new Date()) {
+            sendJson(response, 403, { error: { code: "ENTITLEMENT_INACTIVE", message: "账号当前不可使用" } });
+            return;
+          }
+          sendJson(
+            response,
+            200,
+            buildUserClientConfig({ credential, server: runtimeHost?.address || proxyHost, port: listenPort }),
+            { "content-disposition": `attachment; filename="raylink-sing-box.json"` }
+          );
+          return;
+        }
+        sendJson(response, 404, { error: { code: "NOT_FOUND", message: "接口不存在" } });
+        return;
+      }
+
+      if (url.pathname.startsWith("/api/")) {
+        const sessionSecret = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+        const admin = store.adminForSession(sessionSecret);
+        if (!admin) {
+          sendJson(response, 401, { error: { code: "UNAUTHENTICATED", message: "请先登录" } });
+          return;
+        }
+
+        if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
+          const requestOrigin = request.headers.origin;
+          if (requestOrigin && requestOrigin !== publicOrigin.origin) {
+            sendJson(response, 403, { error: { code: "ORIGIN_REJECTED", message: "请求来源不受信任" } });
+            return;
+          }
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/bootstrap") {
+          sendJson(response, 200, {
+            ...store.bootstrap(admin),
+            runtime: await runtimeManager.status(),
+            runtimePreview: runtimeManager.preview(),
+            deployments: store.listDeployments()
+          });
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/runtime/status") {
+          sendJson(response, 200, await runtimeManager.status());
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/deployments") {
+          sendJson(response, 200, { deployments: store.listDeployments() });
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/deployments/preview") {
+          sendJson(response, 200, runtimeManager.preview());
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/deployments") {
+          sendJson(response, 201, await runtimeManager.publish());
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/plans") {
+          sendJson(response, 201, store.createPlan(await readJson(request)));
+          return;
+        }
+
+        const planMatch = url.pathname.match(/^\/api\/plans\/([^/]+)$/);
+        if (request.method === "PATCH" && planMatch) {
+          sendJson(
+            response,
+            200,
+            store.updatePlan(decodeURIComponent(planMatch[1]), await readJson(request))
+          );
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/users") {
+          sendJson(response, 201, store.createUser(await readJson(request)));
+          return;
+        }
+
+        const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/);
+        if (request.method === "PATCH" && userMatch) {
+          sendJson(response, 200, store.updateUser(decodeURIComponent(userMatch[1]), await readJson(request)));
+          return;
+        }
+
+        const hostMatch = url.pathname.match(/^\/api\/hosts\/([^/]+)$/);
+        if (request.method === "PATCH" && hostMatch) {
+          sendJson(response, 200, store.updateHost(
+            decodeURIComponent(hostMatch[1]),
+            await readJson(request)
+          ));
+          return;
+        }
+
+        sendJson(response, 404, { error: { code: "NOT_FOUND", message: "接口不存在" } });
+        return;
+      }
+
+      if (request.method === "GET" && await sendStatic(response, webDir, url.pathname)) return;
+      sendJson(response, 404, { error: { code: "NOT_FOUND", message: "资源不存在" } });
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, {
+        error: {
+          code: error.code || (error.statusCode ? "BAD_REQUEST" : "INTERNAL_ERROR"),
+          message: error.statusCode ? error.message : "服务器处理请求失败"
+        }
+      });
+    }
+  });
+
+  return {
+    server,
+    store,
+    runtimeManager,
+    async listen({ host, port }) {
+      await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, host, () => {
+          server.off("error", reject);
+          resolve();
+        });
+      });
+    },
+    async close() {
+      if (server.listening) {
+        await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      }
+      store.close();
+    }
+  };
+}

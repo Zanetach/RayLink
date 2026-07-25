@@ -48,6 +48,35 @@ body {
   touch-action: manipulation;
 }
 
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 15% 10%, var(--accent-soft), transparent 30%),
+    radial-gradient(circle at 85% 90%, oklch(0.55 0.08 235 / 0.12), transparent 34%),
+    var(--canvas);
+}
+
+.auth-card {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  padding: 34px;
+  box-shadow: 0 28px 80px rgb(0 0 0 / 0.34);
+}
+
+.auth-brand { margin-bottom: 4px; }
+.auth-card h1 { margin: 0; font-size: 25px; letter-spacing: -0.025em; }
+.auth-copy { margin: -8px 0 6px; color: var(--muted); font-size: 12px; }
+.auth-submit { width: 100%; justify-content: center; margin-top: 4px; }
+.auth-error { min-height: 18px; margin: -4px 0; color: var(--danger); font-size: 11px; }
+.auth-footnote { color: var(--faint); font-size: 9px; line-height: 1.6; text-align: center; }
+
 button, input, select, textarea { font: inherit; }
 
 button, a { -webkit-tap-highlight-color: transparent; }

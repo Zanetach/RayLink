@@ -1,17 +1,5 @@
-const users = [
-  { name: "林知夏", initials: "LZ", email: "lin.zhixia@meridian-log.cn", password: "raylink-demo", portalStatus: "active", state: "active", used: 74.3, planId: "standard", expires: "2026-10-18" },
-  { name: "岡本和也", initials: "OK", email: "k.okamoto@hokkaido-ceramics.jp", password: "raylink-demo", portalStatus: "active", state: "warning", used: 104.8, planId: "standard", expires: "2026-08-04" },
-  { name: "Priya Mehta", initials: "PM", email: "priya@vantage-bioworks.in", password: "raylink-demo", portalStatus: "active", state: "active", used: 75.4, planId: "high-speed", expires: "2026-09-01" },
-  { name: "Nia Okafor", initials: "NO", email: "nia@lagos-fieldworks.ng", password: "raylink-demo", portalStatus: "active", state: "active", used: 46.8, planId: "standard", expires: "2026-11-23" },
-  { name: "Lars Eriksson", initials: "LE", email: "lars@nordhavn-data.se", password: "raylink-demo", portalStatus: "invited", state: "disabled", used: 18.2, planId: "temporary", expires: "2026-07-31" },
-  { name: "陈望舒", initials: "CW", email: "wangshu@lingnan-studio.cn", password: "raylink-demo", portalStatus: "active", state: "warning", used: 103.7, planId: "standard", expires: "2026-08-12" }
-];
-
-const plans = {
-  "standard": { name: "标准访问", quota: 120, devices: 3, nodeGroup: "东京 + 新加坡", clients: ["mihomo", "sing-box"], description: "适合日常办公和开发", tone: "standard" },
-  "high-speed": { name: "高速访问", quota: 320, devices: 5, nodeGroup: "全部节点", clients: ["mihomo", "sing-box", "download"], description: "面向高流量研发团队", tone: "premium" },
-  "temporary": { name: "临时访问", quota: 36, devices: 1, nodeGroup: "东京", clients: ["mihomo", "sing-box"], description: "外部协作和短期项目", tone: "temporary" }
-};
+const users = [];
+const plans = {};
 
 const clientCatalog = {
   "mihomo": { name: "Mihomo", platforms: "macOS / Windows / Android", action: "一键导入" },
@@ -19,9 +7,23 @@ const clientCatalog = {
   "download": { name: "其他客户端", platforms: "下载兼容配置文件", action: "下载配置" }
 };
 
-const accountSummary = {
-  totalUsers: 27,
-  planAssignments: { "standard": 17, "high-speed": 6, "temporary": 4 }
+const accountSummary = { totalUsers: 0, planAssignments: {} };
+
+const controlPlane = {
+  currentAdmin: null,
+  hosts: [],
+  runtime: null,
+  runtimePreview: null,
+  deployments: [],
+  portalProfile: null
+};
+
+const scopeLabels = {
+  all: "全部节点",
+  tokyo: "东京",
+  singapore: "新加坡",
+  frankfurt: "法兰克福",
+  losangeles: "洛杉矶"
 };
 
 const accountTabs = {
@@ -43,6 +45,10 @@ const hostDetails = {
 };
 
 const elements = {
+  authScreen: document.querySelector("#admin-auth"),
+  authForm: document.querySelector("#admin-login-form"),
+  authError: document.querySelector("#admin-auth-error"),
+  appShell: document.querySelector("#app-shell"),
   rail: document.querySelector("#rail"),
   menuToggle: document.querySelector("#menu-toggle"),
   indicator: document.querySelector(".nav-indicator"),
@@ -50,6 +56,7 @@ const elements = {
   userCount: document.querySelector("#user-result-count"),
   userSearch: document.querySelector("#user-search"),
   planList: document.querySelector("#plan-list"),
+  hostBody: document.querySelector("#host-table-body"),
   clientEntryList: document.querySelector("#client-entry-list"),
   drawer: document.querySelector("#detail-drawer"),
   drawerTitle: document.querySelector("#drawer-title"),
@@ -75,6 +82,136 @@ function icon(name) {
   return `<svg aria-hidden="true"><use href="#i-${name}"></use></svg>`;
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      ...(options.body ? { "content-type": "application/json" } : {}),
+      ...options.headers
+    }
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("application/json") ? await response.json() : null;
+  if (!response.ok) {
+    const error = new Error(body?.error?.message || `请求失败（${response.status}）`);
+    error.code = body?.error?.code;
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+function scopeToLabel(scope) {
+  if (scope.includes("all")) return "全部节点";
+  return scope.map((region) => scopeLabels[region] || region).join(" + ");
+}
+
+function labelToScope(label) {
+  if (label === "全部节点") return ["all"];
+  return label.split(" + ").map((name) => Object.entries(scopeLabels).find(([, value]) => value === name)?.[0] || name);
+}
+
+function applyBootstrap(data) {
+  users.splice(0, users.length, ...data.users.map((user) => ({
+    id: user.id,
+    name: user.name,
+    initials: user.initials,
+    email: user.email,
+    portalStatus: user.portalStatus,
+    state: user.state,
+    used: user.usedGb,
+    planId: user.planId,
+    expires: user.expiresAt
+  })));
+  Object.keys(plans).forEach((planId) => delete plans[planId]);
+  Object.keys(accountSummary.planAssignments).forEach((planId) => delete accountSummary.planAssignments[planId]);
+  data.plans.forEach((plan) => {
+    plans[plan.id] = {
+      name: plan.name,
+      quota: plan.quotaGb,
+      devices: plan.deviceLimit,
+      nodeGroup: scopeToLabel(plan.nodeScope),
+      clients: plan.clientFormats,
+      description: plan.description,
+      tone: plan.tone
+    };
+    accountSummary.planAssignments[plan.id] = plan.assignedUsers;
+  });
+  accountSummary.totalUsers = users.length;
+  controlPlane.currentAdmin = data.currentAdmin;
+  controlPlane.hosts = data.hosts;
+  controlPlane.runtime = data.runtime;
+  controlPlane.runtimePreview = data.runtimePreview;
+  controlPlane.deployments = data.deployments;
+  renderUsers();
+  renderPlans();
+  renderRuntime();
+}
+
+async function loadBootstrap() {
+  const data = await api("/api/bootstrap");
+  applyBootstrap(data);
+  return data;
+}
+
+function renderRuntime() {
+  const runtime = controlPlane.runtime;
+  if (!runtime) return;
+  const railStatus = document.querySelector(".rail-status");
+  const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
+  const deploymentVersion = activeDeployment?.version || "尚未发布";
+  const healthy = ["running", "staged"].includes(runtime.state);
+  railStatus.querySelector("strong").textContent = healthy ? "Runtime 已就绪" : "Runtime 待配置";
+  railStatus.querySelector("small").textContent = runtime.runtimeVersion
+    ? `sing-box ${runtime.runtimeVersion}`
+    : `${runtime.mode} · ${runtime.state}`;
+  document.querySelectorAll(".release-version").forEach((element) => {
+    element.textContent = deploymentVersion;
+  });
+  const listenPort = document.querySelector("#managed-listen-port");
+  if (listenPort && controlPlane.runtimePreview) listenPort.textContent = controlPlane.runtimePreview.listenPort;
+  renderHosts();
+}
+
+function renderHosts() {
+  if (!elements.hostBody) return;
+  const host = controlPlane.hosts[0];
+  if (!host) {
+    elements.hostBody.innerHTML = '<tr><td colspan="7"><div class="empty-state">尚未配置 Runtime 主机</div></td></tr>';
+    return;
+  }
+  const runtime = controlPlane.runtime || { state: "unknown", mode: "dry-run" };
+  const healthy = ["running", "staged"].includes(runtime.state);
+  elements.hostBody.innerHTML = `
+    <tr>
+      <td><button class="identity-link" data-open-host="${escapeHtml(host.id)}"><span class="flag">SB</span><span><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></span></button></td>
+      <td><span class="status-badge ${healthy ? "good" : "neutral"}"><i></i>${healthy ? "已就绪" : "待配置"}</span></td>
+      <td><span class="tag">Shadowsocks 2022</span></td>
+      <td class="numeric">—</td>
+      <td class="numeric">—</td>
+      <td>${runtime.runtimeVersion || runtime.mode}</td>
+      <td><button class="icon-button small" aria-label="编辑${escapeHtml(host.name)}" data-open-host="${escapeHtml(host.id)}">${icon("more")}</button></td>
+    </tr>`;
+  document.querySelector("#host-map-name").textContent = host.name;
+  document.querySelector("#host-map-address").textContent = `${host.address} · ${host.region}`;
+  document.querySelector("#host-map-status").innerHTML = `<i></i>${healthy ? "Runtime 已就绪" : "等待首次发布"}`;
+  const managedTargetName = document.querySelector("#managed-target-name");
+  if (managedTargetName) managedTargetName.textContent = host.name;
+  document.querySelectorAll('.nav-item[data-view-target="hosts"] .nav-count').forEach((count) => {
+    count.textContent = controlPlane.hosts.length;
+  });
+}
+
 function formatDate(value) {
   return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(`${value}T00:00:00`));
 }
@@ -95,9 +232,9 @@ function renderUsers() {
     return `
       <tr>
         <td>
-          <button class="identity-link" data-user="${user.email}">
-            <span class="avatar">${user.initials}</span>
-            <span><strong>${user.name}</strong><small>${user.email}</small></span>
+          <button class="identity-link" data-user="${escapeHtml(user.email)}">
+            <span class="avatar">${escapeHtml(user.initials)}</span>
+            <span><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></span>
           </button>
         </td>
         <td><span class="status-badge ${status.className}"><i></i>${status.label}</span></td>
@@ -105,14 +242,23 @@ function renderUsers() {
           <div class="usage-copy"><span>${user.used.toFixed(1)} GB</span><span>${userPlan.quota} GB</span></div>
           <div class="progress ${progressClass}"><i style="width:${ratio.toFixed(1)}%"></i></div>
         </td>
-        <td><span class="plan-cell"><strong>${userPlan.name}</strong><small>${userPlan.devices} 台设备</small></span></td>
+        <td><span class="plan-cell"><strong>${escapeHtml(userPlan.name)}</strong><small>${userPlan.devices} 台设备</small></span></td>
         <td class="numeric">${formatDate(user.expires)}</td>
-        <td><button class="icon-button small" aria-label="编辑 ${user.name}" data-user="${user.email}">${icon("more")}</button></td>
+        <td><button class="icon-button small" aria-label="编辑 ${escapeHtml(user.name)}" data-user="${escapeHtml(user.email)}">${icon("more")}</button></td>
       </tr>`;
   }).join("");
 
   elements.userCount.textContent = `显示 ${filtered.length} / ${accountSummary.totalUsers} 位用户`;
   document.querySelector("#account-tab-users small").textContent = `${accountSummary.totalUsers} 位用户`;
+  document.querySelectorAll('.nav-item[data-view-target="users"] .nav-count').forEach((count) => {
+    count.textContent = accountSummary.totalUsers;
+  });
+  document.querySelectorAll("[data-user-filter]").forEach((button) => {
+    const filterName = button.dataset.userFilter;
+    const count = filterName === "all" ? users.length : users.filter((user) => user.state === filterName).length;
+    const badge = button.querySelector("span");
+    if (badge) badge.textContent = count;
+  });
   if (!filtered.length) {
     elements.userBody.innerHTML = `<tr><td colspan="6"><div class="empty-state">没有符合当前筛选条件的用户</div></td></tr>`;
   }
@@ -122,22 +268,22 @@ function renderPlans() {
   if (!elements.planList) return;
   elements.planList.innerHTML = Object.entries(plans).map(([planId, plan]) => {
     const assignedUsers = accountSummary.planAssignments[planId] || 0;
-    const scopeTags = plan.nodeGroup.split(" + ").map((scope) => `<span class="tag">${scope === "全部节点" ? "全节点" : scope}</span>`).join("");
+    const scopeTags = plan.nodeGroup.split(" + ").map((scope) => `<span class="tag">${escapeHtml(scope === "全部节点" ? "全节点" : scope)}</span>`).join("");
     const groupCount = plan.nodeGroup === "全部节点" ? 4 : plan.nodeGroup.split(" + ").length;
     return `
       <article class="plan-row">
-        <div class="plan-identity"><i class="plan-dot ${plan.tone === "standard" ? "" : plan.tone}"></i><span><strong>${plan.name}</strong><small>${plan.description}</small></span></div>
+        <div class="plan-identity"><i class="plan-dot ${plan.tone === "standard" ? "" : escapeHtml(plan.tone)}"></i><span><strong>${escapeHtml(plan.name)}</strong><small>${escapeHtml(plan.description)}</small></span></div>
         <div class="plan-metric"><strong>${plan.quota} GB</strong><small>${plan.devices} 台设备</small></div>
         <div class="plan-scope">${scopeTags}<small>${groupCount} 个节点组</small></div>
         <div class="plan-users"><strong>${assignedUsers}</strong><small>位用户</small></div>
-        <button class="icon-button small" aria-label="编辑${plan.name}方案" data-plan="${planId}">${icon("more")}</button>
+        <button class="icon-button small" aria-label="编辑${escapeHtml(plan.name)}方案" data-plan="${escapeHtml(planId)}">${icon("more")}</button>
       </article>`;
   }).join("");
 
   const totalUsage = users.reduce((sum, user) => sum + (user.used / plans[user.planId].quota), 0);
   document.querySelector("#plan-count").textContent = Object.keys(plans).length;
   document.querySelector("#assigned-user-count").textContent = accountSummary.totalUsers;
-  document.querySelector("#average-plan-usage").textContent = `${((totalUsage / users.length) * 100).toFixed(1)}%`;
+  document.querySelector("#average-plan-usage").textContent = users.length ? `${((totalUsage / users.length) * 100).toFixed(1)}%` : "0.0%";
   document.querySelector("#account-tab-plans small").textContent = `${Object.keys(plans).length} 个方案`;
 }
 
@@ -247,27 +393,29 @@ function closeDrawer() {
 }
 
 function userDrawerMarkup(user = {}) {
-  const isNew = !user.email;
+  const isNew = !user.id;
   const selectedPlanId = user.planId || Object.keys(plans)[0];
   const selectedPlan = plans[selectedPlanId];
-  const planOptions = Object.entries(plans).map(([planId, plan]) => `<option value="${planId}" ${planId === selectedPlanId ? "selected" : ""}>${plan.name}</option>`).join("");
+  const planOptions = Object.entries(plans).map(([planId, plan]) => `<option value="${escapeHtml(planId)}" ${planId === selectedPlanId ? "selected" : ""}>${escapeHtml(plan.name)}</option>`).join("");
   return `
-    <form class="drawer-form" id="user-drawer-form" data-original-email="${user.email || ""}">
+    <form class="drawer-form" id="user-drawer-form" data-user-id="${escapeHtml(user.id || "")}">
       <div class="drawer-profile">
-        <span class="avatar">${user.initials || "新"}</span>
-        <div><strong>${user.name || "新用户"}</strong><small>${isNew ? "尚未分配方案" : user.email}</small></div>
+        <span class="avatar">${escapeHtml(user.initials || "新")}</span>
+        <div><strong>${escapeHtml(user.name || "新用户")}</strong><small>${isNew ? "尚未分配方案" : escapeHtml(user.email)}</small></div>
       </div>
       <p class="drawer-section-label">基本信息</p>
-      <label class="field"><span>显示名称</span><input name="name" value="${user.name || ""}" placeholder="例如：徐清扬" required><small class="field-error"></small></label>
-      <label class="field"><span>邮箱</span><input name="email" type="email" value="${user.email || ""}" placeholder="name@company.com" required><small class="field-error"></small></label>
-      <label class="field"><span>到期时间</span><input name="expires" type="date" value="${user.expires || "2026-12-31"}" required><small class="field-error"></small></label>
+      <label class="field"><span>显示名称</span><input name="name" value="${escapeHtml(user.name || "")}" placeholder="例如：徐清扬" required><small class="field-error"></small></label>
+      <label class="field"><span>邮箱</span><input name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="name@company.com" required><small class="field-error"></small></label>
+      ${isNew ? '<label class="field"><span>初始密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位" required><small class="field-error"></small></label>' : ""}
+      ${isNew ? "" : '<label class="field"><span>重置密码（可选）</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="留空则保持不变"><small class="field-error"></small></label>'}
+      <label class="field"><span>到期时间</span><input name="expires" type="date" value="${escapeHtml(user.expires || "2026-12-31")}" required><small class="field-error"></small></label>
       <p class="drawer-section-label">订阅方案</p>
       <label class="field"><span>分配方案</span><select name="plan">${planOptions}</select><small class="field-hint">流量、设备数、节点和客户端能力跟随方案</small></label>
-      <div class="assigned-plan-preview"><span><small>每月流量</small><strong data-plan-quota>${selectedPlan.quota} GB</strong></span><span><small>设备上限</small><strong data-plan-devices>${selectedPlan.devices} 台</strong></span><span><small>节点范围</small><strong data-plan-nodes>${selectedPlan.nodeGroup}</strong></span></div>
+      <div class="assigned-plan-preview"><span><small>每月流量</small><strong data-plan-quota>${selectedPlan.quota} GB</strong></span><span><small>设备上限</small><strong data-plan-devices>${selectedPlan.devices} 台</strong></span><span><small>节点范围</small><strong data-plan-nodes>${escapeHtml(selectedPlan.nodeGroup)}</strong></span></div>
       <p class="drawer-section-label">账号状态</p>
-      <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用已分配方案</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
+      <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用已分配方案</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
       <div class="switch-row"><div><strong>允许客户端同步</strong><small>客户端按方案自动获取最新配置</small></div><button type="button" class="switch on" role="switch" aria-checked="true"></button></div>
-      <div class="switch-row"><div><strong data-login-status>${isNew ? "等待创建账号" : user.portalStatus === "active" ? "用户中心账号已激活" : "登录邀请已发送"}</strong><small>${isNew ? "保存用户后自动发送首次登录邀请" : "登录账号使用当前邮箱"}</small></div><button type="button" class="button secondary compact" data-send-invite ${isNew ? "disabled" : ""}>${isNew ? "创建后发送" : "重发邀请"}</button></div>
+      <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
     </form>`;
 }
 
@@ -285,13 +433,18 @@ function planDrawerMarkup(planId) {
   const plan = plans[planId];
   const isNew = !plan;
   const assignedUsers = accountSummary.planAssignments[planId] || 0;
-  const capabilityRows = Object.entries(clientCatalog).map(([capabilityId, client]) => `
-    <div class="switch-row"><div><strong>${client.name}</strong><small>${client.platforms}</small></div><button type="button" class="switch ${plan?.clients.includes(capabilityId) || (isNew && capabilityId !== "download") ? "on" : ""}" data-capability="${capabilityId}" role="switch" aria-checked="${Boolean(plan?.clients.includes(capabilityId) || (isNew && capabilityId !== "download"))}"></button></div>`).join("");
+  const capabilityRows = Object.entries(clientCatalog).map(([capabilityId, client]) => {
+    const available = capabilityId === "sing-box";
+    const selected = available && (plan?.clients.includes(capabilityId) || isNew);
+    return `
+      <div class="switch-row"><div><strong>${client.name}</strong><small>${available ? client.platforms : `${client.platforms} · 即将支持`}</small></div><button type="button" class="switch ${selected ? "on" : ""}" data-capability="${capabilityId}" role="switch" aria-checked="${selected}" ${available ? "" : "disabled"}></button></div>`;
+  }).join("");
   return `
-    <form class="drawer-form" id="plan-drawer-form" data-plan-id="${isNew ? "" : planId}">
+    <form class="drawer-form" id="plan-drawer-form" data-plan-id="${escapeHtml(isNew ? "" : planId)}">
       <p class="drawer-section-label">方案信息</p>
-      <label class="field"><span>方案名称</span><input name="planName" value="${plan?.name || ""}" placeholder="例如：区域办公" required><small class="field-error"></small></label>
-      <label class="field"><span>适用场景</span><input name="description" value="${plan?.description || ""}" placeholder="例如：适合区域办公室日常使用"></label>
+      ${isNew ? '<label class="field"><span>方案 ID</span><input name="planId" pattern="[a-z0-9][a-z0-9-]{1,31}" placeholder="regional-office" required><small class="field-error"></small><small class="field-hint">2–32 位小写字母、数字或连字符，创建后不可更改</small></label>' : ""}
+      <label class="field"><span>方案名称</span><input name="planName" value="${escapeHtml(plan?.name || "")}" placeholder="例如：区域办公" required><small class="field-error"></small></label>
+      <label class="field"><span>适用场景</span><input name="description" value="${escapeHtml(plan?.description || "")}" placeholder="例如：适合区域办公室日常使用"></label>
       <div class="quota-input">
         <label class="field"><span>每月流量</span><input name="quota" type="number" min="1" value="${plan?.quota || 120}" required><small class="field-error"></small></label>
         <label class="field"><span>设备上限</span><input name="devices" type="number" min="1" value="${plan?.devices || 3}" required><small class="field-error"></small></label>
@@ -314,35 +467,29 @@ function openPlan(planId) {
   });
 }
 
-function hostDrawerMarkup(name) {
-  const host = hostDetails[name];
-  const isNew = !host;
+function hostDrawerMarkup(hostId) {
+  const host = controlPlane.hosts.find((item) => item.id === hostId);
   return `
-    <form class="drawer-form" id="host-drawer-form">
-      ${isNew ? "" : `<div class="drawer-profile"><span class="avatar">${name.slice(0, 1)}</span><div><strong>${name}</strong><small>${host.ip} · ${host.os}</small></div></div>`}
+    <form class="drawer-form" id="host-drawer-form" data-host-id="${escapeHtml(host.id)}">
+      <div class="drawer-profile"><span class="avatar">${escapeHtml(host.name.slice(0, 1))}</span><div><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></div></div>
       <p class="drawer-section-label">主机连接</p>
-      <label class="field"><span>名称</span><input name="hostname" value="${isNew ? "" : name}" placeholder="例如：首尔入口" required></label>
-      <label class="field"><span>IP 地址或域名</span><input name="address" value="${host?.ip || ""}" placeholder="203.0.113.10" required></label>
-      <label class="field"><span>区域</span><input name="region" value="${host?.region || ""}" placeholder="韩国 · 首尔"></label>
-      <div class="quota-input">
-        <label class="field"><span>SSH 端口</span><input type="number" value="22"></label>
-        <label class="field"><span>用户</span><input value="root"></label>
-      </div>
+      <label class="field"><span>名称</span><input name="hostname" value="${escapeHtml(host.name)}" placeholder="例如：东京生产节点" required></label>
+      <label class="field"><span>公网 IP 或域名</span><input name="address" value="${escapeHtml(host.address)}" placeholder="node.example.com" required></label>
+      <label class="field"><span>区域标识</span><input name="region" value="${escapeHtml(host.region)}" pattern="[A-Za-z0-9-]{2,32}" placeholder="tokyo" required></label>
       <p class="drawer-section-label">sing-box 入口</p>
-      <label class="field"><span>协议组合</span><select><option ${host?.protocols.includes("Reality") ? "selected" : ""}>VLESS + Reality</option><option ${host?.protocols.includes("Hysteria2") ? "selected" : ""}>Hysteria2 + TUIC</option><option ${host?.protocols.includes("Trojan") ? "selected" : ""}>VLESS + Trojan</option></select></label>
-      <label class="field"><span>监听端口</span><input value="${host?.port || "443"}"></label>
-      ${isNew ? "" : `<p class="drawer-section-label">实时资源</p><div class="switch-row"><div><strong>CPU ${host.cpu}%</strong><small>内存 ${host.memory}% · 同步 ${host.sync}</small></div><span class="status-badge good"><i></i>在线</span></div>`}
-      <div class="switch-row"><div><strong>纳入自动发布</strong><small>配置发布时自动同步该节点</small></div><button type="button" class="switch on" role="switch" aria-checked="true"></button></div>
+      <div class="switch-row"><div><strong>Shadowsocks 2022</strong><small>端口由服务端环境变量统一设置；保存后用户配置立即使用新地址</small></div><span class="status-badge good"><i></i>已启用</span></div>
+      <div class="switch-row"><div><strong>Runtime 模式</strong><small>${controlPlane.runtime?.mode || "dry-run"} · ${controlPlane.runtime?.configPath || "尚未生成配置"}</small></div><span class="status-badge neutral"><i></i>${controlPlane.runtime?.state || "unknown"}</span></div>
     </form>`;
 }
 
-function openHost(name) {
-  const isNew = name === "新主机";
+function openHost(hostId) {
+  const host = controlPlane.hosts.find((item) => item.id === hostId) || controlPlane.hosts[0];
+  if (!host) return;
   openDrawer({
-    title: isNew ? "添加主机" : name,
-    eyebrow: isNew ? "基础设施" : "主机详情",
-    content: hostDrawerMarkup(name),
-    saveLabel: isNew ? "验证并添加" : "保存主机"
+    title: host.name,
+    eyebrow: "Runtime 主机",
+    content: hostDrawerMarkup(host.id),
+    saveLabel: "保存主机"
   });
 }
 
@@ -354,30 +501,33 @@ function portalLoginMarkup() {
         <div><strong>登录 RayLink 用户中心</strong><small>使用管理员为你创建的账号</small></div>
       </div>
       <label class="field"><span>登录邮箱</span><input name="portalEmail" type="email" value="priya@vantage-bioworks.in" required><small class="field-error"></small></label>
-      <label class="field"><span>密码</span><input name="portalPassword" type="password" value="raylink-demo" required><small class="field-error"></small></label>
+      <label class="field"><span>密码</span><input name="portalPassword" type="password" autocomplete="current-password" required><small class="field-error"></small></label>
       <div class="portal-login-help"><svg><use href="#i-shield"/></svg><span><strong>账号由管理员开通</strong><small>首次登录邀请和密码重置邮件发送到用户邮箱。</small></span></div>
     </form>`;
 }
 
 function portalHomeMarkup() {
-  const user = users.find((item) => item.email === currentPortalUserEmail);
-  const plan = plans[user.planId];
-  const clientEntries = plan.clients.map((clientId) => {
+  const profile = controlPlane.portalProfile;
+  const user = profile.user;
+  const plan = profile.plan;
+  const clientEntries = plan.clientFormats.map((clientId) => {
     const client = clientCatalog[clientId];
-    return `<button type="button" data-client-import="${client.name}"><span><strong>${client.name}</strong><small>${client.platforms}</small></span><span>${client.action}</span></button>`;
+    if (!client) return "";
+    const available = clientId === "sing-box";
+    return `<button type="button" ${available ? 'data-client-import="sing-box"' : "disabled"}><span><strong>${client.name}</strong><small>${client.platforms}</small></span><span>${available ? "下载配置" : "即将支持"}</span></button>`;
   }).join("");
   return `
     <div class="portal-home">
       <div class="drawer-profile">
-        <span class="avatar">${user.initials}</span>
-        <div><strong>${user.name}</strong><small>${user.email}</small></div>
+        <span class="avatar">${escapeHtml(user.initials)}</span>
+        <div><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></div>
         <span class="status-badge good"><i></i>账号正常</span>
       </div>
       <div class="portal-entitlement">
         <p class="drawer-section-label">当前订阅方案</p>
-        <h3>${plan.name}</h3>
-        <p>${plan.description}</p>
-        <div class="assigned-plan-preview"><span><small>剩余流量</small><strong>${(plan.quota - user.used).toFixed(1)} GB</strong></span><span><small>设备上限</small><strong>${plan.devices} 台</strong></span><span><small>节点范围</small><strong>${plan.nodeGroup}</strong></span></div>
+        <h3>${escapeHtml(plan.name)}</h3>
+        <p>${escapeHtml(plan.description)}</p>
+        <div class="assigned-plan-preview"><span><small>剩余流量</small><strong>${Math.max(0, plan.quotaGb - user.usedGb).toFixed(1)} GB</strong></span><span><small>设备上限</small><strong>${plan.deviceLimit} 台</strong></span><span><small>节点范围</small><strong>${escapeHtml(scopeToLabel(plan.nodeScope))}</strong></span></div>
       </div>
       <p class="drawer-section-label">选择客户端</p>
       <div class="portal-client-list">
@@ -412,6 +562,28 @@ async function copyText(text) {
   showToast("已复制", "用户中心入口已复制到剪贴板。");
 }
 
+async function downloadPortalConfig() {
+  try {
+    const response = await fetch("/api/portal/config/sing-box");
+    if (!response.ok) {
+      const body = await response.json();
+      throw new Error(body?.error?.message || "配置生成失败");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "raylink-sing-box.json";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    showToast("配置已下载", "将 JSON 配置导入 sing-box 客户端即可使用。");
+  } catch (error) {
+    showToast("下载失败", error.message);
+  }
+}
+
 function validateDrawerForm(form) {
   let valid = true;
   form.querySelectorAll(".field-error").forEach((error) => error.classList.remove("visible"));
@@ -432,57 +604,68 @@ function validateDrawerForm(form) {
   return valid;
 }
 
-function recordUserAssignment(previousPlanId, nextPlanId, isNewUser = false) {
-  if (previousPlanId === nextPlanId && !isNewUser) return;
-  if (previousPlanId) {
-    accountSummary.planAssignments[previousPlanId] = Math.max(0, (accountSummary.planAssignments[previousPlanId] || 0) - 1);
-  }
-  accountSummary.planAssignments[nextPlanId] = (accountSummary.planAssignments[nextPlanId] || 0) + 1;
-  if (isNewUser) accountSummary.totalUsers += 1;
-}
-
-function saveUserForm(form) {
-  const originalEmail = form.dataset.originalEmail;
+async function saveUserForm(form) {
+  const userId = form.dataset.userId;
   const name = form.elements.name.value.trim();
   const email = form.elements.email.value.trim();
   const planId = form.elements.plan.value;
-  const expires = form.elements.expires.value;
-  const existingUser = users.find((user) => user.email === originalEmail);
-
-  if (existingUser) {
-    recordUserAssignment(existingUser.planId, planId);
-    Object.assign(existingUser, { name, email, planId, expires });
-  } else {
-    const initials = name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-    users.push({ name, initials: initials || "新", email, password: "raylink-demo", portalStatus: "invited", state: "active", used: 0, planId, expires });
-    recordUserAssignment(null, planId, true);
-  }
-  renderUsers();
-  renderPlans();
-}
-
-function savePlanForm(form) {
-  const planId = form.dataset.planId || `custom-${Date.now()}`;
-  const name = form.elements.planName.value.trim();
-  const previousPlan = plans[planId];
-  const enabledClients = [...form.querySelectorAll(".switch[data-capability].on")].map((button) => button.dataset.capability);
-  const updatedPlan = {
+  const payload = {
     name,
-    quota: Number(form.elements.quota.value),
-    devices: Number(form.elements.devices.value),
-    nodeGroup: form.elements.nodeGroup.value,
-    clients: enabledClients,
-    description: form.elements.description.value.trim() || "自定义服务方案",
-    tone: previousPlan?.tone || "standard"
+    email,
+    planId,
+    expiresAt: form.elements.expires.value,
+    state: form.querySelector("[data-user-enabled]").classList.contains("on") ? "active" : "disabled",
+    portalStatus: form.querySelector("[data-portal-enabled]").classList.contains("on") ? "active" : "invited"
   };
-
-  plans[planId] = updatedPlan;
-  if (!(planId in accountSummary.planAssignments)) accountSummary.planAssignments[planId] = 0;
-  renderUsers();
-  renderPlans();
+  if (form.elements.password.value) payload.password = form.elements.password.value;
+  await api(userId ? `/api/users/${encodeURIComponent(userId)}` : "/api/users", {
+    method: userId ? "PATCH" : "POST",
+    body: JSON.stringify(payload)
+  });
+  await loadBootstrap();
 }
 
-function saveDrawer() {
+async function savePlanForm(form) {
+  const existingPlanId = form.dataset.planId;
+  const planId = existingPlanId || form.elements.planId.value.trim();
+  const name = form.elements.planName.value.trim();
+  const enabledClients = [...form.querySelectorAll(".switch[data-capability].on")].map((button) => button.dataset.capability);
+  if (!enabledClients.length) {
+    const error = new Error("至少启用一种客户端格式");
+    error.code = "INVALID_CLIENT_FORMATS";
+    throw error;
+  }
+  const payload = {
+    ...(existingPlanId ? {} : { id: planId }),
+    name,
+    quotaGb: Number(form.elements.quota.value),
+    deviceLimit: Number(form.elements.devices.value),
+    nodeScope: labelToScope(form.elements.nodeGroup.value),
+    clientFormats: enabledClients,
+    description: form.elements.description.value.trim() || "自定义服务方案",
+    tone: plans[planId]?.tone || "standard"
+  };
+  await api(existingPlanId ? `/api/plans/${encodeURIComponent(existingPlanId)}` : "/api/plans", {
+    method: existingPlanId ? "PATCH" : "POST",
+    body: JSON.stringify(payload)
+  });
+  await loadBootstrap();
+}
+
+async function saveHostForm(form) {
+  const hostId = form.dataset.hostId;
+  await api(`/api/hosts/${encodeURIComponent(hostId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: form.elements.hostname.value.trim(),
+      address: form.elements.address.value.trim(),
+      region: form.elements.region.value.trim()
+    })
+  });
+  await loadBootstrap();
+}
+
+async function saveDrawer() {
   const form = elements.drawerContent.querySelector("form");
   if (!form) {
     closeDrawer();
@@ -493,14 +676,19 @@ function saveDrawer() {
   if (form.id === "portal-login-form") {
     const email = form.elements.portalEmail.value.trim();
     const password = form.elements.portalPassword.value;
-    const user = users.find((item) => item.email === email);
-    if (!user || user.password !== password || user.portalStatus !== "active") {
+    try {
+      controlPlane.portalProfile = await api("/api/portal/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password })
+      });
+    } catch (error) {
       const passwordError = form.elements.portalPassword.closest(".field").querySelector(".field-error");
-      passwordError.textContent = user?.portalStatus === "invited" ? "该账号尚未完成首次登录激活" : "账号或密码不正确";
+      passwordError.textContent = error.message;
       passwordError.classList.add("visible");
       form.elements.portalPassword.focus();
       return;
     }
+    const user = controlPlane.portalProfile.user;
     currentPortalUserEmail = user.email;
     elements.drawerEyebrow.textContent = "用户中心预览";
     elements.drawerTitle.textContent = "我的服务";
@@ -510,18 +698,32 @@ function saveDrawer() {
     return;
   }
 
-  if (form.id === "user-drawer-form") saveUserForm(form);
-  if (form.id === "plan-drawer-form") savePlanForm(form);
+  elements.drawerSave.disabled = true;
+  const previousLabel = elements.drawerSave.textContent;
+  elements.drawerSave.textContent = "保存中…";
+  try {
+    if (form.id === "user-drawer-form") await saveUserForm(form);
+    if (form.id === "plan-drawer-form") await savePlanForm(form);
+    if (form.id === "host-drawer-form") await saveHostForm(form);
+  } catch (error) {
+    showToast("保存失败", error.message);
+    elements.drawerSave.disabled = false;
+    elements.drawerSave.textContent = previousLabel;
+    return;
+  }
 
   const message = form?.id === "plan-drawer-form"
     ? "方案设置已保存，关联用户将在下次同步时更新。"
-    : form?.id === "user-drawer-form" && elements.drawerSave.textContent.includes("创建")
+    : form?.id === "host-drawer-form"
+      ? "Runtime 主机已更新，用户配置将使用新的公网地址。"
+    : form?.id === "user-drawer-form" && previousLabel.includes("创建")
       ? "用户已创建并分配订阅方案。"
-      : elements.drawerSave.textContent.includes("添加")
+      : previousLabel.includes("添加")
         ? "主机连接信息已通过本地校验。"
         : "更改已经写入当前草稿。";
   closeDrawer();
   showToast("已保存", message);
+  elements.drawerSave.disabled = false;
 }
 
 function handleSwitch(button) {
@@ -529,50 +731,49 @@ function handleSwitch(button) {
   button.setAttribute("aria-checked", String(enabled));
 }
 
-function publishConfig() {
+async function publishConfig() {
   if (publishInProgress) return;
   publishInProgress = true;
   const button = document.querySelector("#publish-config");
   const items = [...document.querySelectorAll("#publish-trail li")];
   const statusBadge = document.querySelector(".release-header .status-badge");
   button.disabled = true;
-  button.innerHTML = `${icon("refresh")} 发布中 0 / 4`;
+  button.innerHTML = `${icon("refresh")} 正在校验`;
   statusBadge.className = "status-badge warning";
   statusBadge.innerHTML = "<i></i>发布中";
 
-  const stages = [
-    { index: 1, text: "校验完成", button: "发布中 0 / 4" },
-    { index: 2, text: "快照已保存", button: "发布中 0 / 4" },
-    { index: 3, text: "节点 2 / 4", button: "发布中 2 / 4" },
-    { index: 4, text: "健康检查通过", button: "发布中 4 / 4" }
-  ];
-
   items[0].className = "done";
   items[0].querySelector("span").innerHTML = icon("check");
+  try {
+    const preview = await api("/api/deployments/preview", { method: "POST" });
+    items[1].className = "done";
+    items[1].querySelector("span").innerHTML = icon("check");
+    items[2].className = "current";
+    button.innerHTML = `${icon("refresh")} 写入快照`;
+    showToast("校验完成", `${preview.eligibleUsers} 位有效用户，${preview.inboundCount} 个入站。`);
 
-  stages.forEach((stage, step) => {
-    setTimeout(() => {
-      const previous = items[stage.index - 1];
-      if (previous) {
-        previous.className = "done";
-        previous.querySelector("span").innerHTML = icon("check");
-      }
-      const current = items[stage.index];
-      current.className = step === stages.length - 1 ? "done" : "current";
-      current.querySelector("span").innerHTML = step === stages.length - 1 ? icon("check") : String(stage.index + 1);
-      button.innerHTML = `${icon("refresh")} ${stage.button}`;
-      showToast(stage.text, step === stages.length - 1 ? "4 个节点均已加载新配置。" : "配置发布轨迹已更新。");
-
-      if (step === stages.length - 1) {
-        button.disabled = false;
-        button.innerHTML = `${icon("check")} 已发布`;
-        statusBadge.className = "status-badge good";
-        statusBadge.innerHTML = "<i></i>已生效";
-        document.querySelector(".release-version").textContent = "v2026.07.25-05";
-        publishInProgress = false;
-      }
-    }, 850 * (step + 1));
-  });
+    const deployment = await api("/api/deployments", { method: "POST" });
+    items.forEach((item) => {
+      item.className = "done";
+      item.querySelector("span").innerHTML = icon("check");
+    });
+    button.innerHTML = `${icon("check")} 已发布`;
+    statusBadge.className = "status-badge good";
+    statusBadge.innerHTML = "<i></i>已生效";
+    document.querySelectorAll(".release-version").forEach((element) => {
+      element.textContent = deployment.version;
+    });
+    await loadBootstrap();
+    showToast("配置已生效", `${deployment.eligibleUsers} 位用户已写入 sing-box 配置。`);
+  } catch (error) {
+    button.innerHTML = `${icon("terminal")} 重试发布`;
+    statusBadge.className = "status-badge warning";
+    statusBadge.innerHTML = "<i></i>发布失败";
+    showToast("发布失败", error.message);
+  } finally {
+    button.disabled = false;
+    publishInProgress = false;
+  }
 }
 
 document.addEventListener("click", (event) => {
@@ -623,7 +824,7 @@ document.addEventListener("click", (event) => {
 
   const clientImport = event.target.closest("[data-client-import]");
   if (clientImport) {
-    showToast("客户端已准备", `${clientImport.dataset.clientImport} 的导入配置已经生成。`);
+    if (clientImport.dataset.clientImport === "sing-box") downloadPortalConfig();
     return;
   }
 
@@ -736,9 +937,42 @@ function syncResponsiveNavigation() {
 
 window.addEventListener("resize", syncResponsiveNavigation);
 
-renderUsers();
-renderPlans();
-renderClientEntries();
-syncResponsiveNavigation();
-const initialRoute = location.hash.replace(/^#\//, "") || "dashboard";
-navigate(initialRoute, false);
+async function enterControlPlane() {
+  await loadBootstrap();
+  elements.authScreen.hidden = true;
+  elements.appShell.hidden = false;
+  renderClientEntries();
+  syncResponsiveNavigation();
+  const initialRoute = location.hash.replace(/^#\//, "") || "dashboard";
+  navigate(initialRoute, false);
+}
+
+elements.authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  elements.authError.textContent = "";
+  const submit = elements.authForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  submit.textContent = "登录中…";
+  try {
+    await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        username: elements.authForm.elements.username.value.trim(),
+        password: elements.authForm.elements.password.value
+      })
+    });
+    await enterControlPlane();
+  } catch (error) {
+    elements.authError.textContent = error.message;
+    elements.authForm.elements.password.focus();
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "登录";
+  }
+});
+
+enterControlPlane().catch((error) => {
+  if (error.status !== 401) elements.authError.textContent = `无法连接控制面：${error.message}`;
+  elements.authScreen.hidden = false;
+  elements.appShell.hidden = true;
+});

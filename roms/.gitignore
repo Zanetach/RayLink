@@ -1,0 +1,7 @@
+data/*.db
+data/*.db-*
+data/sing-box/*.json
+data/sing-box/*.bak
+data/sing-box/*.tmp
+coverage/
+.env
