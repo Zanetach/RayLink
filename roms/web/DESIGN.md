@@ -6,7 +6,7 @@ RayLink is a precise, quiet operations console for teams running sing-box infras
 
 The primary signature is the deployment trail: every configuration change is shown as a traceable sequence from draft to validation, snapshot, rollout, and health confirmation.
 
-Users and subscriptions are separate business objects. A subscription plan defines service entitlement such as traffic, device count, node scope, and client support; a user receives one assigned plan and consumes it through the authenticated user center.
+Users and subscriptions are separate business objects presented in one "Users & subscriptions" workspace. The user-management tab handles daily assignment work, while the plan-management tab defines reusable traffic, device, node-scope, and client entitlements.
 
 ## 2. Color palette and roles
 
@@ -45,6 +45,7 @@ The reflex choices Inter, Space Grotesk, and IBM Plex Sans are rejected. The int
 - Inputs use Surface 1, 8px radius, a 1px divider outline, and a two-pixel accent focus ring.
 - Tables are cardless operational surfaces with hairline row dividers, sticky headers, right-aligned numeric data, and compact 48px rows.
 - Navigation is a 232px rail with one sliding accent indicator and restrained active fill.
+- User and plan management share one rail destination, then use a two-tab underline switch inside the workspace.
 - Drawers are fixed detail surfaces at the right edge. They retain page context and never behave like centered modals.
 
 ## 5. Layout principles
@@ -69,7 +70,7 @@ Depth comes from luminance steps, not dark drop shadows. The canvas is level 0, 
 
 ## 8. Responsive behavior
 
-At 920px the rail becomes a compact top bar with an accessible navigation drawer. At 680px dense tables become labeled record rows, two-column forms collapse to one column, and the primary navigation becomes a five-item bottom bar. All touch targets remain at least 40px and safe-area insets are respected.
+At 920px the rail becomes a compact top bar with an accessible navigation drawer. At 680px dense tables become labeled record rows, two-column forms collapse to one column, and the primary navigation becomes a four-item bottom bar. All touch targets remain at least 40px and safe-area insets are respected.
 
 ## 9. Agent prompt guide
 

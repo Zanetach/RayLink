@@ -34,6 +34,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html { min-width: 320px; background: var(--canvas); }
 
@@ -387,6 +388,56 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.012em; lin
 .button.compact { min-height: 40px; padding: 0 12px; font-size: 10px; }
 .button:disabled { cursor: not-allowed; opacity: 0.46; }
 .heading-actions { display: flex; gap: 8px; }
+
+.view#view-users .page-heading { margin-bottom: 16px; }
+.account-tabs {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.account-tabs button {
+  position: relative;
+  display: grid;
+  min-width: 128px;
+  min-height: 56px;
+  align-content: center;
+  justify-items: start;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  transition: transform 120ms var(--ease-out), opacity 160ms ease;
+}
+.account-tabs button::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+  opacity: 0;
+  transform: scaleX(0.72);
+  transition: transform 160ms var(--ease-out), opacity 120ms ease;
+}
+.account-tabs button span { color: var(--text-soft); font-size: 13px; font-weight: 650; }
+.account-tabs button small { margin-top: 4px; color: var(--faint); font-size: 10px; }
+.account-tabs button.active::after { opacity: 1; transform: scaleX(1); }
+.account-tabs button.active span { color: var(--text); }
+.account-panel { display: none; }
+.account-panel.active { display: block; animation: view-enter 220ms var(--ease-out) both; }
+.account-context {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  color: var(--faint);
+  font-size: 10px;
+}
+.account-context span:first-child { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.account-panel .view-context { margin: 0 0 16px; }
 
 .status-band {
   display: grid;
@@ -955,6 +1006,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 
 @media (hover: hover) {
   .nav-item:hover, .icon-button:hover, .profile-button:hover, .node-row:hover { background-color: var(--surface-2); color: var(--text); }
+  .account-tabs button:hover span { color: var(--text); }
   .button.primary:hover { background-color: var(--accent-strong); }
   .button.secondary:hover, .command-button:hover { border-color: var(--border); background-color: var(--surface-3); }
   .text-button:hover, .identity-link:hover strong { color: var(--accent); }
@@ -1018,6 +1070,9 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   .node-row { grid-template-columns: 12px minmax(120px,1fr) 44px; }
   .node-load { display: none; }
   .toolbar { margin-bottom: 10px; }
+  .account-tabs { gap: 8px; margin-bottom: 16px; }
+  .account-tabs button { min-width: 0; flex: 1; min-height: 56px; padding: 0 8px; }
+  .account-context, .account-panel .view-context { align-items: flex-start; flex-direction: column; justify-content: center; gap: 4px; padding: 8px 0; }
   .filter-group { padding-bottom: 4px; }
   .table-panel { background: transparent; }
   .table-scroll { overflow: visible; }
@@ -1090,7 +1145,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
     left: 0;
     display: grid;
     height: calc(64px + env(safe-area-inset-bottom));
-    grid-template-columns: repeat(5,1fr);
+    grid-template-columns: repeat(4,1fr);
     border-top: 1px solid var(--border);
     background: var(--rail);
     padding: 4px 5px env(safe-area-inset-bottom);

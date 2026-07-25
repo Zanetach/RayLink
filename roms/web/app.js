@@ -8,9 +8,9 @@ const users = [
 ];
 
 const plans = {
-  "standard": { name: "标准访问", quota: 120, devices: 3, nodeGroup: "东京 + 新加坡", clients: ["mihomo", "sing-box"], description: "适合日常办公和开发", tone: "standard" },
-  "high-speed": { name: "高速访问", quota: 320, devices: 5, nodeGroup: "全部节点", clients: ["mihomo", "sing-box", "download"], description: "面向高流量研发团队", tone: "premium" },
-  "temporary": { name: "临时访问", quota: 36, devices: 1, nodeGroup: "东京", clients: ["mihomo", "sing-box"], description: "外部协作和短期项目", tone: "temporary" }
+  "standard": { name: "标准访问", quota: 120, devices: 3, nodeGroup: "东京 + 新加坡", clients: ["mihomo", "sing-box"], assignedUsers: 17, description: "适合日常办公和开发", tone: "standard" },
+  "high-speed": { name: "高速访问", quota: 320, devices: 5, nodeGroup: "全部节点", clients: ["mihomo", "sing-box", "download"], assignedUsers: 6, description: "面向高流量研发团队", tone: "premium" },
+  "temporary": { name: "临时访问", quota: 36, devices: 1, nodeGroup: "东京", clients: ["mihomo", "sing-box"], assignedUsers: 4, description: "外部协作和短期项目", tone: "temporary" }
 };
 
 const clientCatalog = {
@@ -55,6 +55,8 @@ const elements = {
 };
 
 let activeUserFilter = "all";
+let activeAccountTab = "users";
+let totalUserCount = 27;
 let toastTimer;
 let lastFocusedElement;
 let publishInProgress = false;
@@ -100,7 +102,8 @@ function renderUsers() {
       </tr>`;
   }).join("");
 
-  elements.userCount.textContent = `显示 ${filtered.length} / 27 位用户`;
+  elements.userCount.textContent = `显示 ${filtered.length} / ${totalUserCount} 位用户`;
+  document.querySelector("#account-tab-users small").textContent = `${totalUserCount} 位用户`;
   if (!filtered.length) {
     elements.userBody.innerHTML = `<tr><td colspan="6"><div class="empty-state">没有符合当前筛选条件的用户</div></td></tr>`;
   }
@@ -109,7 +112,7 @@ function renderUsers() {
 function renderPlans() {
   if (!elements.planList) return;
   elements.planList.innerHTML = Object.entries(plans).map(([planId, plan]) => {
-    const assignedUsers = users.filter((user) => user.planId === planId).length;
+    const assignedUsers = plan.assignedUsers;
     const scopeTags = plan.nodeGroup.split(" + ").map((scope) => `<span class="tag">${scope === "全部节点" ? "全节点" : scope}</span>`).join("");
     const groupCount = plan.nodeGroup === "全部节点" ? 4 : plan.nodeGroup.split(" + ").length;
     return `
@@ -124,8 +127,9 @@ function renderPlans() {
 
   const totalUsage = users.reduce((sum, user) => sum + (user.used / plans[user.planId].quota), 0);
   document.querySelector("#plan-count").textContent = Object.keys(plans).length;
-  document.querySelector("#assigned-user-count").textContent = users.length;
+  document.querySelector("#assigned-user-count").textContent = totalUserCount;
   document.querySelector("#average-plan-usage").textContent = `${((totalUsage / users.length) * 100).toFixed(1)}%`;
+  document.querySelector("#account-tab-plans small").textContent = `${Object.keys(plans).length} 个方案`;
 }
 
 function renderClientEntries() {
@@ -134,10 +138,44 @@ function renderClientEntries() {
     <button data-open-portal><span><strong>${client.name}</strong><small>${client.platforms}</small></span>${icon("arrow")}</button>`).join("");
 }
 
+function setAccountTab(tabName, updateHash = false) {
+  activeAccountTab = tabName === "plans" ? "plans" : "users";
+
+  document.querySelectorAll("[data-account-tab]").forEach((button) => {
+    const active = button.dataset.accountTab === activeAccountTab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+
+  document.querySelectorAll("[data-account-panel]").forEach((panel) => {
+    const active = panel.dataset.accountPanel === activeAccountTab;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+
+  document.querySelectorAll("[data-account-action]").forEach((button) => {
+    button.hidden = button.dataset.accountAction !== activeAccountTab;
+  });
+
+  document.title = `${activeAccountTab === "plans" ? "方案管理" : "用户管理"} · RayLink`;
+  if (updateHash) {
+    const route = activeAccountTab === "plans" ? "users/plans" : "users";
+    history.pushState({ view: "users", accountTab: activeAccountTab }, "", `#/${route}`);
+  }
+}
+
 function navigate(viewName, updateHash = true) {
-  const target = document.querySelector(`[data-view="${viewName}"]`) || document.querySelector('[data-view="not-found"]');
+  const requestedAccountTab = viewName === "subscriptions" || viewName === "users/plans"
+    ? "plans"
+    : viewName === "users"
+      ? "users"
+      : null;
+  const normalizedView = requestedAccountTab ? "users" : viewName;
+  const target = document.querySelector(`[data-view="${normalizedView}"]`) || document.querySelector('[data-view="not-found"]');
   const resolvedView = target.dataset.view;
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view === target));
+  if (resolvedView === "users") setAccountTab(requestedAccountTab || activeAccountTab);
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     const active = button.dataset.viewTarget === resolvedView;
@@ -154,9 +192,14 @@ function navigate(viewName, updateHash = true) {
     elements.indicator.style.transform = `translateY(${index * 48}px)`;
   }
 
-  const headings = { dashboard: "仪表盘", users: "用户", subscriptions: "订阅方案", hosts: "主机", deploy: "配置发布", "not-found": "未找到" };
+  const headings = { dashboard: "仪表盘", users: activeAccountTab === "plans" ? "方案管理" : "用户管理", hosts: "主机", deploy: "配置发布", "not-found": "未找到" };
   document.title = `${headings[resolvedView]} · RayLink`;
-  if (updateHash) history.pushState({ view: resolvedView }, "", `#/${resolvedView}`);
+  if (updateHash) {
+    const route = resolvedView === "users" && activeAccountTab === "plans" ? "users/plans" : resolvedView;
+    history.pushState({ view: resolvedView, accountTab: activeAccountTab }, "", `#/${route}`);
+  } else if (viewName === "subscriptions") {
+    history.replaceState({ view: "users", accountTab: "plans" }, "", "#/users/plans");
+  }
   elements.rail.classList.remove("open");
   elements.rail.toggleAttribute("inert", window.innerWidth <= 920);
   elements.menuToggle.setAttribute("aria-expanded", "false");
@@ -232,7 +275,7 @@ function openNewUser() {
 function planDrawerMarkup(planId) {
   const plan = plans[planId];
   const isNew = !plan;
-  const assignedUsers = users.filter((user) => user.planId === planId).length;
+  const assignedUsers = plan?.assignedUsers || 0;
   const capabilityRows = Object.entries(clientCatalog).map(([capabilityId, client]) => `
     <div class="switch-row"><div><strong>${client.name}</strong><small>${client.platforms}</small></div><button type="button" class="switch ${plan?.clients.includes(capabilityId) || (isNew && capabilityId !== "download") ? "on" : ""}" data-capability="${capabilityId}" role="switch" aria-checked="${Boolean(plan?.clients.includes(capabilityId) || (isNew && capabilityId !== "download"))}"></button></div>`).join("");
   return `
@@ -389,10 +432,16 @@ function saveUserForm(form) {
   const existingUser = users.find((user) => user.email === originalEmail);
 
   if (existingUser) {
+    if (existingUser.planId !== planId) {
+      plans[existingUser.planId].assignedUsers = Math.max(0, plans[existingUser.planId].assignedUsers - 1);
+      plans[planId].assignedUsers += 1;
+    }
     Object.assign(existingUser, { name, email, planId, expires });
   } else {
     const initials = name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
     users.push({ name, initials: initials || "新", email, password: "raylink-demo", portalStatus: "invited", state: "active", used: 0, planId, expires });
+    plans[planId].assignedUsers += 1;
+    totalUserCount += 1;
   }
   renderUsers();
   renderPlans();
@@ -409,6 +458,7 @@ function savePlanForm(form) {
     devices: Number(form.elements.devices.value),
     nodeGroup: form.elements.nodeGroup.value,
     clients: enabledClients,
+    assignedUsers: previousPlan?.assignedUsers || 0,
     description: form.elements.description.value.trim() || "自定义服务方案",
     tone: previousPlan?.tone || "standard"
   };
@@ -515,6 +565,12 @@ document.addEventListener("click", (event) => {
   const viewButton = event.target.closest("[data-view-target]");
   if (viewButton) {
     navigate(viewButton.dataset.viewTarget);
+    return;
+  }
+
+  const accountTab = event.target.closest("[data-account-tab]");
+  if (accountTab) {
+    setAccountTab(accountTab.dataset.accountTab, true);
     return;
   }
 
@@ -643,6 +699,12 @@ document.addEventListener("keydown", (event) => {
       event.preventDefault();
       first.focus();
     }
+  }
+  if (["ArrowLeft", "ArrowRight"].includes(event.key) && event.target.matches("[data-account-tab]")) {
+    event.preventDefault();
+    const nextTab = activeAccountTab === "users" ? "plans" : "users";
+    setAccountTab(nextTab, true);
+    document.querySelector(`[data-account-tab="${nextTab}"]`).focus();
   }
 });
 

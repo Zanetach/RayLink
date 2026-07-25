@@ -47,10 +47,7 @@
           <svg><use href="#i-grid"/></svg><span>仪表盘</span>
         </button>
         <button class="nav-item" data-view-target="users">
-          <svg><use href="#i-users"/></svg><span>用户</span><span class="nav-count">27</span>
-        </button>
-        <button class="nav-item" data-view-target="subscriptions">
-          <svg><use href="#i-link"/></svg><span>订阅</span>
+          <svg><use href="#i-users"/></svg><span>用户与订阅</span><span class="nav-count">27</span>
         </button>
         <button class="nav-item" data-view-target="hosts">
           <svg><use href="#i-server"/></svg><span>主机</span><span class="nav-count">4</span>
@@ -201,67 +198,82 @@
 
         <section class="view" id="view-users" data-view="users">
           <div class="page-heading">
-            <div><p class="eyebrow">访问控制</p><h1>用户</h1><p>管理账号、流量配额、有效期和节点权限。</p></div>
-            <button class="button primary" data-new-user><svg><use href="#i-plus"/></svg>新建用户</button>
-          </div>
-          <div class="toolbar">
-            <label class="search-field"><svg><use href="#i-search"/></svg><input id="user-search" type="search" placeholder="搜索姓名、邮箱或订阅 ID"></label>
-            <div class="filter-group" role="group" aria-label="用户状态筛选">
-              <button class="filter active" data-user-filter="all">全部 <span>27</span></button>
-              <button class="filter" data-user-filter="active">启用 <span>21</span></button>
-              <button class="filter" data-user-filter="warning">临近配额 <span>4</span></button>
-              <button class="filter" data-user-filter="disabled">停用 <span>2</span></button>
+            <div><p class="eyebrow">访问与服务</p><h1>用户与订阅</h1><p>先定义可复用的服务方案，再分配给用户账号。</p></div>
+            <div class="heading-actions">
+              <button class="button primary" data-account-action="users" data-new-user><svg><use href="#i-plus"/></svg>新建用户</button>
+              <button class="button primary" data-account-action="plans" data-new-plan hidden><svg><use href="#i-plus"/></svg>新建方案</button>
             </div>
           </div>
-          <section class="table-panel">
-            <div class="table-scroll">
-              <table>
-                <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>订阅方案</th><th>到期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
-                <tbody id="user-table-body"></tbody>
-              </table>
-            </div>
-            <div class="table-footer"><span id="user-result-count">显示 6 / 27 位用户</span><div class="pagination"><button disabled>上一页</button><span>1 / 5</span><button>下一页</button></div></div>
-          </section>
-        </section>
 
-        <section class="view" id="view-subscriptions" data-view="subscriptions">
-          <div class="page-heading">
-            <div><p class="eyebrow">服务策略</p><h1>订阅方案</h1><p>订阅定义流量、节点范围、设备数量和客户端能力，再分配给用户。</p></div>
-            <button class="button primary" data-new-plan><svg><use href="#i-plus"/></svg>新建方案</button>
+          <div class="account-tabs" role="tablist" aria-label="用户与订阅管理">
+            <button class="active" id="account-tab-users" role="tab" aria-selected="true" aria-controls="account-panel-users" data-account-tab="users">
+              <span>用户管理</span><small>27 位用户</small>
+            </button>
+            <button id="account-tab-plans" role="tab" aria-selected="false" aria-controls="account-panel-plans" tabindex="-1" data-account-tab="plans">
+              <span>方案管理</span><small>3 个方案</small>
+            </button>
           </div>
-          <div class="view-context"><span><i class="good-dot"></i>策略版本 v2026.07.25-04 已生效</span><span>发布人 林知夏 · 14:32</span></div>
-          <div class="subscription-layout">
-            <section class="plan-panel">
-              <div class="plan-summary">
-                <span><small>有效方案</small><strong id="plan-count">3</strong></span>
-                <span><small>已分配用户</small><strong id="assigned-user-count">27</strong></span>
-                <span><small>平均使用率</small><strong id="average-plan-usage">51.8%</strong></span>
+
+          <div class="account-panel active" id="account-panel-users" role="tabpanel" aria-labelledby="account-tab-users" data-account-panel="users">
+            <div class="account-context">
+              <span><i class="good-dot"></i>21 个账号正在使用服务</span>
+              <span>每位用户只能分配一个订阅方案</span>
+            </div>
+            <div class="toolbar">
+              <label class="search-field"><svg><use href="#i-search"/></svg><input id="user-search" type="search" placeholder="搜索姓名、邮箱或订阅方案"></label>
+              <div class="filter-group" role="group" aria-label="用户状态筛选">
+                <button class="filter active" data-user-filter="all">全部 <span>27</span></button>
+                <button class="filter" data-user-filter="active">启用 <span>21</span></button>
+                <button class="filter" data-user-filter="warning">临近配额 <span>4</span></button>
+                <button class="filter" data-user-filter="disabled">停用 <span>2</span></button>
               </div>
-              <div class="plan-list-heading">
-                <span>方案与权益</span><span>流量 / 设备</span><span>节点范围</span><span>用户</span><span></span>
+            </div>
+            <section class="table-panel">
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>订阅方案</th><th>到期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
+                  <tbody id="user-table-body"></tbody>
+                </table>
               </div>
-              <div id="plan-list"></div>
-              <div class="plan-policy-note">
-                <svg><use href="#i-shield"/></svg>
-                <div><strong>一个用户分配一个订阅方案</strong><p>流量、设备、节点和客户端能力由方案统一管理。修改方案后，所属用户在下次同步时自动获得新配置。</p></div>
-              </div>
+              <div class="table-footer"><span id="user-result-count">显示 6 / 27 位用户</span><div class="pagination"><button disabled>上一页</button><span>1 / 5</span><button>下一页</button></div></div>
             </section>
-            <aside class="onboarding-panel">
-              <div class="preview-heading"><span>用户如何使用</span><span class="status-badge good"><i></i>用户中心在线</span></div>
-              <div class="portal-profile">
-                <span class="brand-mark small">R/</span>
-                <div><p>RayLink 用户中心</p><strong>Priya Mehta</strong><small>高速访问 · 剩余 244.6 GB</small></div>
-              </div>
-              <ol class="usage-steps">
-                <li><span>1</span><div><strong>管理员分配方案</strong><small>在用户详情中选择订阅方案</small></div></li>
-                <li><span>2</span><div><strong>用户登录用户中心</strong><small>使用账号和密码查看可用服务</small></div></li>
-                <li><span>3</span><div><strong>选择客户端并导入</strong><small>一键导入 Mihomo 或 sing-box</small></div></li>
-                <li><span>4</span><div><strong>系统同步用量</strong><small>流量、到期和设备状态回到用户账号</small></div></li>
-              </ol>
-              <label class="preview-url"><span>用户中心入口</span><div><code id="portal-url">https://sub.cyclelink.org/portal</code><button type="button" class="icon-button copy-button" aria-label="复制用户中心入口" data-copy-target="portal-url"><svg><use href="#i-copy"/></svg></button></div></label>
-              <div class="client-entry-list" id="client-entry-list"></div>
-              <p class="portal-note">用户只需要管理自己的账号和客户端，技术配置由 RayLink 根据所分配方案生成。</p>
-            </aside>
+          </div>
+
+          <div class="account-panel" id="account-panel-plans" role="tabpanel" aria-labelledby="account-tab-plans" data-account-panel="plans" hidden>
+            <div class="view-context"><span><i class="good-dot"></i>策略版本 v2026.07.25-04 已生效</span><span>发布人 林知夏 · 14:32</span></div>
+            <div class="subscription-layout">
+              <section class="plan-panel">
+                <div class="plan-summary">
+                  <span><small>有效方案</small><strong id="plan-count">3</strong></span>
+                  <span><small>已分配用户</small><strong id="assigned-user-count">27</strong></span>
+                  <span><small>平均使用率</small><strong id="average-plan-usage">51.8%</strong></span>
+                </div>
+                <div class="plan-list-heading">
+                  <span>方案与权益</span><span>流量 / 设备</span><span>节点范围</span><span>用户</span><span></span>
+                </div>
+                <div id="plan-list"></div>
+                <div class="plan-policy-note">
+                  <svg><use href="#i-shield"/></svg>
+                  <div><strong>方案是权益的唯一来源</strong><p>流量、设备、节点和客户端能力由方案统一管理。修改方案后，所属用户在下次同步时自动获得新配置。</p></div>
+                </div>
+              </section>
+              <aside class="onboarding-panel">
+                <div class="preview-heading"><span>用户如何使用</span><span class="status-badge good"><i></i>用户中心在线</span></div>
+                <div class="portal-profile">
+                  <span class="brand-mark small">R/</span>
+                  <div><p>RayLink 用户中心</p><strong>Priya Mehta</strong><small>高速访问 · 剩余 244.6 GB</small></div>
+                </div>
+                <ol class="usage-steps">
+                  <li><span>1</span><div><strong>管理员分配方案</strong><small>在用户详情中选择订阅方案</small></div></li>
+                  <li><span>2</span><div><strong>用户登录用户中心</strong><small>使用账号和密码查看可用服务</small></div></li>
+                  <li><span>3</span><div><strong>选择客户端并导入</strong><small>一键导入 Mihomo 或 sing-box</small></div></li>
+                  <li><span>4</span><div><strong>系统同步用量</strong><small>流量、到期和设备状态回到用户账号</small></div></li>
+                </ol>
+                <label class="preview-url"><span>用户中心入口</span><div><code id="portal-url">https://sub.cyclelink.org/portal</code><button type="button" class="icon-button copy-button" aria-label="复制用户中心入口" data-copy-target="portal-url"><svg><use href="#i-copy"/></svg></button></div></label>
+                <div class="client-entry-list" id="client-entry-list"></div>
+                <p class="portal-note">用户只需要管理自己的账号和客户端，技术配置由 RayLink 根据所分配方案生成。</p>
+              </aside>
+            </div>
           </div>
         </section>
 
@@ -363,8 +375,7 @@
 
   <nav class="mobile-nav" aria-label="移动端主导航">
     <button class="active" data-view-target="dashboard"><svg><use href="#i-grid"/></svg><span>总览</span></button>
-    <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户</span></button>
-    <button data-view-target="subscriptions"><svg><use href="#i-link"/></svg><span>订阅</span></button>
+    <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户与订阅</span></button>
     <button data-view-target="hosts"><svg><use href="#i-server"/></svg><span>主机</span></button>
     <button data-view-target="deploy"><svg><use href="#i-code"/></svg><span>发布</span></button>
   </nav>
