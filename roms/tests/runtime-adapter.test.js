@@ -87,3 +87,31 @@ process.exit(args[0] === "check" ? 0 : 2);
   );
   await assert.rejects(() => readFile(join(dataDir, "sing-box", "config.json"), "utf8"), /ENOENT/);
 });
+
+test("version probe failure after activation does not fail the deployment", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "raylink-runtime-version-probe-"));
+  const fakeBinary = join(dataDir, "fake-sing-box");
+  await writeFile(fakeBinary, `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === "version") process.exit(1);
+process.exit(args[0] === "check" ? 0 : 2);
+`);
+  await chmod(fakeBinary, 0o755);
+  const adapter = new LocalSingBoxAdapter({
+    dataDir,
+    binaryPath: fakeBinary,
+    mode: "dry-run"
+  });
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+
+  const result = await adapter.publish({
+    version: "v1",
+    checksum: "first",
+    configText: "{\"inbounds\":[]}\n"
+  });
+  assert.equal(result.runtimeVersion, null);
+  assert.equal(
+    await readFile(join(dataDir, "sing-box", "config.json"), "utf8"),
+    "{\"inbounds\":[]}\n"
+  );
+});

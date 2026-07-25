@@ -153,6 +153,26 @@ function applyBootstrap(data) {
   controlPlane.runtime = data.runtime;
   controlPlane.runtimePreview = data.runtimePreview;
   controlPlane.deployments = data.deployments;
+  const rollbackButton = document.querySelector("#rollback-config");
+  const rollbackTarget = data.deployments.find((deployment) => deployment.status === "superseded");
+  if (rollbackButton) {
+    rollbackButton.disabled = !rollbackTarget;
+    rollbackButton.dataset.deploymentId = rollbackTarget?.id || "";
+    rollbackButton.title = rollbackTarget ? `回滚到 ${rollbackTarget.version}` : "没有可回滚的历史版本";
+  }
+  const portalUrl = document.querySelector("#portal-url");
+  if (portalUrl) portalUrl.textContent = `${location.origin}/portal`;
+  const newUserButton = document.querySelector("[data-new-user]");
+  if (newUserButton) {
+    newUserButton.disabled = data.plans.length === 0;
+    newUserButton.title = data.plans.length === 0 ? "请先创建至少一个方案" : "";
+  }
+  const profileButton = document.querySelector(".profile-button");
+  if (profileButton) {
+    profileButton.querySelector(".avatar").textContent = data.currentAdmin.username.slice(0, 2).toUpperCase();
+    profileButton.querySelector("strong").textContent = data.currentAdmin.username;
+    profileButton.querySelector("small").textContent = "管理员";
+  }
   renderUsers();
   renderPlans();
   renderRuntime();
@@ -181,6 +201,58 @@ function renderRuntime() {
   const listenPort = document.querySelector("#managed-listen-port");
   if (listenPort && controlPlane.runtimePreview) listenPort.textContent = controlPlane.runtimePreview.listenPort;
   renderHosts();
+  renderDashboard();
+}
+
+function renderDashboard() {
+  const runtime = controlPlane.runtime || { state: "not-configured", mode: "dry-run" };
+  const host = controlPlane.hosts[0];
+  const latestAttempt = controlPlane.deployments[0];
+  const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
+  const ready = ["running", "staged"].includes(runtime.state);
+  const activeUsers = users.filter((user) => ["active", "warning"].includes(user.state)).length;
+  const setText = (selector, value) => {
+    const element = document.querySelector(selector);
+    if (element) element.textContent = value;
+  };
+  setText("#dashboard-runtime-heading", ready ? "sing-box Runtime 已就绪" : "Runtime 等待首次发布");
+  setText("#dashboard-runtime-copy", ready
+    ? `${host?.name || "本机 Runtime"} 正在使用 ${runtime.runtimeVersion ? `sing-box ${runtime.runtimeVersion}` : runtime.mode}。`
+    : "完成主机配置后，在“配置发布”中生成并校验第一份受管配置。");
+  const runtimeCount = document.querySelector("#dashboard-runtime-count");
+  if (runtimeCount) runtimeCount.innerHTML = `${ready ? 1 : 0}<small>/ 1</small>`;
+  setText("#dashboard-runtime-mode", `${runtime.mode} · ${runtime.state}`);
+  setText("#dashboard-eligible-users", activeDeployment?.eligibleUsers ?? controlPlane.runtimePreview?.eligibleUsers ?? 0);
+  setText("#dashboard-user-count", users.length);
+  setText("#dashboard-active-users", `${activeUsers} 个账号启用`);
+  setText("#dashboard-deployment-count", controlPlane.deployments.length);
+  setText("#dashboard-latest-version", activeDeployment?.version || "尚未发布");
+  setText("#dashboard-host-name", host?.name || "本机 Runtime");
+  setText("#dashboard-host-address", host?.address || "尚未配置");
+  setText("#dashboard-host-region", host?.region || "—");
+  setText("#dashboard-host-status", ready ? "已就绪" : "待配置");
+  document.querySelector("#dashboard-host-pulse")?.classList.toggle("warning", !ready);
+  setText("#dashboard-deployment-version", activeDeployment?.version || "尚未发布");
+  const deploymentStatus = document.querySelector("#dashboard-deployment-status");
+  if (deploymentStatus) {
+    deploymentStatus.className = `status-badge ${activeDeployment ? "good" : "neutral"}`;
+    deploymentStatus.innerHTML = `<i></i>${activeDeployment ? "已生效" : "无记录"}`;
+  }
+  setText("#dashboard-deployment-users", activeDeployment?.eligibleUsers || 0);
+  setText("#dashboard-deployment-time", activeDeployment?.publishedAt
+    ? `${activeDeployment.publisherUsername || "管理员"} · ${new Date(activeDeployment.publishedAt).toLocaleString("zh-CN")}`
+    : "—");
+  setText("#dashboard-deployment-validation", latestAttempt?.status === "failed"
+    ? `最近一次尝试失败：${latestAttempt.error}`
+    : runtime.runtimeVersion ? `sing-box ${runtime.runtimeVersion}` : runtime.mode);
+  const policyStatus = activeDeployment ? `策略 ${activeDeployment.version} 已生效` : "尚未发布账号策略";
+  const policyMeta = activeDeployment?.publishedAt
+    ? `${activeDeployment.publisherUsername || "管理员"} · ${new Date(activeDeployment.publishedAt).toLocaleString("zh-CN")}`
+    : "修改后需要重新发布配置";
+  setText("#user-policy-status", policyStatus);
+  setText("#plan-policy-status", policyStatus);
+  setText("#user-policy-meta", policyMeta);
+  setText("#plan-policy-meta", policyMeta);
 }
 
 function renderHosts() {
@@ -269,12 +341,12 @@ function renderPlans() {
   elements.planList.innerHTML = Object.entries(plans).map(([planId, plan]) => {
     const assignedUsers = accountSummary.planAssignments[planId] || 0;
     const scopeTags = plan.nodeGroup.split(" + ").map((scope) => `<span class="tag">${escapeHtml(scope === "全部节点" ? "全节点" : scope)}</span>`).join("");
-    const groupCount = plan.nodeGroup === "全部节点" ? 4 : plan.nodeGroup.split(" + ").length;
+    const groupCount = plan.nodeGroup === "全部节点" ? controlPlane.hosts.length : plan.nodeGroup.split(" + ").length;
     return `
       <article class="plan-row">
         <div class="plan-identity"><i class="plan-dot ${plan.tone === "standard" ? "" : escapeHtml(plan.tone)}"></i><span><strong>${escapeHtml(plan.name)}</strong><small>${escapeHtml(plan.description)}</small></span></div>
         <div class="plan-metric"><strong>${plan.quota} GB</strong><small>${plan.devices} 台设备</small></div>
-        <div class="plan-scope">${scopeTags}<small>${groupCount} 个节点组</small></div>
+        <div class="plan-scope">${scopeTags}<small>${groupCount} 个区域范围</small></div>
         <div class="plan-users"><strong>${assignedUsers}</strong><small>位用户</small></div>
         <button class="icon-button small" aria-label="编辑${escapeHtml(plan.name)}方案" data-plan="${escapeHtml(planId)}">${icon("more")}</button>
       </article>`;
@@ -289,8 +361,11 @@ function renderPlans() {
 
 function renderClientEntries() {
   if (!elements.clientEntryList) return;
-  elements.clientEntryList.innerHTML = Object.values(clientCatalog).map((client) => `
-    <button data-open-portal><span><strong>${client.name}</strong><small>${client.platforms}</small></span>${icon("arrow")}</button>`).join("");
+  elements.clientEntryList.innerHTML = Object.entries(clientCatalog).map(([clientId, client]) => {
+    const available = clientId === "sing-box";
+    return `
+      <button ${available ? "data-open-portal" : "disabled"}><span><strong>${client.name}</strong><small>${client.platforms}${available ? "" : " · 即将支持"}</small></span>${available ? icon("arrow") : ""}</button>`;
+  }).join("");
 }
 
 function accountTabForRoute(routeName) {
@@ -395,7 +470,7 @@ function closeDrawer() {
 function userDrawerMarkup(user = {}) {
   const isNew = !user.id;
   const selectedPlanId = user.planId || Object.keys(plans)[0];
-  const selectedPlan = plans[selectedPlanId];
+  const selectedPlan = plans[selectedPlanId] || { quota: 0, devices: 0, nodeGroup: "未分配" };
   const planOptions = Object.entries(plans).map(([planId, plan]) => `<option value="${escapeHtml(planId)}" ${planId === selectedPlanId ? "selected" : ""}>${escapeHtml(plan.name)}</option>`).join("");
   return `
     <form class="drawer-form" id="user-drawer-form" data-user-id="${escapeHtml(user.id || "")}">
@@ -409,12 +484,12 @@ function userDrawerMarkup(user = {}) {
       ${isNew ? '<label class="field"><span>初始密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位" required><small class="field-error"></small></label>' : ""}
       ${isNew ? "" : '<label class="field"><span>重置密码（可选）</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="留空则保持不变"><small class="field-error"></small></label>'}
       <label class="field"><span>到期时间</span><input name="expires" type="date" value="${escapeHtml(user.expires || "2026-12-31")}" required><small class="field-error"></small></label>
+      <label class="field"><span>已用流量</span><input name="usedGb" type="number" min="0" step="0.1" value="${Number(user.used || 0).toFixed(1)}" required><small class="field-error"></small><small class="field-hint">可由管理员或外部采集器通过用户更新 API 写回</small></label>
       <p class="drawer-section-label">订阅方案</p>
       <label class="field"><span>分配方案</span><select name="plan">${planOptions}</select><small class="field-hint">流量、设备数、节点和客户端能力跟随方案</small></label>
       <div class="assigned-plan-preview"><span><small>每月流量</small><strong data-plan-quota>${selectedPlan.quota} GB</strong></span><span><small>设备上限</small><strong data-plan-devices>${selectedPlan.devices} 台</strong></span><span><small>节点范围</small><strong data-plan-nodes>${escapeHtml(selectedPlan.nodeGroup)}</strong></span></div>
       <p class="drawer-section-label">账号状态</p>
       <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用已分配方案</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
-      <div class="switch-row"><div><strong>允许客户端同步</strong><small>客户端按方案自动获取最新配置</small></div><button type="button" class="switch on" role="switch" aria-checked="true"></button></div>
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
     </form>`;
 }
@@ -426,6 +501,11 @@ function openUser(email) {
 }
 
 function openNewUser() {
+  if (!Object.keys(plans).length) {
+    setAccountTab("plans", true);
+    showToast("请先创建方案", "用户必须且只能分配一个服务方案。");
+    return;
+  }
   openDrawer({ title: "新建用户", eyebrow: "访问控制", content: userDrawerMarkup(), saveLabel: "创建并分配方案" });
 }
 
@@ -435,10 +515,20 @@ function planDrawerMarkup(planId) {
   const assignedUsers = accountSummary.planAssignments[planId] || 0;
   const capabilityRows = Object.entries(clientCatalog).map(([capabilityId, client]) => {
     const available = capabilityId === "sing-box";
-    const selected = available && (plan?.clients.includes(capabilityId) || isNew);
+    const selected = plan?.clients.includes(capabilityId) || (isNew && available);
     return `
       <div class="switch-row"><div><strong>${client.name}</strong><small>${available ? client.platforms : `${client.platforms} · 即将支持`}</small></div><button type="button" class="switch ${selected ? "on" : ""}" data-capability="${capabilityId}" role="switch" aria-checked="${selected}" ${available ? "" : "disabled"}></button></div>`;
   }).join("");
+  const currentHostRegion = controlPlane.hosts[0]?.region;
+  const standardNodeGroups = [
+    currentHostRegion ? scopeToLabel([currentHostRegion]) : null,
+    "全部节点",
+    "东京 + 新加坡",
+    "东京"
+  ].filter(Boolean);
+  const nodeGroupOptions = [...new Set([plan?.nodeGroup, ...standardNodeGroups].filter(Boolean))]
+    .map((nodeGroup) => `<option ${plan?.nodeGroup === nodeGroup ? "selected" : ""}>${escapeHtml(nodeGroup)}</option>`)
+    .join("");
   return `
     <form class="drawer-form" id="plan-drawer-form" data-plan-id="${escapeHtml(isNew ? "" : planId)}">
       <p class="drawer-section-label">方案信息</p>
@@ -447,9 +537,9 @@ function planDrawerMarkup(planId) {
       <label class="field"><span>适用场景</span><input name="description" value="${escapeHtml(plan?.description || "")}" placeholder="例如：适合区域办公室日常使用"></label>
       <div class="quota-input">
         <label class="field"><span>每月流量</span><input name="quota" type="number" min="1" value="${plan?.quota || 120}" required><small class="field-error"></small></label>
-        <label class="field"><span>设备上限</span><input name="devices" type="number" min="1" value="${plan?.devices || 3}" required><small class="field-error"></small></label>
+        <label class="field"><span>设备上限（策略）</span><input name="devices" type="number" min="1" value="${plan?.devices || 3}" required><small class="field-error"></small><small class="field-hint">当前用于权益展示；设备指纹强制限制尚未启用</small></label>
       </div>
-      <label class="field"><span>节点范围</span><select name="nodeGroup"><option ${plan?.nodeGroup === "东京 + 新加坡" ? "selected" : ""}>东京 + 新加坡</option><option ${plan?.nodeGroup === "全部节点" ? "selected" : ""}>全部节点</option><option ${plan?.nodeGroup === "东京" ? "selected" : ""}>东京</option></select></label>
+      <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select></label>
       <p class="drawer-section-label">客户端能力</p>
       ${capabilityRows}
       ${isNew ? "" : `<p class="drawer-section-label">分配情况</p><div class="switch-row"><div><strong>${assignedUsers} 位用户</strong><small>修改后同步影响所有已分配用户</small></div><span class="status-badge good"><i></i>使用中</span></div>`}
@@ -614,6 +704,7 @@ async function saveUserForm(form) {
     email,
     planId,
     expiresAt: form.elements.expires.value,
+    usedGb: Number(form.elements.usedGb.value),
     state: form.querySelector("[data-user-enabled]").classList.contains("on") ? "active" : "disabled",
     portalStatus: form.querySelector("[data-portal-enabled]").classList.contains("on") ? "active" : "invited"
   };
@@ -776,6 +867,28 @@ async function publishConfig() {
   }
 }
 
+async function rollbackConfig() {
+  const button = document.querySelector("#rollback-config");
+  const deploymentId = button.dataset.deploymentId;
+  if (!deploymentId || publishInProgress) return;
+  publishInProgress = true;
+  button.disabled = true;
+  button.innerHTML = `${icon("refresh")} 回滚中`;
+  try {
+    const deployment = await api(`/api/deployments/${encodeURIComponent(deploymentId)}/rollback`, {
+      method: "POST"
+    });
+    await loadBootstrap();
+    showToast("回滚已生效", `已从历史快照创建 ${deployment.version}。`);
+  } catch (error) {
+    showToast("回滚失败", error.message);
+  } finally {
+    publishInProgress = false;
+    button.innerHTML = `${icon("rollback")} 回滚上一版本`;
+    button.disabled = !button.dataset.deploymentId;
+  }
+}
+
 document.addEventListener("click", (event) => {
   const viewButton = event.target.closest("[data-view-target]");
   if (viewButton) {
@@ -883,6 +996,7 @@ elements.drawerScrim.addEventListener("click", closeDrawer);
 elements.drawerSave.addEventListener("click", saveDrawer);
 
 document.querySelector("#publish-config").addEventListener("click", publishConfig);
+document.querySelector("#rollback-config").addEventListener("click", rollbackConfig);
 
 document.querySelector("#global-search").addEventListener("click", () => {
   navigate("users");

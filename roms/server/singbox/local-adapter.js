@@ -98,12 +98,16 @@ export class LocalSingBoxAdapter {
         }
       }
 
+      let runtimeVersion = null;
+      try {
+        runtimeVersion = await this.binaryVersion();
+      } catch {}
       return {
         mode: this.mode,
         configPath: this.activePath,
         checksum,
         validation,
-        runtimeVersion: await this.binaryVersion()
+        runtimeVersion
       };
     } finally {
       await rm(candidatePath, { force: true });

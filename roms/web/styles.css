@@ -77,6 +77,24 @@ body {
 .auth-error { min-height: 18px; margin: -4px 0; color: var(--danger); font-size: 11px; }
 .auth-footnote { color: var(--faint); font-size: 9px; line-height: 1.6; text-align: center; }
 
+.portal-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 8%, var(--accent-soft), transparent 30%),
+    var(--canvas);
+}
+
+.portal-shell { width: min(100% - 32px, 620px); margin: 0 auto; padding: 48px 0; }
+.portal-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+.portal-brand strong, .portal-brand small { display: block; }
+.portal-brand strong { font-size: 15px; }
+.portal-brand small { color: var(--faint); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.portal-card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); padding: 32px; box-shadow: 0 24px 70px rgb(0 0 0 / .28); }
+.portal-card h1 { margin: 4px 0 8px; font-size: 24px; letter-spacing: -.02em; }
+.portal-card > p:not(.eyebrow, .drawer-section-label, .portal-note) { margin: 0 0 24px; color: var(--muted); font-size: 12px; }
+.portal-account .drawer-profile { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
+.portal-download { width: 100%; justify-content: center; margin-top: 24px; }
+
 button, input, select, textarea { font: inherit; }
 
 button, a { -webkit-tap-highlight-color: transparent; }

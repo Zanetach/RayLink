@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="RayLink 用户中心">
+  <title>用户中心 · RayLink</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="portal-page">
+  <main class="portal-shell">
+    <header class="portal-brand">
+      <span class="brand-mark">R/</span>
+      <div><strong>RayLink</strong><small>用户中心</small></div>
+    </header>
+
+    <section class="portal-card" id="portal-login-panel" aria-labelledby="portal-login-title">
+      <p class="eyebrow">安全登录</p>
+      <h1 id="portal-login-title">查看我的网络服务</h1>
+      <p>登录密码由管理员设置，与 sing-box 运行凭据相互独立。</p>
+      <form class="drawer-form" id="standalone-portal-login">
+        <label class="field"><span>邮箱</span><input name="email" type="email" autocomplete="username" required></label>
+        <label class="field"><span>密码</span><input name="password" type="password" autocomplete="current-password" required></label>
+        <p class="auth-error" id="portal-login-error" role="alert"></p>
+        <button class="button primary auth-submit" type="submit">登录</button>
+      </form>
+    </section>
+
+    <section class="portal-card portal-account" id="portal-account-panel" aria-labelledby="portal-account-title" hidden>
+      <div class="drawer-profile">
+        <span class="avatar" id="portal-user-initials">—</span>
+        <div><strong id="portal-user-name">—</strong><small id="portal-user-email">—</small></div>
+        <span class="status-badge good"><i></i>账号正常</span>
+      </div>
+      <p class="drawer-section-label">当前方案</p>
+      <h1 id="portal-account-title">—</h1>
+      <p id="portal-plan-description">—</p>
+      <div class="assigned-plan-preview">
+        <span><small>剩余流量</small><strong id="portal-remaining-quota">—</strong></span>
+        <span><small>设备上限</small><strong id="portal-device-limit">—</strong></span>
+        <span><small>节点范围</small><strong id="portal-node-scope">—</strong></span>
+      </div>
+      <button class="button primary portal-download" id="portal-download-config">下载 sing-box 配置</button>
+      <p class="portal-note" id="portal-download-note">配置只包含你的运行凭据。导入 sing-box 客户端后即可使用。</p>
+    </section>
+  </main>
+  <script src="/portal.js"></script>
+</body>
+</html>

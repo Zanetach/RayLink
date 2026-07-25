@@ -2,8 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { buildSingBoxConfig } from "./config.js";
 
-function deploymentVersion(now = new Date()) {
-  return `v${now.toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
+function deploymentVersion(prefix = "v", now = new Date()) {
+  return `${prefix}${now.toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
 }
 
 function compile(store, listenPort) {
@@ -23,6 +23,7 @@ export class RuntimeManager {
     this.store = store;
     this.adapter = adapter;
     this.listenPort = listenPort;
+    this.publishing = false;
   }
 
   preview() {
@@ -35,21 +36,49 @@ export class RuntimeManager {
     };
   }
 
-  async publish() {
+  async publish(publisherAdminId = null) {
     const compiled = compile(this.store, this.listenPort);
-    const version = deploymentVersion();
-    const deploymentId = this.store.createDeployment({
-      version,
-      configJson: compiled.config,
-      checksum: compiled.checksum,
-      eligibleUsers: compiled.eligibleUsers
+    return this.publishCompiled({
+      ...compiled,
+      version: deploymentVersion(),
+      publisherAdminId
     });
+  }
 
+  async rollback(sourceDeploymentId, publisherAdminId = null) {
+    const snapshot = this.store.deploymentSnapshot(sourceDeploymentId);
+    const configText = `${JSON.stringify(snapshot.config, null, 2)}\n`;
+    return this.publishCompiled({
+      config: snapshot.config,
+      configText,
+      checksum: createHash("sha256").update(configText).digest("hex"),
+      eligibleUsers: snapshot.eligibleUsers,
+      version: deploymentVersion("r"),
+      publisherAdminId
+    });
+  }
+
+  async publishCompiled({ config, configText, checksum, eligibleUsers, version, publisherAdminId }) {
+    if (this.publishing) {
+      const error = new Error("已有配置正在发布，请稍后重试");
+      error.code = "DEPLOYMENT_IN_PROGRESS";
+      error.statusCode = 409;
+      throw error;
+    }
+    this.publishing = true;
+    let deploymentId;
     try {
+      deploymentId = this.store.createDeployment({
+        version,
+        configJson: config,
+        checksum,
+        eligibleUsers,
+        publisherAdminId
+      });
       const runtime = await this.adapter.publish({
         version,
-        checksum: compiled.checksum,
-        configText: compiled.configText
+        checksum,
+        configText
       });
       this.store.finishDeployment(deploymentId, { status: "active" });
       return {
@@ -57,8 +86,10 @@ export class RuntimeManager {
         runtime
       };
     } catch (error) {
-      this.store.finishDeployment(deploymentId, { status: "failed", error: error.message });
+      if (deploymentId) this.store.finishDeployment(deploymentId, { status: "failed", error: error.message });
       throw error;
+    } finally {
+      this.publishing = false;
     }
   }
 

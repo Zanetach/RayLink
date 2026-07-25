@@ -27,6 +27,8 @@ export function loadConfig(env = process.env) {
     dataDir: resolve(env.RAYLINK_DATA_DIR || "./data"),
     adminUsername: env.RAYLINK_ADMIN_USERNAME || "admin",
     adminPassword,
+    seedDemoData: env.NODE_ENV !== "production",
+    trustProxy: env.RAYLINK_TRUST_PROXY === "true",
     publicOrigin,
     proxyHost: env.RAYLINK_PROXY_HOST || new URL(publicOrigin).hostname,
     runtimeMode,

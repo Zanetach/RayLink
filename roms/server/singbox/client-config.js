@@ -17,7 +17,7 @@ export function buildUserClientConfig({ credential, server, port }) {
         server,
         server_port: port,
         method: "2022-blake3-aes-128-gcm",
-        password: credential.runtimePassword
+        password: `${credential.serverPassword}:${credential.runtimePassword}`
       },
       {
         type: "direct",

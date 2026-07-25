@@ -19,16 +19,16 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 - SQLite 持久化
 - Shadowsocks 2022 多用户配置编译
 - 过期、停用用户自动排除
-- `sing-box check` 校验、SHA-256 快照、`0600` 原子写入和失败回滚
+- `sing-box check` 校验、SHA-256 快照、发布人审计、`0600` 原子写入、失败恢复和历史版本一键回滚
 - dry-run 与 systemd 两种发布模式
-- 用户中心按当前方案生成专属 sing-box 客户端 JSON
+- 独立用户中心（`/portal/`）按当前方案生成专属 sing-box 客户端 JSON
 - 同源 Web 前端和 JSON API
 
 ## 当前边界
 
 这是完整的单机纵向闭环，不是多节点商业面板。以下能力尚未实现：
 
-- 实时流量采集、配额强制停用和账单
+- 实时流量采集和账单；当数据库中的已用量达到方案额度时，配置发布和下载会排除该用户，但用量仍需外部采集器更新
 - 设备指纹与设备数强制限制
 - 多 Runtime 节点编排和灰度发布
 - VLESS/Reality、Hysteria2 等额外协议
@@ -95,6 +95,7 @@ sing-box check -c data/sing-box/config.json
 | `RAYLINK_HOST` | `127.0.0.1` | 控制面监听地址 |
 | `RAYLINK_PORT` | `4173` | 控制面端口 |
 | `RAYLINK_PUBLIC_ORIGIN` | 根据监听地址生成 | Cookie 与同源校验基准 |
+| `RAYLINK_TRUST_PROXY` | `false` | 仅在受信任反向代理覆盖 `X-Forwarded-For` 时设为 `true` |
 | `RAYLINK_ADMIN_USERNAME` | `admin` | 管理员用户名 |
 | `RAYLINK_ADMIN_PASSWORD` | 仅开发默认值 | 生产必须修改 |
 | `RAYLINK_DATA_DIR` | `./data` | SQLite 和 Runtime 配置目录 |

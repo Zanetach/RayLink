@@ -72,6 +72,16 @@ test("authenticated bootstrap returns separate users and plans", async (t) => {
   assert.equal("runtimeCredential" in body.users[0], false);
 });
 
+test("production initialization can start without known demo users", async (t) => {
+  const testApp = await startTestApp({ seedDemoData: false });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const response = await api(testApp.baseUrl, cookie, "/api/bootstrap");
+  const body = await response.json();
+  assert.deepEqual(body.users, []);
+  assert.deepEqual(body.plans, []);
+});
+
 test("admin creates a reusable plan and assigns exactly one plan to a user", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -175,6 +185,7 @@ test("admin previews and publishes the current database snapshot", async (t) => 
   const snapshot = await bootstrap.json();
   assert.equal(snapshot.runtime.state, "running");
   assert.equal(snapshot.deployments[0].status, "active");
+  assert.equal(snapshot.deployments[0].publisherUsername, "admin");
 });
 
 test("active user logs in and downloads a credential-scoped sing-box client config", async (t) => {
@@ -208,6 +219,10 @@ test("active user logs in and downloads a credential-scoped sing-box client conf
   assert.equal(config.outbounds[0].server, "node.cyclelink.org");
   assert.equal(config.outbounds[0].server_port, 8388);
   assert.ok(config.outbounds[0].password);
+  const passwordParts = config.outbounds[0].password.split(":");
+  assert.equal(passwordParts.length, 2);
+  assert.equal(Buffer.from(passwordParts[0], "base64").length, 16);
+  assert.equal(Buffer.from(passwordParts[1], "base64").length, 16);
   assert.equal(JSON.stringify(config).includes("shadowsocks_master_password"), false);
 });
 
@@ -286,6 +301,94 @@ test("admin updates the single runtime host used by portal client configs", asyn
   assert.equal((await configResponse.json()).outbounds[0].server, "node.example.com");
 });
 
+test("revoking portal access invalidates an existing user session", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = portalLogin.headers.getSetCookie()[0].split(";")[0];
+  const adminCookie = await login(testApp.baseUrl);
+  const bootstrapResponse = await api(testApp.baseUrl, adminCookie, "/api/bootstrap");
+  const bootstrap = await bootstrapResponse.json();
+  const user = bootstrap.users.find((candidate) => candidate.email === "priya@vantage-bioworks.in");
+  await api(testApp.baseUrl, adminCookie, `/api/users/${user.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ portalStatus: "invited" })
+  });
+
+  const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  });
+  assert.equal(configResponse.status, 403);
+  assert.equal((await configResponse.json()).error.code, "ACCOUNT_NOT_ACTIVE");
+});
+
+test("portal refuses a client config when the assigned plan excludes the runtime region", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const adminCookie = await login(testApp.baseUrl);
+  await api(testApp.baseUrl, adminCookie, "/api/plans/high-speed", {
+    method: "PATCH",
+    body: JSON.stringify({ nodeScope: ["frankfurt"] })
+  });
+  const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = portalLogin.headers.getSetCookie()[0].split(";")[0];
+  const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  });
+  assert.equal(configResponse.status, 403);
+  assert.equal((await configResponse.json()).error.code, "ENTITLEMENT_INACTIVE");
+});
+
+test("recorded usage at the plan quota removes the user from runtime and blocks config download", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const adminCookie = await login(testApp.baseUrl);
+  const bootstrapResponse = await api(testApp.baseUrl, adminCookie, "/api/bootstrap");
+  const bootstrap = await bootstrapResponse.json();
+  const user = bootstrap.users.find((candidate) => candidate.email === "priya@vantage-bioworks.in");
+
+  const updateResponse = await api(testApp.baseUrl, adminCookie, `/api/users/${user.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ usedGb: 320 })
+  });
+  assert.equal(updateResponse.status, 200);
+  assert.equal((await updateResponse.json()).usedGb, 320);
+
+  const previewResponse = await api(testApp.baseUrl, adminCookie, "/api/deployments/preview", {
+    method: "POST"
+  });
+  assert.equal((await previewResponse.json()).eligibleUsers, 4);
+
+  const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = portalLogin.headers.getSetCookie()[0].split(";")[0];
+  const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  });
+  assert.equal(configResponse.status, 403);
+  assert.equal((await configResponse.json()).error.code, "ENTITLEMENT_INACTIVE");
+});
+
 test("control plane serves the RayLink web application on the same origin", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -298,4 +401,11 @@ test("control plane serves the RayLink web application on the same origin", asyn
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type"), /javascript/);
+
+  const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);
+  assert.equal(portalResponse.status, 200);
+  const portalHtml = await portalResponse.text();
+  assert.match(portalHtml, /查看我的网络服务/);
+  assert.match(portalHtml, /href="\/styles\.css"/);
+  assert.match(portalHtml, /src="\/portal\.js"/);
 });

@@ -1,5 +1,7 @@
 function isEligibleUser(user, hostRegion, now) {
   if (!["active", "warning"].includes(user.state)) return false;
+  if (user.portalStatus !== "active") return false;
+  if (user.usedGb >= user.quotaGb) return false;
   const expiresAt = new Date(`${user.expiresAt}T23:59:59.999Z`);
   if (!Number.isFinite(expiresAt.getTime()) || expiresAt < now) return false;
   return user.nodeScope.includes("all") || user.nodeScope.includes(hostRegion);

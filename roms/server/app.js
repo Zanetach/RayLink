@@ -62,7 +62,11 @@ function sendJson(response, statusCode, body, headers = {}) {
 }
 
 async function sendStatic(response, webDir, pathname) {
-  const relativePath = pathname === "/" ? "index.html" : decodeURIComponent(pathname).replace(/^\/+/, "");
+  const relativePath = pathname === "/"
+    ? "index.html"
+    : ["/portal", "/portal/"].includes(pathname)
+      ? "portal.html"
+      : decodeURIComponent(pathname).replace(/^\/+/, "");
   const filePath = resolve(webDir, relativePath);
   if (filePath !== webDir && !filePath.startsWith(`${webDir}${sep}`)) return false;
   try {
@@ -104,7 +108,8 @@ export async function createRayLinkApp(options) {
     dbPath,
     adminUsername: options.adminUsername,
     adminPassword: options.adminPassword,
-    initialHostAddress: proxyHost
+    initialHostAddress: proxyHost,
+    seedDemoData: options.seedDemoData
   });
   const webDir = resolve(options.webDir || defaultWebDir);
   const listenPort = options.listenPort || 8388;
@@ -119,6 +124,36 @@ export async function createRayLinkApp(options) {
     adapter: runtimeAdapter,
     listenPort
   });
+  const authAttempts = new Map();
+  const authWindowMs = 10 * 60 * 1000;
+  const authAttemptLimit = 8;
+  const clientAddress = (request) => {
+    if (options.trustProxy) {
+      const forwarded = String(request.headers["x-forwarded-for"] || "").split(",")[0].trim();
+      if (forwarded) return forwarded;
+    }
+    return request.socket.remoteAddress || "unknown";
+  };
+  const authKey = (request, kind) => [clientAddress(request), kind].join("|");
+  const authAllowed = (key) => {
+    const now = Date.now();
+    if (authAttempts.size > 10_000) {
+      for (const [candidateKey, candidate] of authAttempts) {
+        if (candidate.resetAt <= now || authAttempts.size > 9_000) authAttempts.delete(candidateKey);
+        if (authAttempts.size <= 9_000) break;
+      }
+    }
+    const entry = authAttempts.get(key);
+    if (!entry || entry.resetAt <= now) {
+      authAttempts.set(key, { count: 0, resetAt: now + authWindowMs });
+      return true;
+    }
+    return entry.count < authAttemptLimit;
+  };
+  const recordAuthFailure = (key) => {
+    const entry = authAttempts.get(key);
+    if (entry) entry.count += 1;
+  };
 
   const server = createServer(async (request, response) => {
     try {
@@ -126,11 +161,18 @@ export async function createRayLinkApp(options) {
 
       if (request.method === "POST" && url.pathname === "/api/auth/login") {
         const body = await readJson(request);
-        const admin = store.authenticateAdmin(body.username, body.password);
+        const attemptKey = authKey(request, "admin");
+        if (!authAllowed(attemptKey)) {
+          sendJson(response, 429, { error: { code: "RATE_LIMITED", message: "登录尝试过多，请稍后再试" } });
+          return;
+        }
+        const admin = await store.authenticateAdmin(body.username, body.password);
         if (!admin) {
+          recordAuthFailure(attemptKey);
           sendJson(response, 401, { error: { code: "INVALID_CREDENTIALS", message: "用户名或密码不正确" } });
           return;
         }
+        authAttempts.delete(attemptKey);
         const session = store.createAdminSession(admin.id);
         sendJson(
           response,
@@ -143,11 +185,18 @@ export async function createRayLinkApp(options) {
 
       if (request.method === "POST" && url.pathname === "/api/portal/login") {
         const body = await readJson(request);
-        const user = store.authenticateUser(body.email, body.password);
+        const attemptKey = authKey(request, "portal");
+        if (!authAllowed(attemptKey)) {
+          sendJson(response, 429, { error: { code: "RATE_LIMITED", message: "登录尝试过多，请稍后再试" } });
+          return;
+        }
+        const user = await store.authenticateUser(body.email, body.password);
         if (!user) {
+          recordAuthFailure(attemptKey);
           sendJson(response, 401, { error: { code: "INVALID_CREDENTIALS", message: "邮箱或密码不正确" } });
           return;
         }
+        authAttempts.delete(attemptKey);
         if (user.portalStatus !== "active") {
           sendJson(response, 403, { error: { code: "ACCOUNT_NOT_ACTIVE", message: "账号尚未完成首次登录激活" } });
           return;
@@ -175,6 +224,14 @@ export async function createRayLinkApp(options) {
           return;
         }
         const profile = store.portalProfile(sessionUser.id);
+        if (profile.user.portalStatus !== "active") {
+          sendJson(response, 403, { error: { code: "ACCOUNT_NOT_ACTIVE", message: "用户中心权限已被撤销" } });
+          return;
+        }
+        if (profile.user.state === "disabled") {
+          sendJson(response, 403, { error: { code: "ACCOUNT_DISABLED", message: "账号已经停用" } });
+          return;
+        }
         if (request.method === "GET" && url.pathname === "/api/portal/me") {
           sendJson(response, 200, profile);
           return;
@@ -183,8 +240,20 @@ export async function createRayLinkApp(options) {
           const credential = store.clientCredential(sessionUser.id);
           const runtimeHost = store.getHost("local");
           const expiresAt = new Date(`${credential.expiresAt}T23:59:59.999Z`);
-          if (!["active", "warning"].includes(credential.state) || expiresAt < new Date()) {
+          const regionAllowed = credential.nodeScope.includes("all")
+            || credential.nodeScope.includes(credential.hostRegion);
+          if (
+            !["active", "warning"].includes(credential.state)
+            || credential.portalStatus !== "active"
+            || credential.usedGb >= credential.quotaGb
+            || expiresAt < new Date()
+            || !regionAllowed
+          ) {
             sendJson(response, 403, { error: { code: "ENTITLEMENT_INACTIVE", message: "账号当前不可使用" } });
+            return;
+          }
+          if (!credential.clientFormats.includes("sing-box")) {
+            sendJson(response, 403, { error: { code: "FORMAT_NOT_ALLOWED", message: "当前方案未启用 sing-box 配置" } });
             return;
           }
           sendJson(
@@ -241,7 +310,17 @@ export async function createRayLinkApp(options) {
         }
 
         if (request.method === "POST" && url.pathname === "/api/deployments") {
-          sendJson(response, 201, await runtimeManager.publish());
+          sendJson(response, 201, await runtimeManager.publish(admin.id));
+          return;
+        }
+
+        const rollbackMatch = url.pathname.match(/^\/api\/deployments\/([^/]+)\/rollback$/);
+        if (request.method === "POST" && rollbackMatch) {
+          sendJson(
+            response,
+            201,
+            await runtimeManager.rollback(decodeURIComponent(rollbackMatch[1]), admin.id)
+          );
           return;
         }
 

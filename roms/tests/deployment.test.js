@@ -77,3 +77,74 @@ test("deployment failure is recorded and leaves the previous runtime untouched",
   await assert.rejects(() => manager.publish(), /sing-box check failed/);
   assert.equal(store.listDeployments()[0].status, "failed");
 });
+
+test("runtime manager rejects a concurrent publication", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "raylink-deploy-concurrent-"));
+  const store = new RayLinkStore({
+    dbPath: join(dataDir, "raylink.db"),
+    adminUsername: "admin",
+    adminPassword: "Admin@2026"
+  });
+  let releasePublish;
+  const gate = new Promise((resolve) => {
+    releasePublish = resolve;
+  });
+  const adapter = {
+    async publish() {
+      await gate;
+      return { mode: "test", runtimeVersion: "1.13.14" };
+    },
+    async status() {
+      return { state: "running", mode: "test" };
+    }
+  };
+  const manager = new RuntimeManager({ store, adapter, listenPort: 8388 });
+  t.after(async () => {
+    store.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const first = manager.publish();
+  await assert.rejects(
+    () => manager.publish(),
+    (error) => error.code === "DEPLOYMENT_IN_PROGRESS" && error.statusCode === 409
+  );
+  releasePublish();
+  assert.equal((await first).status, "active");
+  assert.equal(store.listDeployments().length, 1);
+});
+
+test("rollback republishes an immutable historical snapshot as a new active deployment", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "raylink-deploy-rollback-"));
+  const store = new RayLinkStore({
+    dbPath: join(dataDir, "raylink.db"),
+    adminUsername: "admin",
+    adminPassword: "Admin@2026"
+  });
+  const adapter = new RecordingRuntimeAdapter();
+  const manager = new RuntimeManager({ store, adapter, listenPort: 8388 });
+  t.after(async () => {
+    store.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const first = await manager.publish();
+  const firstConfig = adapter.publications[0].configText;
+  const user = store.listUsers().find((candidate) => candidate.email === "priya@vantage-bioworks.in");
+  store.updateUser(user.id, { usedGb: 320 });
+  const second = await manager.publish();
+
+  assert.equal(store.listDeployments().find((deployment) => deployment.id === first.id).status, "superseded");
+  assert.equal(second.eligibleUsers, 4);
+
+  const rollback = await manager.rollback(first.id);
+  assert.match(rollback.version, /^r/);
+  assert.equal(rollback.status, "active");
+  assert.equal(rollback.eligibleUsers, 5);
+  assert.equal(adapter.publications.length, 3);
+  assert.equal(adapter.publications[2].configText, firstConfig);
+  assert.equal(
+    store.listDeployments().find((deployment) => deployment.id === second.id).status,
+    "superseded"
+  );
+});

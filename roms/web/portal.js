@@ -1,0 +1,93 @@
+const loginPanel = document.querySelector("#portal-login-panel");
+const accountPanel = document.querySelector("#portal-account-panel");
+const loginForm = document.querySelector("#standalone-portal-login");
+const loginError = document.querySelector("#portal-login-error");
+const downloadButton = document.querySelector("#portal-download-config");
+
+async function portalApi(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      ...(options.body ? { "content-type": "application/json" } : {}),
+      ...options.headers
+    }
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body?.error?.message || "请求失败");
+  return body;
+}
+
+function scopeLabel(scope) {
+  const labels = { all: "全部节点", tokyo: "东京", singapore: "新加坡" };
+  if (scope.includes("all")) return labels.all;
+  return scope.map((item) => labels[item] || item).join(" + ");
+}
+
+function renderAccount(profile) {
+  const { user, plan } = profile;
+  document.querySelector("#portal-user-initials").textContent = user.initials;
+  document.querySelector("#portal-user-name").textContent = user.name;
+  document.querySelector("#portal-user-email").textContent = user.email;
+  document.querySelector("#portal-account-title").textContent = plan.name;
+  document.querySelector("#portal-plan-description").textContent = plan.description;
+  document.querySelector("#portal-remaining-quota").textContent = `${Math.max(0, plan.quotaGb - user.usedGb).toFixed(1)} GB`;
+  document.querySelector("#portal-device-limit").textContent = `${plan.deviceLimit} 台`;
+  document.querySelector("#portal-node-scope").textContent = scopeLabel(plan.nodeScope);
+  downloadButton.hidden = !plan.clientFormats.includes("sing-box");
+  loginPanel.hidden = true;
+  accountPanel.hidden = false;
+}
+
+loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  loginError.textContent = "";
+  const submit = loginForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  submit.textContent = "登录中…";
+  try {
+    const profile = await portalApi("/api/portal/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: loginForm.elements.email.value.trim(),
+        password: loginForm.elements.password.value
+      })
+    });
+    loginForm.elements.password.value = "";
+    renderAccount(profile);
+  } catch (error) {
+    loginError.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "登录";
+  }
+});
+
+downloadButton.addEventListener("click", async () => {
+  downloadButton.disabled = true;
+  downloadButton.textContent = "正在生成…";
+  try {
+    const response = await fetch("/api/portal/config/sing-box");
+    if (!response.ok) {
+      const body = await response.json();
+      throw new Error(body?.error?.message || "配置生成失败");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "raylink-sing-box.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    document.querySelector("#portal-download-note").textContent = "配置已生成。请妥善保管，其中包含你的专属运行凭据。";
+  } catch (error) {
+    document.querySelector("#portal-download-note").textContent = error.message;
+  } finally {
+    downloadButton.disabled = false;
+    downloadButton.textContent = "下载 sing-box 配置";
+  }
+});
+
+portalApi("/api/portal/me").then(renderAccount).catch(() => {
+  loginPanel.hidden = false;
+  accountPanel.hidden = true;
+});

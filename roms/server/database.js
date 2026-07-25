@@ -7,6 +7,7 @@ import {
   createRuntimePassword,
   createSessionSecret,
   createShadowsocksKey,
+  DUMMY_PASSWORD_HASH,
   hashPassword,
   hashSessionSecret,
   verifyPassword
@@ -106,12 +107,18 @@ function userFromRow(row) {
 }
 
 export class RayLinkStore {
-  constructor({ dbPath, adminUsername, adminPassword, initialHostAddress = "127.0.0.1" }) {
+  constructor({
+    dbPath,
+    adminUsername,
+    adminPassword,
+    initialHostAddress = "127.0.0.1",
+    seedDemoData = true
+  }) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.migrate();
-    this.seed({ adminUsername, adminPassword, initialHostAddress });
+    this.seed({ adminUsername, adminPassword, initialHostAddress, seedDemoData });
   }
 
   migrate() {
@@ -182,13 +189,18 @@ export class RayLinkStore {
         status TEXT NOT NULL,
         config_json TEXT NOT NULL,
         error_json TEXT,
+        publisher_admin_id TEXT,
         created_at TEXT NOT NULL,
         published_at TEXT
       );
     `);
+    const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
+    if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
+      this.db.exec("ALTER TABLE deployments ADD COLUMN publisher_admin_id TEXT");
+    }
   }
 
-  seed({ adminUsername, adminPassword, initialHostAddress }) {
+  seed({ adminUsername, adminPassword, initialHostAddress, seedDemoData }) {
     const createdAt = nowIso();
     const insertAdmin = this.db.prepare(`
       INSERT OR IGNORE INTO admins (id, username, password_hash, created_at)
@@ -196,50 +208,52 @@ export class RayLinkStore {
     `);
     insertAdmin.run(randomUUID(), adminUsername, hashPassword(adminPassword), createdAt);
 
-    const insertPlan = this.db.prepare(`
+    if (seedDemoData) {
+      const insertPlan = this.db.prepare(`
       INSERT OR IGNORE INTO plans (
         id, name, quota_gb, device_limit, node_scope_json, client_formats_json,
         description, tone, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    for (const plan of seedPlans) {
-      insertPlan.run(
-        plan.id,
-        plan.name,
-        plan.quotaGb,
-        plan.deviceLimit,
-        JSON.stringify(plan.nodeScope),
-        JSON.stringify(plan.clientFormats),
-        plan.description,
-        plan.tone,
-        createdAt,
-        createdAt
-      );
-    }
+      for (const plan of seedPlans) {
+        insertPlan.run(
+          plan.id,
+          plan.name,
+          plan.quotaGb,
+          plan.deviceLimit,
+          JSON.stringify(plan.nodeScope),
+          JSON.stringify(plan.clientFormats),
+          plan.description,
+          plan.tone,
+          createdAt,
+          createdAt
+        );
+      }
 
-    const insertUser = this.db.prepare(`
+      const insertUser = this.db.prepare(`
       INSERT OR IGNORE INTO users (
         id, name, initials, email, password_hash, portal_status, state, used_gb,
         plan_id, expires_at, runtime_uuid, runtime_password, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    for (const [name, initials, email, portalStatus, state, usedGb, planId, expiresAt] of seedUsers) {
-      insertUser.run(
-        randomUUID(),
-        name,
-        initials,
-        email,
-        hashPassword("raylink-demo"),
-        portalStatus,
-        state,
-        usedGb,
-        planId,
-        expiresAt,
-        randomUUID(),
-        createShadowsocksKey(),
-        createdAt,
-        createdAt
-      );
+      for (const [name, initials, email, portalStatus, state, usedGb, planId, expiresAt] of seedUsers) {
+        insertUser.run(
+          randomUUID(),
+          name,
+          initials,
+          email,
+          hashPassword("raylink-demo"),
+          portalStatus,
+          state,
+          usedGb,
+          planId,
+          expiresAt,
+          randomUUID(),
+          createShadowsocksKey(),
+          createdAt,
+          createdAt
+        );
+      }
     }
 
     this.db.prepare(`
@@ -252,9 +266,10 @@ export class RayLinkStore {
     `).run(createShadowsocksKey(), createdAt);
   }
 
-  authenticateAdmin(username, password) {
+  async authenticateAdmin(username, password) {
     const admin = this.db.prepare("SELECT * FROM admins WHERE username = ?").get(username);
-    if (!admin || !verifyPassword(password, admin.password_hash)) return null;
+    const valid = await verifyPassword(password, admin?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!admin || !valid) return null;
     return { id: admin.id, username: admin.username };
   }
 
@@ -278,9 +293,10 @@ export class RayLinkStore {
     `).get(hashSessionSecret(secret), nowIso()) || null;
   }
 
-  authenticateUser(email, password) {
+  async authenticateUser(email, password) {
     const user = this.db.prepare("SELECT * FROM users WHERE email = ?").get(String(email || "").trim().toLowerCase());
-    if (!user || !verifyPassword(password, user.password_hash)) return null;
+    const valid = await verifyPassword(password, user?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!user || !valid) return null;
     return {
       id: user.id,
       email: user.email,
@@ -335,7 +351,11 @@ export class RayLinkStore {
 
   clientCredential(userId) {
     const row = this.db.prepare(`
-      SELECT users.email, users.runtime_password, users.state, users.expires_at, plans.node_scope_json
+      SELECT users.email, users.runtime_password, users.state, users.portal_status,
+             users.expires_at, users.used_gb, plans.quota_gb, plans.node_scope_json,
+             plans.client_formats_json,
+             (SELECT region FROM hosts WHERE id = 'local') AS host_region,
+             (SELECT value FROM settings WHERE key = 'shadowsocks_master_password') AS server_password
       FROM users
       JOIN plans ON plans.id = users.plan_id
       WHERE users.id = ?
@@ -344,9 +364,15 @@ export class RayLinkStore {
     return {
       email: row.email,
       runtimePassword: row.runtime_password,
+      serverPassword: row.server_password,
       state: row.state,
+      portalStatus: row.portal_status,
       expiresAt: row.expires_at,
-      nodeScope: parseJson(row.node_scope_json, [])
+      usedGb: row.used_gb,
+      quotaGb: row.quota_gb,
+      nodeScope: parseJson(row.node_scope_json, []),
+      clientFormats: parseJson(row.client_formats_json, []),
+      hostRegion: row.host_region
     };
   }
 
@@ -569,7 +595,8 @@ export class RayLinkStore {
       planId: input.planId === undefined ? current.planId : String(input.planId),
       expiresAt: input.expiresAt === undefined ? current.expiresAt : String(input.expiresAt),
       state: input.state === undefined ? current.state : String(input.state),
-      portalStatus: input.portalStatus === undefined ? current.portalStatus : String(input.portalStatus)
+      portalStatus: input.portalStatus === undefined ? current.portalStatus : String(input.portalStatus),
+      usedGb: input.usedGb === undefined ? current.usedGb : Number(input.usedGb)
     };
     if (!next.name) throw domainError("INVALID_USER_NAME", "用户名称不能为空");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) {
@@ -584,6 +611,9 @@ export class RayLinkStore {
     if (!["active", "invited"].includes(next.portalStatus)) {
       throw domainError("INVALID_PORTAL_STATUS", "用户中心状态不正确");
     }
+    if (!Number.isFinite(next.usedGb) || next.usedGb < 0) {
+      throw domainError("INVALID_USAGE", "已用流量必须是大于或等于 0 的数值");
+    }
     if (input.password !== undefined && String(input.password).length < 8) {
       throw domainError("INVALID_PASSWORD", "用户中心密码至少需要 8 位");
     }
@@ -592,7 +622,7 @@ export class RayLinkStore {
       this.db.prepare(`
         UPDATE users
         SET name = ?, initials = ?, email = ?, plan_id = ?, expires_at = ?,
-            state = ?, portal_status = ?, updated_at = ?
+            state = ?, portal_status = ?, used_gb = ?, updated_at = ?
         WHERE id = ?
       `).run(
         next.name,
@@ -602,6 +632,7 @@ export class RayLinkStore {
         next.expiresAt,
         next.state,
         next.portalStatus,
+        next.usedGb,
         nowIso(),
         id
       );
@@ -622,13 +653,17 @@ export class RayLinkStore {
     const host = this.db.prepare("SELECT id, name, address, region, status FROM hosts WHERE id = 'local'").get();
     const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'shadowsocks_master_password'").get();
     const users = this.db.prepare(`
-      SELECT users.email, users.state, users.expires_at, users.runtime_password, plans.node_scope_json
+      SELECT users.email, users.state, users.portal_status, users.used_gb, users.expires_at,
+             users.runtime_password, plans.quota_gb, plans.node_scope_json
       FROM users
       JOIN plans ON plans.id = users.plan_id
       ORDER BY users.email
     `).all().map((row) => ({
       email: row.email,
       state: row.state,
+      portalStatus: row.portal_status,
+      usedGb: row.used_gb,
+      quotaGb: row.quota_gb,
       expiresAt: row.expires_at,
       runtimePassword: row.runtime_password,
       nodeScope: parseJson(row.node_scope_json, [])
@@ -640,16 +675,28 @@ export class RayLinkStore {
     };
   }
 
-  createDeployment({ version, configJson, checksum, eligibleUsers }) {
+  createDeployment({ version, configJson, checksum, eligibleUsers, publisherAdminId = null }) {
     const id = randomUUID();
     this.db.prepare(`
-      INSERT INTO deployments (id, version, status, config_json, error_json, created_at, published_at)
-      VALUES (?, ?, 'validating', ?, NULL, ?, NULL)
-    `).run(id, version, JSON.stringify({ config: configJson, checksum, eligibleUsers }), nowIso());
+      INSERT INTO deployments (
+        id, version, status, config_json, error_json, publisher_admin_id, created_at, published_at
+      ) VALUES (?, ?, 'validating', ?, NULL, ?, ?, NULL)
+    `).run(
+      id,
+      version,
+      JSON.stringify({ config: configJson, checksum, eligibleUsers }),
+      publisherAdminId,
+      nowIso()
+    );
     return id;
   }
 
   finishDeployment(id, { status, error = null }) {
+    if (status === "active") {
+      this.db.prepare(`
+        UPDATE deployments SET status = 'superseded' WHERE status = 'active' AND id <> ?
+      `).run(id);
+    }
     this.db.prepare(`
       UPDATE deployments
       SET status = ?, error_json = ?, published_at = ?
@@ -659,9 +706,12 @@ export class RayLinkStore {
 
   listDeployments(limit = 20) {
     return this.db.prepare(`
-      SELECT id, version, status, config_json, error_json, created_at, published_at
+      SELECT deployments.id, deployments.version, deployments.status, deployments.config_json,
+             deployments.error_json, deployments.created_at, deployments.published_at,
+             admins.username AS publisher_username
       FROM deployments
-      ORDER BY created_at DESC
+      LEFT JOIN admins ON admins.id = deployments.publisher_admin_id
+      ORDER BY deployments.created_at DESC
       LIMIT ?
     `).all(limit).map((row) => {
       const metadata = parseJson(row.config_json, {});
@@ -673,10 +723,28 @@ export class RayLinkStore {
         checksum: metadata.checksum,
         eligibleUsers: metadata.eligibleUsers,
         error: error?.message || null,
+        publisherUsername: row.publisher_username || null,
         createdAt: row.created_at,
         publishedAt: row.published_at
       };
     });
+  }
+
+  deploymentSnapshot(id) {
+    const row = this.db.prepare(`
+      SELECT id, version, status, config_json FROM deployments WHERE id = ?
+    `).get(id);
+    if (!row) throw domainError("DEPLOYMENT_NOT_FOUND", "部署记录不存在", 404);
+    const metadata = parseJson(row.config_json, {});
+    if (!metadata.config) throw domainError("DEPLOYMENT_SNAPSHOT_MISSING", "部署快照不可用", 409);
+    return {
+      id: row.id,
+      version: row.version,
+      status: row.status,
+      config: metadata.config,
+      checksum: metadata.checksum,
+      eligibleUsers: metadata.eligibleUsers
+    };
   }
 
   close() {

@@ -11,6 +11,9 @@ test("sing-box config contains one credential per eligible user", () => {
       {
         email: "active@example.cn",
         state: "active",
+        portalStatus: "active",
+        usedGb: 1,
+        quotaGb: 10,
         expiresAt: "2027-01-31",
         runtimePassword: "YWJjZGVmZ2hpamtsbW5vcA==",
         nodeScope: ["tokyo"]
@@ -18,6 +21,9 @@ test("sing-box config contains one credential per eligible user", () => {
       {
         email: "all-nodes@example.cn",
         state: "warning",
+        portalStatus: "active",
+        usedGb: 9,
+        quotaGb: 10,
         expiresAt: "2027-02-28",
         runtimePassword: "cXdlcnR5dWlvcGFzZGZnaA==",
         nodeScope: ["all"]
@@ -25,6 +31,9 @@ test("sing-box config contains one credential per eligible user", () => {
       {
         email: "disabled@example.cn",
         state: "disabled",
+        portalStatus: "active",
+        usedGb: 1,
+        quotaGb: 10,
         expiresAt: "2027-02-28",
         runtimePassword: "emFzZGZnaGprbHF3ZXJ0eQ==",
         nodeScope: ["tokyo"]
@@ -32,7 +41,30 @@ test("sing-box config contains one credential per eligible user", () => {
       {
         email: "expired@example.cn",
         state: "active",
+        portalStatus: "active",
+        usedGb: 1,
+        quotaGb: 10,
         expiresAt: "2025-01-01",
+        runtimePassword: "eHVpY2h1c2h1aWJhaWppYQ==",
+        nodeScope: ["tokyo"]
+      },
+      {
+        email: "over-quota@example.cn",
+        state: "active",
+        portalStatus: "active",
+        usedGb: 10,
+        quotaGb: 10,
+        expiresAt: "2027-02-28",
+        runtimePassword: "eHVpY2h1c2h1aWJhaWppYQ==",
+        nodeScope: ["tokyo"]
+      },
+      {
+        email: "revoked@example.cn",
+        state: "active",
+        portalStatus: "invited",
+        usedGb: 1,
+        quotaGb: 10,
+        expiresAt: "2027-02-28",
         runtimePassword: "eHVpY2h1c2h1aWJhaWppYQ==",
         nodeScope: ["tokyo"]
       }

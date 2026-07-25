@@ -93,8 +93,8 @@
         </button>
         <div class="environment">
           <span class="environment-dot"></span>
-          <strong>生产环境</strong>
-          <span>杭州 / ap-east-1</span>
+          <strong>单机环境</strong>
+          <span>RayLink / local Runtime</span>
         </div>
         <div class="topbar-actions">
           <button class="command-button" id="global-search">
@@ -115,9 +115,9 @@
         <section class="view active" id="view-dashboard" data-view="dashboard">
           <div class="page-heading">
             <div>
-              <p class="eyebrow">总览 · 2026年7月25日</p>
-              <h1>网络运行正常</h1>
-              <p>4 个节点持续同步，过去 24 小时无异常退出。</p>
+              <p class="eyebrow">单机控制面总览</p>
+              <h1 id="dashboard-runtime-heading">Runtime 待配置</h1>
+              <p id="dashboard-runtime-copy">正在读取 sing-box 运行状态。</p>
             </div>
             <button class="button secondary" data-view-target="deploy">
               <svg><use href="#i-code"/></svg>查看当前配置
@@ -125,86 +125,41 @@
           </div>
 
           <section class="status-band" aria-label="运行状态摘要">
-            <article><span>在线节点</span><strong>4<small>/ 4</small></strong><em class="good">全部健康</em></article>
-            <article><span>活跃用户</span><strong>21</strong><em>较昨日 +3</em></article>
-            <article><span>本月流量</span><strong>1.84<small> TB</small></strong><em>配额 42.7%</em></article>
-            <article><span>可用率</span><strong>99.94<small>%</small></strong><em class="good">SLA 达标</em></article>
+            <article><span>Runtime</span><strong id="dashboard-runtime-count">0<small>/ 1</small></strong><em id="dashboard-runtime-mode">等待发布</em></article>
+            <article><span>可用用户</span><strong id="dashboard-eligible-users">0</strong><em>已写入配置</em></article>
+            <article><span>账号总数</span><strong id="dashboard-user-count">0</strong><em id="dashboard-active-users">0 个账号启用</em></article>
+            <article><span>发布记录</span><strong id="dashboard-deployment-count">0</strong><em id="dashboard-latest-version">尚未发布</em></article>
           </section>
 
           <div class="dashboard-grid">
-            <section class="panel traffic-panel">
-              <div class="panel-heading">
-                <div><p class="eyebrow">网络吞吐</p><h2>最近 24 小时</h2></div>
-                <div class="segmented" role="group" aria-label="时间范围">
-                  <button>1H</button><button class="active">24H</button><button>7D</button>
-                </div>
-              </div>
-              <div class="chart-legend"><span><i class="line up"></i>上传 138.4 Mbps</span><span><i class="line down"></i>下载 391.7 Mbps</span></div>
-              <div class="traffic-chart" aria-label="最近24小时上传和下载流量折线图">
-                <div class="chart-y"><span>600</span><span>400</span><span>200</span><span>0</span></div>
-                <svg viewBox="0 0 760 230" preserveAspectRatio="none" role="img">
-                  <title>上传和下载吞吐趋势</title>
-                  <g class="grid-lines"><path d="M0 20H760M0 83H760M0 146H760M0 209H760"/></g>
-                  <path class="area-line down-area" d="M0 179 C45 173 52 110 97 126 S171 158 205 113 268 52 311 94 363 170 409 127 462 69 511 95 568 155 613 112 687 40 760 61 L760 230 L0 230Z"/>
-                  <path class="chart-line download" d="M0 179 C45 173 52 110 97 126 S171 158 205 113 268 52 311 94 363 170 409 127 462 69 511 95 568 155 613 112 687 40 760 61"/>
-                  <path class="chart-line upload" d="M0 202 C55 190 69 171 112 180 S178 201 230 170 300 132 348 161 402 196 459 178 514 136 570 169 627 192 681 160 721 143 760 151"/>
-                </svg>
-                <div class="chart-x"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>现在</span></div>
-              </div>
-            </section>
-
             <section class="panel host-summary">
               <div class="panel-heading">
-                <div><p class="eyebrow">节点健康</p><h2>实时状态</h2></div>
-                <button class="text-button" data-view-target="hosts">查看全部 <svg><use href="#i-arrow"/></svg></button>
+                <div><p class="eyebrow">受管主机</p><h2 id="dashboard-host-name">本机 Runtime</h2></div>
+                <button class="text-button" data-view-target="hosts">配置主机 <svg><use href="#i-arrow"/></svg></button>
               </div>
               <div class="node-list">
-                <button class="node-row" data-open-host="东京核心">
-                  <span class="node-pulse"></span><span class="node-name"><strong>东京核心</strong><small>103.45.17.82</small></span>
-                  <span class="node-load"><i style="--load:34%"></i></span><span class="latency">38 ms</span>
-                </button>
-                <button class="node-row" data-open-host="新加坡边缘">
-                  <span class="node-pulse"></span><span class="node-name"><strong>新加坡边缘</strong><small>18.141.202.73</small></span>
-                  <span class="node-load"><i style="--load:51%"></i></span><span class="latency">63 ms</span>
-                </button>
-                <button class="node-row" data-open-host="法兰克福">
-                  <span class="node-pulse"></span><span class="node-name"><strong>法兰克福</strong><small>3.71.186.44</small></span>
-                  <span class="node-load"><i style="--load:27%"></i></span><span class="latency">186 ms</span>
-                </button>
-                <button class="node-row" data-open-host="洛杉矶入口">
-                  <span class="node-pulse warning"></span><span class="node-name"><strong>洛杉矶入口</strong><small>34.216.88.109</small></span>
-                  <span class="node-load"><i style="--load:76%"></i></span><span class="latency warning">228 ms</span>
+                <button class="node-row" data-open-host="local">
+                  <span class="node-pulse" id="dashboard-host-pulse"></span>
+                  <span class="node-name"><strong id="dashboard-host-address">尚未配置</strong><small id="dashboard-host-region">—</small></span>
+                  <span class="node-load"><i id="dashboard-host-load" style="--load:0%"></i></span>
+                  <span class="latency" id="dashboard-host-status">待配置</span>
                 </button>
               </div>
             </section>
 
             <section class="panel deployment-panel">
               <div class="panel-heading">
-                <div><p class="eyebrow">配置轨迹</p><h2>v2026.07.25-04</h2></div>
-                <span class="status-badge good"><i></i>已生效</span>
+                <div><p class="eyebrow">当前发布</p><h2 id="dashboard-deployment-version">尚未发布</h2></div>
+                <span class="status-badge neutral" id="dashboard-deployment-status"><i></i>无记录</span>
               </div>
               <div class="deployment-meta">
-                <span>发布人 <strong>林知夏</strong></span><span>14:32</span><span>变更 3 项</span>
+                <span>有效用户 <strong id="dashboard-deployment-users">0</strong></span>
+                <span id="dashboard-deployment-time">—</span>
+                <span id="dashboard-deployment-validation">等待首次发布</span>
               </div>
-              <ol class="deploy-trail compact">
-                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>草稿</strong><small>14:26</small></li>
-                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>校验</strong><small>14:28</small></li>
-                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>快照</strong><small>14:30</small></li>
-                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>发布</strong><small>14:31</small></li>
-                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>健康</strong><small>14:32</small></li>
-              </ol>
               <div class="change-log">
-                <span>+ 新加坡节点启用 Hysteria2</span>
-                <span>~ 用户 Priya Mehta 配额调整为 180 GB</span>
-                <span>~ DNS 出站规则同步至全部节点</span>
-              </div>
-            </section>
-
-            <section class="panel event-panel">
-              <div class="panel-heading"><div><p class="eyebrow">事件</p><h2>需要关注</h2></div><span class="count-badge">2</span></div>
-              <div class="event-list">
-                <article><span class="event-icon warning"><svg><use href="#i-server"/></svg></span><div><strong>洛杉矶入口延迟偏高</strong><p>连续 8 分钟超过 220 ms</p><small>3 分钟前</small></div></article>
-                <article><span class="event-icon neutral"><svg><use href="#i-users"/></svg></span><div><strong>用户流量接近配额</strong><p>岡本和也已使用 87.6%</p><small>18 分钟前</small></div></article>
+                <span>配置由当前用户、方案和主机状态实时编译</span>
+                <span>发布前执行 sing-box check，并保留可审计快照</span>
               </div>
             </section>
           </div>
@@ -230,8 +185,8 @@
 
           <div class="account-panel active" id="account-panel-users" role="tabpanel" aria-labelledby="account-tab-users" data-account-panel="users">
             <div class="account-context">
-              <span><i class="good-dot"></i>账号与方案策略 v2026.07.25-04 已生效</span>
-              <span>发布人 林知夏 · 14:32</span>
+              <span><i class="good-dot"></i><span id="user-policy-status">尚未发布账号策略</span></span>
+              <span id="user-policy-meta">修改后需要重新发布配置</span>
             </div>
             <div class="toolbar">
               <label class="search-field"><svg><use href="#i-search"/></svg><input id="user-search" type="search" placeholder="搜索姓名、邮箱或订阅方案"></label>
@@ -254,7 +209,7 @@
           </div>
 
           <div class="account-panel" id="account-panel-plans" role="tabpanel" aria-labelledby="account-tab-plans" data-account-panel="plans" hidden>
-            <div class="view-context"><span><i class="good-dot"></i>策略版本 v2026.07.25-04 已生效</span><span>发布人 林知夏 · 14:32</span></div>
+            <div class="view-context"><span><i class="good-dot"></i><span id="plan-policy-status">尚未发布方案策略</span></span><span id="plan-policy-meta">修改后需要重新发布配置</span></div>
             <div class="subscription-layout">
               <section class="plan-panel">
                 <div class="plan-summary">
@@ -275,15 +230,15 @@
                 <div class="preview-heading"><span>用户如何使用</span><span class="status-badge good"><i></i>用户中心在线</span></div>
                 <div class="portal-profile">
                   <span class="brand-mark small">R/</span>
-                  <div><p>RayLink 用户中心</p><strong>Priya Mehta</strong><small>高速访问 · 剩余 244.6 GB</small></div>
+                  <div><p>RayLink 用户中心</p><strong>独立账号登录</strong><small>只显示当前用户被分配的方案权益</small></div>
                 </div>
                 <ol class="usage-steps">
                   <li><span>1</span><div><strong>管理员分配方案</strong><small>在用户详情中选择订阅方案</small></div></li>
                   <li><span>2</span><div><strong>用户登录用户中心</strong><small>使用账号和密码查看可用服务</small></div></li>
-                  <li><span>3</span><div><strong>选择客户端并导入</strong><small>一键导入 Mihomo 或 sing-box</small></div></li>
-                  <li><span>4</span><div><strong>系统同步用量</strong><small>流量、到期和设备状态回到用户账号</small></div></li>
+                  <li><span>3</span><div><strong>下载客户端配置</strong><small>导入 sing-box 桌面或移动客户端</small></div></li>
+                  <li><span>4</span><div><strong>更新使用量</strong><small>管理员或外部采集器写回已用流量</small></div></li>
                 </ol>
-                <label class="preview-url"><span>用户中心入口</span><div><code id="portal-url">https://sub.cyclelink.org/portal</code><button type="button" class="icon-button copy-button" aria-label="复制用户中心入口" data-copy-target="portal-url"><svg><use href="#i-copy"/></svg></button></div></label>
+                <label class="preview-url"><span>用户中心入口</span><div><code id="portal-url">/portal</code><button type="button" class="icon-button copy-button" aria-label="复制用户中心入口" data-copy-target="portal-url"><svg><use href="#i-copy"/></svg></button></div></label>
                 <div class="client-entry-list" id="client-entry-list"></div>
                 <p class="portal-note">用户只需要管理自己的账号和客户端，技术配置由 RayLink 根据所分配方案生成。</p>
               </aside>
@@ -316,8 +271,8 @@
 
         <section class="view" id="view-deploy" data-view="deploy">
           <div class="page-heading">
-            <div><p class="eyebrow">变更管理</p><h1>配置发布</h1><p>校验、快照并向全部 sing-box 节点分批推送配置。</p></div>
-            <div class="heading-actions"><button class="button secondary"><svg><use href="#i-rollback"/></svg>回滚</button><button class="button primary" id="publish-config"><svg><use href="#i-terminal"/></svg>校验并发布</button></div>
+            <div><p class="eyebrow">变更管理</p><h1>配置发布</h1><p>编译、校验并原子发布到当前 sing-box Runtime。</p></div>
+            <div class="heading-actions"><button class="button secondary" id="rollback-config" disabled><svg><use href="#i-rollback"/></svg>回滚上一版本</button><button class="button primary" id="publish-config"><svg><use href="#i-terminal"/></svg>校验并发布</button></div>
           </div>
           <section class="release-header">
             <div><span class="release-version">v2026.07.25-05</span><span class="status-badge neutral"><i></i>草稿</span></div>
@@ -326,7 +281,7 @@
           <ol class="deploy-trail full" id="publish-trail">
             <li class="current"><span>1</span><strong>草稿</strong><small>3 项变更</small></li>
             <li><span>2</span><strong>校验</strong><small>语法与端口</small></li>
-            <li><span>3</span><strong>快照</strong><small>可安全回滚</small></li>
+            <li><span>3</span><strong>快照</strong><small>保留审计记录</small></li>
             <li><span>4</span><strong>原子发布</strong><small>单机 Runtime</small></li>
             <li><span>5</span><strong>运行确认</strong><small>版本与状态</small></li>
           </ol>
