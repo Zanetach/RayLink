@@ -17,7 +17,13 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 - 登录密码和 sing-box 运行凭据完全分离
 - 单机 Runtime 公网地址配置
 - SQLite 持久化
-- Shadowsocks 2022 多用户配置编译
+- 读取 `sing-box version` 的版本、平台、架构和 build tags
+- macOS Homebrew / Linux 官方脚本一键安装
+- sing-box v1.13.14 的 17 种 inbound 能力目录
+- Shadowsocks、VMess、VLESS、Trojan、Naive、AnyTLS、Hysteria、TUIC、Hysteria2、SOCKS、HTTP、Mixed 图形化配置
+- Reality 密钥生成、证书 TLS、HTTP/WS/QUIC/gRPC/HTTPUpgrade Transport
+- ShadowTLS、Direct、TUN、Redirect、TProxy 高级 JSON 配置
+- 多协议用户凭据编译和多出站客户端配置
 - 过期、停用用户自动排除
 - `sing-box check` 校验、SHA-256 快照、发布人审计、`0600` 原子写入、失败恢复和历史版本一键回滚
 - dry-run 与 systemd 两种发布模式
@@ -31,7 +37,7 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 - 实时流量采集和账单；当数据库中的已用量达到方案额度时，配置发布和下载会排除该用户，但用量仍需外部采集器更新
 - 设备指纹与设备数强制限制
 - 多 Runtime 节点编排和灰度发布
-- VLESS/Reality、Hysteria2 等额外协议
+- 完整的 outbound、endpoint、DNS 和路由规则图形化编辑器
 - Mihomo 订阅转换
 - 邮件邀请、忘记密码、双因素认证和细粒度 RBAC
 
@@ -74,6 +80,9 @@ sing-box check -c data/sing-box/config.json
 
 测试覆盖管理 API、用户中心、配置编译、部署记录、真实发布适配器和失败回滚。
 
+源码协议矩阵、build tag 和平台限制见
+[docs/sing-box-protocol-support.md](docs/sing-box-protocol-support.md)。
+
 ## 生产部署
 
 生产环境建议：
@@ -85,6 +94,10 @@ sing-box check -c data/sing-box/config.json
 5. 先以 `dry-run` 发布并确认 `validation: sing-box`。
 6. 再切换到 `systemd`，确保 sing-box 服务读取 RayLink 生成的配置路径。
 7. 防火墙只开放 HTTPS 管理入口和实际代理端口。
+
+“一键安装”会在 macOS 上执行固定的 `brew install sing-box`，在 Linux 上执行
+sing-box 官方 `https://sing-box.app/install.sh`。生产服务账户必须拥有对应的包管理权限；
+安装命令由后端白名单固定，不接受浏览器提交任意 shell。
 
 可直接参考 [deploy/README.md](deploy/README.md) 和示例 systemd 单元。
 

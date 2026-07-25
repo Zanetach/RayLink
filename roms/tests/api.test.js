@@ -188,6 +188,127 @@ test("admin previews and publishes the current database snapshot", async (t) => 
   assert.equal(snapshot.deployments[0].publisherUsername, "admin");
 });
 
+test("admin detects sing-box, enables a protocol profile and triggers one-click installation", async (t) => {
+  let installCalls = 0;
+  const installer = {
+    async status() {
+      return {
+        installed: installCalls > 0,
+        version: installCalls > 0 ? "1.13.14" : null,
+        platform: "darwin",
+        architecture: "arm64",
+        tags: installCalls > 0 ? ["with_quic", "with_utls"] : [],
+        binaryPath: "sing-box"
+      };
+    },
+    async install() {
+      installCalls += 1;
+      return this.status();
+    },
+    async generateRealityKeypair() {
+      return { privateKey: "private-key", publicKey: "public-key" };
+    }
+  };
+  const testApp = await startTestApp({ installer });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const initialResponse = await api(testApp.baseUrl, cookie, "/api/bootstrap");
+  const initial = await initialResponse.json();
+  assert.equal(initial.installation.installed, false);
+  assert.equal(initial.protocols.find((profile) => profile.type === "shadowsocks").enabled, true);
+  assert.ok(initial.protocolCatalog.some((protocol) => protocol.type === "hysteria2"));
+
+  const installResponse = await api(testApp.baseUrl, cookie, "/api/runtime/install", { method: "POST" });
+  assert.equal(installResponse.status, 200);
+  assert.equal((await installResponse.json()).version, "1.13.14");
+
+  const updateResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vless", {
+    method: "PATCH",
+    body: JSON.stringify({
+      enabled: true,
+      listen: "::",
+      port: 8443,
+      tls: { mode: "none" },
+      transport: { type: "ws", path: "/raylink" },
+      options: {}
+    })
+  });
+  assert.equal(updateResponse.status, 200);
+  assert.equal((await updateResponse.json()).enabled, true);
+
+  const previewResponse = await api(testApp.baseUrl, cookie, "/api/deployments/preview", { method: "POST" });
+  const preview = await previewResponse.json();
+  assert.equal(preview.inboundCount, 2);
+  assert.deepEqual(preview.protocols, ["shadowsocks", "vless"]);
+
+  const conflictResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vmess", {
+    method: "PATCH",
+    body: JSON.stringify({
+      enabled: true,
+      listen: "::",
+      port: 8443,
+      tls: { mode: "none" },
+      transport: { type: "none" },
+      options: {}
+    })
+  });
+  assert.equal(conflictResponse.status, 422);
+  assert.equal((await conflictResponse.json()).error.code, "PROTOCOL_PORT_CONFLICT");
+});
+
+test("admin cannot enable Reality or QUIC transport when the sing-box build tags are missing", async (t) => {
+  const installer = {
+    async status() {
+      return {
+        installed: true,
+        version: "1.13.14",
+        platform: "linux",
+        architecture: "amd64",
+        tags: [],
+        binaryPath: "sing-box"
+      };
+    }
+  };
+  const testApp = await startTestApp({ installer });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const baseProfile = {
+    enabled: true,
+    listen: "::",
+    port: 8443,
+    options: {}
+  };
+
+  const realityResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vless", {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...baseProfile,
+      tls: {
+        mode: "reality",
+        serverName: "www.microsoft.com",
+        privateKey: "private-key",
+        publicKey: "public-key",
+        shortId: "0123456789abcdef"
+      },
+      transport: { type: "none" }
+    })
+  });
+  assert.equal(realityResponse.status, 422);
+  assert.equal((await realityResponse.json()).error.code, "REALITY_UNAVAILABLE");
+
+  const quicResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vless", {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...baseProfile,
+      tls: { mode: "none" },
+      transport: { type: "quic" }
+    })
+  });
+  assert.equal(quicResponse.status, 422);
+  assert.equal((await quicResponse.json()).error.code, "QUIC_UNAVAILABLE");
+});
+
 test("active user logs in and downloads a credential-scoped sing-box client config", async (t) => {
   const testApp = await startTestApp({ proxyHost: "node.cyclelink.org", listenPort: 8388 });
   t.after(() => testApp.close());

@@ -893,6 +893,69 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .code-variable { color: oklch(0.77 0.1 265); }
 
 .host-map { margin-bottom: 20px; background: var(--surface-1); }
+.runtime-console { margin-bottom: 20px; background: var(--surface-1); }
+.runtime-console-heading {
+  display: flex;
+  min-height: 104px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+  padding: 20px;
+}
+.runtime-console-heading h2 { margin-top: 4px; font-size: 18px; }
+.runtime-console-heading p:last-child { margin: 8px 0 0; color: var(--muted); font-size: 10px; }
+.runtime-build {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 20px;
+  color: var(--faint);
+  font-size: 10px;
+}
+.runtime-build code { margin-left: auto; color: var(--muted); }
+.protocol-toolbar {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+}
+.protocol-toolbar strong, .protocol-toolbar small { display: block; }
+.protocol-toolbar strong { color: var(--text-soft); font-size: 12px; font-weight: 600; }
+.protocol-toolbar small { margin-top: 4px; color: var(--faint); font-size: 10px; }
+.protocol-toolbar a { color: var(--muted); font-size: 10px; }
+.protocol-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+}
+.protocol-card {
+  min-height: 220px;
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 16px;
+}
+.protocol-card.enabled { box-shadow: inset 2px 0 var(--accent); }
+.protocol-card header, .protocol-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.protocol-kind { color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; text-transform: uppercase; }
+.protocol-card h3 { margin-top: 20px; color: var(--text-soft); font-size: 14px; }
+.protocol-card > p { min-height: 48px; margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.protocol-meta { display: flex; gap: 8px; margin-top: 12px; }
+.protocol-meta span { padding: 4px 6px; background: var(--canvas); color: var(--faint); font-size: 9px; }
+.protocol-card footer { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.protocol-card footer a { color: var(--faint); font-size: 9px; }
+.protocol-card footer .button { min-height: 32px; padding: 0 10px; font-size: 9px; }
+.protocol-subsection { display: grid; gap: 12px; padding: 16px; background: var(--canvas); }
+.protocol-subsection-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.protocol-subsection-heading strong, .protocol-subsection-heading small { display: block; }
+.protocol-subsection-heading strong { color: var(--text-soft); font-size: 11px; }
+.protocol-subsection-heading small { margin-top: 4px; color: var(--faint); font-size: 9px; }
+.source-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: var(--canvas); color: var(--faint); font-size: 9px; }
+.source-note a { color: var(--muted); }
 .map-header { display: flex; height: 52px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0 20px; color: var(--muted); font-size: 10px; }
 .map-header span:last-child { display: flex; align-items: center; gap: 7px; }
 .map-header i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
@@ -1069,6 +1132,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   .preview-panel { position: static; }
   .form-section { grid-template-columns: 170px 1fr; }
   .deploy-layout { grid-template-columns: 1fr; }
+  .protocol-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 920px) {
@@ -1169,6 +1233,11 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   .map-node.singapore { left: 55%; top: 68%; }
   .map-node.frankfurt { left: 10%; top: 24%; }
   .map-node.losangeles { left: 7%; top: 62%; }
+  .runtime-console-heading, .protocol-toolbar { align-items: flex-start; flex-direction: column; }
+  .runtime-console-heading { padding: 16px; }
+  .runtime-build { align-items: flex-start; flex-direction: column; gap: 8px; padding: 12px 16px; }
+  .runtime-build code { margin-left: 0; overflow-wrap: anywhere; }
+  .protocol-grid { grid-template-columns: 1fr; }
   .host-table td:nth-child(2)::before { content: "状态"; }
   .host-table td:nth-child(3)::before { content: "入口协议"; }
   .host-table td:nth-child(4)::before { content: "CPU"; }

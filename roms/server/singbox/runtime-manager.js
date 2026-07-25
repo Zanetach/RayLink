@@ -10,11 +10,14 @@ function compile(store, listenPort) {
   const config = buildSingBoxConfig(store.runtimeSnapshot(), { listenPort });
   const configText = `${JSON.stringify(config, null, 2)}\n`;
   const checksum = createHash("sha256").update(configText).digest("hex");
+  const eligibleUsers = new Set(
+    config.inbounds.flatMap((inbound) => inbound.users?.map((user) => user.name || user.username) || [])
+  ).size;
   return {
     config,
     configText,
     checksum,
-    eligibleUsers: config.inbounds.reduce((sum, inbound) => sum + (inbound.users?.length || 0), 0)
+    eligibleUsers
   };
 }
 
@@ -32,7 +35,8 @@ export class RuntimeManager {
       checksum: compiled.checksum,
       eligibleUsers: compiled.eligibleUsers,
       inboundCount: compiled.config.inbounds.length,
-      listenPort: this.listenPort
+      listenPort: compiled.config.inbounds[0]?.listen_port || null,
+      protocols: compiled.config.inbounds.map((inbound) => inbound.type)
     };
   }
 

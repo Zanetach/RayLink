@@ -1,3 +1,8 @@
+import {
+  buildProtocolInbounds,
+  defaultProtocolConfigs
+} from "./protocol-catalog.js";
+
 function isEligibleUser(user, hostRegion, now) {
   if (!["active", "warning"].includes(user.state)) return false;
   if (user.portalStatus !== "active") return false;
@@ -10,25 +15,19 @@ function isEligibleUser(user, hostRegion, now) {
 export function buildSingBoxConfig(snapshot, options = {}) {
   const now = options.now || new Date();
   const listenPort = options.listenPort || 8388;
-  const users = snapshot.users
-    .filter((user) => isEligibleUser(user, snapshot.host.region, now))
-    .map((user) => ({ name: user.email, password: user.runtimePassword }));
+  const users = snapshot.users.filter((user) => isEligibleUser(user, snapshot.host.region, now));
+  const profiles = snapshot.protocols || defaultProtocolConfigs(listenPort);
 
   return {
     log: {
       level: "info",
       timestamp: true
     },
-    inbounds: [{
-      type: "shadowsocks",
-      tag: "managed-shadowsocks",
-      listen: "::",
-      listen_port: listenPort,
-      network: "tcp",
-      method: "2022-blake3-aes-128-gcm",
-      password: snapshot.masterPassword,
-      users
-    }],
+    inbounds: buildProtocolInbounds({
+      profiles,
+      users,
+      masterPassword: snapshot.masterPassword
+    }),
     outbounds: [{
       type: "direct",
       tag: "direct"

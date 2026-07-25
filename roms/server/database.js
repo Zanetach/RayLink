@@ -12,6 +12,12 @@ import {
   hashSessionSecret,
   verifyPassword
 } from "./security.js";
+import {
+  assertProtocolSet,
+  defaultProtocolConfigs,
+  normalizeProtocolConfig,
+  normalizeProtocolConfigs
+} from "./singbox/protocol-catalog.js";
 
 const seedPlans = [
   {
@@ -112,13 +118,14 @@ export class RayLinkStore {
     adminUsername,
     adminPassword,
     initialHostAddress = "127.0.0.1",
+    initialListenPort = 8388,
     seedDemoData = true
   }) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.migrate();
-    this.seed({ adminUsername, adminPassword, initialHostAddress, seedDemoData });
+    this.seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData });
   }
 
   migrate() {
@@ -200,7 +207,7 @@ export class RayLinkStore {
     }
   }
 
-  seed({ adminUsername, adminPassword, initialHostAddress, seedDemoData }) {
+  seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData }) {
     const createdAt = nowIso();
     const insertAdmin = this.db.prepare(`
       INSERT OR IGNORE INTO admins (id, username, password_hash, created_at)
@@ -264,6 +271,10 @@ export class RayLinkStore {
       INSERT OR IGNORE INTO settings (key, value, updated_at)
       VALUES ('shadowsocks_master_password', ?, ?)
     `).run(createShadowsocksKey(), createdAt);
+    this.db.prepare(`
+      INSERT OR IGNORE INTO settings (key, value, updated_at)
+      VALUES ('runtime_protocols', ?, ?)
+    `).run(JSON.stringify(defaultProtocolConfigs(initialListenPort)), createdAt);
   }
 
   async authenticateAdmin(username, password) {
@@ -351,7 +362,7 @@ export class RayLinkStore {
 
   clientCredential(userId) {
     const row = this.db.prepare(`
-      SELECT users.email, users.runtime_password, users.state, users.portal_status,
+      SELECT users.email, users.runtime_uuid, users.runtime_password, users.state, users.portal_status,
              users.expires_at, users.used_gb, plans.quota_gb, plans.node_scope_json,
              plans.client_formats_json,
              (SELECT region FROM hosts WHERE id = 'local') AS host_region,
@@ -363,6 +374,7 @@ export class RayLinkStore {
     if (!row) return null;
     return {
       email: row.email,
+      runtimeUuid: row.runtime_uuid,
       runtimePassword: row.runtime_password,
       serverPassword: row.server_password,
       state: row.state,
@@ -654,7 +666,7 @@ export class RayLinkStore {
     const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'shadowsocks_master_password'").get();
     const users = this.db.prepare(`
       SELECT users.email, users.state, users.portal_status, users.used_gb, users.expires_at,
-             users.runtime_password, plans.quota_gb, plans.node_scope_json
+             users.runtime_uuid, users.runtime_password, plans.quota_gb, plans.node_scope_json
       FROM users
       JOIN plans ON plans.id = users.plan_id
       ORDER BY users.email
@@ -665,14 +677,42 @@ export class RayLinkStore {
       usedGb: row.used_gb,
       quotaGb: row.quota_gb,
       expiresAt: row.expires_at,
+      runtimeUuid: row.runtime_uuid,
       runtimePassword: row.runtime_password,
       nodeScope: parseJson(row.node_scope_json, [])
     }));
     return {
       host,
       masterPassword: setting.value,
-      users
+      users,
+      protocols: this.listProtocolConfigs()
     };
+  }
+
+  listProtocolConfigs() {
+    const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'runtime_protocols'").get();
+    return normalizeProtocolConfigs(parseJson(setting?.value, []));
+  }
+
+  updateProtocolConfig(type, input) {
+    const profiles = this.listProtocolConfigs();
+    const index = profiles.findIndex((profile) => profile.type === type);
+    if (index < 0) throw domainError("PROTOCOL_NOT_FOUND", "sing-box 入站协议不存在", 404);
+    const current = profiles[index];
+    const next = normalizeProtocolConfig({
+      ...current,
+      ...input,
+      type,
+      tls: { ...current.tls, ...(input.tls || {}) },
+      transport: { ...current.transport, ...(input.transport || {}) },
+      options: input.options === undefined ? current.options : input.options
+    });
+    const candidate = profiles.toSpliced(index, 1, next);
+    assertProtocolSet(candidate);
+    this.db.prepare(`
+      UPDATE settings SET value = ?, updated_at = ? WHERE key = 'runtime_protocols'
+    `).run(JSON.stringify(candidate), nowIso());
+    return next;
   }
 
   createDeployment({ version, configJson, checksum, eligibleUsers, publisherAdminId = null }) {

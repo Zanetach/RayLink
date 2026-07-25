@@ -259,6 +259,24 @@
               <span class="map-origin">RayLink 控制面</span>
             </div>
           </section>
+          <section class="runtime-console" aria-labelledby="runtime-console-title">
+            <header class="runtime-console-heading">
+              <div>
+                <p class="eyebrow">Runtime 管理</p>
+                <h2 id="runtime-console-title">sing-box 与入口协议</h2>
+                <p id="runtime-installation-copy">正在检测本机 sing-box。</p>
+              </div>
+              <button class="button primary" id="install-sing-box"><svg><use href="#i-terminal"/></svg>一键安装 sing-box</button>
+            </header>
+            <div class="runtime-build" id="runtime-build-details">
+              <span>版本检测中</span>
+            </div>
+            <div class="protocol-toolbar">
+              <div><strong id="enabled-protocol-count">0 个协议已启用</strong><small>保存协议后，在“配置发布”中校验并生效。</small></div>
+              <a href="https://sing-box.sagernet.org/configuration/inbound/" target="_blank" rel="noreferrer">官方协议文档 ↗</a>
+            </div>
+            <div class="protocol-grid" id="protocol-grid"></div>
+          </section>
           <section class="table-panel host-table">
             <div class="table-scroll">
               <table>
@@ -290,7 +308,7 @@
               <div class="editor-tabs"><button class="active">config.json</button><button>route.json</button><button>dns.json</button><span>JSON</span></div>
               <div class="editor-body">
                 <ol class="line-numbers" aria-hidden="true"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li></ol>
-                <pre><code>{
+                <pre><code id="managed-config-preview">{
   <span class="code-key">"log"</span>: {
     <span class="code-key">"level"</span>: <span class="code-string">"info"</span>,
     <span class="code-key">"timestamp"</span>: <span class="code-bool">true</span>

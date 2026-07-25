@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 
 import { RayLinkStore } from "./database.js";
 import { buildUserClientConfig } from "./singbox/client-config.js";
+import { SingBoxInstaller } from "./singbox/installer.js";
 import { LocalSingBoxAdapter } from "./singbox/local-adapter.js";
+import {
+  protocolAvailability,
+  protocolCatalog
+} from "./singbox/protocol-catalog.js";
 import { RuntimeManager } from "./singbox/runtime-manager.js";
 
 const SESSION_COOKIE = "raylink_session";
@@ -104,15 +109,16 @@ export async function createRayLinkApp(options) {
   const dbPath = options.dbPath || join(options.dataDir, "raylink.db");
   const publicOrigin = new URL(options.publicOrigin);
   const proxyHost = options.proxyHost || publicOrigin.hostname;
+  const listenPort = options.listenPort || 8388;
   const store = new RayLinkStore({
     dbPath,
     adminUsername: options.adminUsername,
     adminPassword: options.adminPassword,
     initialHostAddress: proxyHost,
+    initialListenPort: listenPort,
     seedDemoData: options.seedDemoData
   });
   const webDir = resolve(options.webDir || defaultWebDir);
-  const listenPort = options.listenPort || 8388;
   const runtimeAdapter = options.runtimeAdapter || new LocalSingBoxAdapter({
     dataDir: options.dataDir,
     binaryPath: options.singBoxBinary || "sing-box",
@@ -123,6 +129,9 @@ export async function createRayLinkApp(options) {
     store,
     adapter: runtimeAdapter,
     listenPort
+  });
+  const installer = options.installer || new SingBoxInstaller({
+    binaryPath: options.singBoxBinary || "sing-box"
   });
   const authAttempts = new Map();
   const authWindowMs = 10 * 60 * 1000;
@@ -259,7 +268,12 @@ export async function createRayLinkApp(options) {
           sendJson(
             response,
             200,
-            buildUserClientConfig({ credential, server: runtimeHost?.address || proxyHost, port: listenPort }),
+            buildUserClientConfig({
+              credential,
+              server: runtimeHost?.address || proxyHost,
+              port: listenPort,
+              protocols: store.listProtocolConfigs()
+            }),
             { "content-disposition": `attachment; filename="raylink-sing-box.json"` }
           );
           return;
@@ -285,17 +299,76 @@ export async function createRayLinkApp(options) {
         }
 
         if (request.method === "GET" && url.pathname === "/api/bootstrap") {
+          const installation = await installer.status();
           sendJson(response, 200, {
             ...store.bootstrap(admin),
             runtime: await runtimeManager.status(),
             runtimePreview: runtimeManager.preview(),
-            deployments: store.listDeployments()
+            deployments: store.listDeployments(),
+            installation,
+            protocols: store.listProtocolConfigs(),
+            protocolCatalog: protocolCatalog.map((protocol) => protocolAvailability(protocol, installation))
           });
           return;
         }
 
         if (request.method === "GET" && url.pathname === "/api/runtime/status") {
           sendJson(response, 200, await runtimeManager.status());
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/runtime/installation") {
+          sendJson(response, 200, await installer.status());
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/runtime/install") {
+          sendJson(response, 200, await installer.install());
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/runtime/reality-keypair") {
+          sendJson(response, 201, await installer.generateRealityKeypair());
+          return;
+        }
+
+        const protocolMatch = url.pathname.match(/^\/api\/runtime\/protocols\/([^/]+)$/);
+        if (request.method === "PATCH" && protocolMatch) {
+          const protocolType = decodeURIComponent(protocolMatch[1]);
+          const input = await readJson(request);
+          if (input.enabled === true) {
+            const installation = await installer.status();
+            const catalog = protocolCatalog.find((candidate) => candidate.type === protocolType);
+            if (!catalog) {
+              sendJson(response, 404, { error: { code: "PROTOCOL_NOT_FOUND", message: "协议不存在" } });
+              return;
+            }
+            const availability = protocolAvailability(catalog, installation);
+            if (!availability.available) {
+              sendJson(response, 422, {
+                error: {
+                  code: "PROTOCOL_UNAVAILABLE",
+                  message: availability.platformSupported
+                    ? `当前 sing-box 构建缺少 ${availability.missingTags.join(", ") || "所需能力"}`
+                    : `当前平台不支持 ${catalog.name}`
+                }
+              });
+              return;
+            }
+            if (input.tls?.mode === "reality" && !availability.realityAvailable) {
+              sendJson(response, 422, {
+                error: { code: "REALITY_UNAVAILABLE", message: "当前 sing-box 构建缺少 with_utls" }
+              });
+              return;
+            }
+            if (input.transport?.type === "quic" && !availability.quicTransportAvailable) {
+              sendJson(response, 422, {
+                error: { code: "QUIC_UNAVAILABLE", message: "当前 sing-box 构建缺少 with_quic" }
+              });
+              return;
+            }
+          }
+          sendJson(response, 200, store.updateProtocolConfig(protocolType, input));
           return;
         }
 
