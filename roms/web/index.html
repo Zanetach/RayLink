@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Linehaul sing-box 多用户控制台前端原型">
+  <title>Linehaul · sing-box control plane</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2386df9d'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='24' font-weight='700' fill='%23102a19'%3EL/%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m20 6-11 11-5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 18h.01"/></symbol>
+    <symbol id="i-rollback" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M5.5 16a8 8 0 1 0 .5-9l-3 3"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="rail" id="rail" aria-label="主导航">
+      <div class="brand">
+        <span class="brand-mark">L/</span>
+        <span class="brand-copy"><strong>Linehaul</strong><small>control plane</small></span>
+      </div>
+
+      <nav class="primary-nav">
+        <span class="nav-indicator" aria-hidden="true"></span>
+        <button class="nav-item active" data-view-target="dashboard" aria-current="page">
+          <svg><use href="#i-grid"/></svg><span>仪表盘</span>
+        </button>
+        <button class="nav-item" data-view-target="users">
+          <svg><use href="#i-users"/></svg><span>用户</span><span class="nav-count">27</span>
+        </button>
+        <button class="nav-item" data-view-target="subscriptions">
+          <svg><use href="#i-link"/></svg><span>订阅</span>
+        </button>
+        <button class="nav-item" data-view-target="hosts">
+          <svg><use href="#i-server"/></svg><span>主机</span><span class="nav-count">4</span>
+        </button>
+        <button class="nav-item" data-view-target="deploy">
+          <svg><use href="#i-code"/></svg><span>配置发布</span>
+        </button>
+      </nav>
+
+      <div class="rail-status">
+        <div class="status-orbit"><span></span></div>
+        <div><strong>控制面在线</strong><small>上次同步 12 秒前</small></div>
+      </div>
+
+      <div class="rail-footer">
+        <button class="profile-button" data-open-drawer="profile">
+          <span class="avatar">ZH</span>
+          <span><strong>周航</strong><small>所有者</small></span>
+          <svg><use href="#i-more"/></svg>
+        </button>
+        <div class="legal"><a href="#privacy">隐私</a><a href="#terms">条款</a></div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="menu-toggle" aria-label="打开导航" aria-expanded="false">
+          <svg><use href="#i-menu"/></svg>
+        </button>
+        <div class="environment">
+          <span class="environment-dot"></span>
+          <strong>生产环境</strong>
+          <span>杭州 / ap-east-1</span>
+        </div>
+        <div class="topbar-actions">
+          <button class="command-button" id="global-search">
+            <svg><use href="#i-search"/></svg>
+            <span>搜索资源</span>
+            <kbd>⌘ K</kbd>
+          </button>
+          <button class="icon-button" aria-label="通知">
+            <svg><use href="#i-bell"/></svg><span class="notification-dot"></span>
+          </button>
+          <button class="icon-button" aria-label="帮助">
+            <svg><use href="#i-help"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <main id="main-content" tabindex="-1">
+        <section class="view active" id="view-dashboard" data-view="dashboard">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">总览 · 2026年7月25日</p>
+              <h1>网络运行正常</h1>
+              <p>4 个节点持续同步，过去 24 小时无异常退出。</p>
+            </div>
+            <button class="button secondary" data-view-target="deploy">
+              <svg><use href="#i-code"/></svg>查看当前配置
+            </button>
+          </div>
+
+          <section class="status-band" aria-label="运行状态摘要">
+            <article><span>在线节点</span><strong>4<small>/ 4</small></strong><em class="good">全部健康</em></article>
+            <article><span>活跃用户</span><strong>21</strong><em>较昨日 +3</em></article>
+            <article><span>本月流量</span><strong>1.84<small> TB</small></strong><em>配额 42.7%</em></article>
+            <article><span>可用率</span><strong>99.94<small>%</small></strong><em class="good">SLA 达标</em></article>
+          </section>
+
+          <div class="dashboard-grid">
+            <section class="panel traffic-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">网络吞吐</p><h2>最近 24 小时</h2></div>
+                <div class="segmented" role="group" aria-label="时间范围">
+                  <button>1H</button><button class="active">24H</button><button>7D</button>
+                </div>
+              </div>
+              <div class="chart-legend"><span><i class="line up"></i>上传 138.4 Mbps</span><span><i class="line down"></i>下载 391.7 Mbps</span></div>
+              <div class="traffic-chart" aria-label="最近24小时上传和下载流量折线图">
+                <div class="chart-y"><span>600</span><span>400</span><span>200</span><span>0</span></div>
+                <svg viewBox="0 0 760 230" preserveAspectRatio="none" role="img">
+                  <title>上传和下载吞吐趋势</title>
+                  <g class="grid-lines"><path d="M0 20H760M0 83H760M0 146H760M0 209H760"/></g>
+                  <path class="area-line down-area" d="M0 179 C45 173 52 110 97 126 S171 158 205 113 268 52 311 94 363 170 409 127 462 69 511 95 568 155 613 112 687 40 760 61 L760 230 L0 230Z"/>
+                  <path class="chart-line download" d="M0 179 C45 173 52 110 97 126 S171 158 205 113 268 52 311 94 363 170 409 127 462 69 511 95 568 155 613 112 687 40 760 61"/>
+                  <path class="chart-line upload" d="M0 202 C55 190 69 171 112 180 S178 201 230 170 300 132 348 161 402 196 459 178 514 136 570 169 627 192 681 160 721 143 760 151"/>
+                </svg>
+                <div class="chart-x"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>现在</span></div>
+              </div>
+            </section>
+
+            <section class="panel host-summary">
+              <div class="panel-heading">
+                <div><p class="eyebrow">节点健康</p><h2>实时状态</h2></div>
+                <button class="text-button" data-view-target="hosts">查看全部 <svg><use href="#i-arrow"/></svg></button>
+              </div>
+              <div class="node-list">
+                <button class="node-row" data-open-host="东京核心">
+                  <span class="node-pulse"></span><span class="node-name"><strong>东京核心</strong><small>103.45.17.82</small></span>
+                  <span class="node-load"><i style="--load:34%"></i></span><span class="latency">38 ms</span>
+                </button>
+                <button class="node-row" data-open-host="新加坡边缘">
+                  <span class="node-pulse"></span><span class="node-name"><strong>新加坡边缘</strong><small>18.141.202.73</small></span>
+                  <span class="node-load"><i style="--load:51%"></i></span><span class="latency">63 ms</span>
+                </button>
+                <button class="node-row" data-open-host="法兰克福">
+                  <span class="node-pulse"></span><span class="node-name"><strong>法兰克福</strong><small>3.71.186.44</small></span>
+                  <span class="node-load"><i style="--load:27%"></i></span><span class="latency">186 ms</span>
+                </button>
+                <button class="node-row" data-open-host="洛杉矶入口">
+                  <span class="node-pulse warning"></span><span class="node-name"><strong>洛杉矶入口</strong><small>34.216.88.109</small></span>
+                  <span class="node-load"><i style="--load:76%"></i></span><span class="latency warning">228 ms</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="panel deployment-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">配置轨迹</p><h2>v2026.07.25-04</h2></div>
+                <span class="status-badge good"><i></i>已生效</span>
+              </div>
+              <div class="deployment-meta">
+                <span>发布人 <strong>林知夏</strong></span><span>14:32</span><span>变更 3 项</span>
+              </div>
+              <ol class="deploy-trail compact">
+                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>草稿</strong><small>14:26</small></li>
+                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>校验</strong><small>14:28</small></li>
+                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>快照</strong><small>14:30</small></li>
+                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>发布</strong><small>14:31</small></li>
+                <li class="done"><span><svg><use href="#i-check"/></svg></span><strong>健康</strong><small>14:32</small></li>
+              </ol>
+              <div class="change-log">
+                <span>+ 新加坡节点启用 Hysteria2</span>
+                <span>~ 用户 Priya Mehta 配额调整为 180 GB</span>
+                <span>~ DNS 出站规则同步至全部节点</span>
+              </div>
+            </section>
+
+            <section class="panel event-panel">
+              <div class="panel-heading"><div><p class="eyebrow">事件</p><h2>需要关注</h2></div><span class="count-badge">2</span></div>
+              <div class="event-list">
+                <article><span class="event-icon warning"><svg><use href="#i-server"/></svg></span><div><strong>洛杉矶入口延迟偏高</strong><p>连续 8 分钟超过 220 ms</p><small>3 分钟前</small></div></article>
+                <article><span class="event-icon neutral"><svg><use href="#i-users"/></svg></span><div><strong>用户流量接近配额</strong><p>岡本和也已使用 87.6%</p><small>18 分钟前</small></div></article>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-users" data-view="users">
+          <div class="page-heading">
+            <div><p class="eyebrow">访问控制</p><h1>用户</h1><p>管理账号、流量配额、有效期和节点权限。</p></div>
+            <button class="button primary" data-new-user><svg><use href="#i-plus"/></svg>新建用户</button>
+          </div>
+          <div class="toolbar">
+            <label class="search-field"><svg><use href="#i-search"/></svg><input id="user-search" type="search" placeholder="搜索姓名、邮箱或订阅 ID"></label>
+            <div class="filter-group" role="group" aria-label="用户状态筛选">
+              <button class="filter active" data-user-filter="all">全部 <span>27</span></button>
+              <button class="filter" data-user-filter="active">启用 <span>21</span></button>
+              <button class="filter" data-user-filter="warning">临近配额 <span>4</span></button>
+              <button class="filter" data-user-filter="disabled">停用 <span>2</span></button>
+            </div>
+          </div>
+          <section class="table-panel">
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>订阅协议</th><th>到期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
+                <tbody id="user-table-body"></tbody>
+              </table>
+            </div>
+            <div class="table-footer"><span id="user-result-count">显示 6 / 27 位用户</span><div class="pagination"><button disabled>上一页</button><span>1 / 5</span><button>下一页</button></div></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-subscriptions" data-view="subscriptions">
+          <div class="page-heading">
+            <div><p class="eyebrow">客户端分发</p><h1>订阅配置</h1><p>统一生成 Clash、Mihomo、sing-box 和原始链接。</p></div>
+            <button class="button primary" id="save-subscription"><svg><use href="#i-check"/></svg>保存设置</button>
+          </div>
+          <div class="settings-layout">
+            <form class="settings-form" id="subscription-form" novalidate>
+              <section class="form-section">
+                <div class="section-intro"><span>01</span><div><h2>服务入口</h2><p>定义用户复制和扫码时看到的订阅地址。</p></div></div>
+                <div class="field-grid">
+                  <label class="field full"><span>订阅域名</span><input type="url" name="subdomain" value="https://sub.cyclelink.org" required><small class="field-hint">必须使用有效的 HTTPS 地址</small><small class="field-error"></small></label>
+                  <label class="field"><span>URI 前缀</span><div class="input-affix"><span>/</span><input name="prefix" value="feed"></div></label>
+                  <label class="field"><span>令牌长度</span><select name="tokenLength"><option>24 位</option><option selected>32 位</option><option>48 位</option></select></label>
+                </div>
+              </section>
+              <section class="form-section">
+                <div class="section-intro"><span>02</span><div><h2>输出格式</h2><p>决定用户默认获得哪一种客户端配置。</p></div></div>
+                <div class="format-options">
+                  <label><input type="checkbox" checked><span><strong>Clash / Mihomo</strong><small>YAML，包含策略组和路由规则</small></span></label>
+                  <label><input type="checkbox" checked><span><strong>sing-box</strong><small>JSON，适用于官方客户端</small></span></label>
+                  <label><input type="checkbox" checked><span><strong>原始 URI</strong><small>逐行输出各协议连接</small></span></label>
+                  <label><input type="checkbox"><span><strong>Surge</strong><small>兼容 Surge 5 配置格式</small></span></label>
+                </div>
+              </section>
+              <section class="form-section">
+                <div class="section-intro"><span>03</span><div><h2>客户端呈现</h2><p>控制客户端中显示的标题、支持入口和公告。</p></div></div>
+                <div class="field-grid">
+                  <label class="field"><span>订阅标题</span><input name="title" value="CycleLink · 生产网络"></label>
+                  <label class="field"><span>刷新间隔</span><select><option>每 6 小时</option><option selected>每 12 小时</option><option>每 24 小时</option></select></label>
+                  <label class="field full"><span>公告</span><textarea rows="3">节点维护会提前 24 小时在订阅公告中通知。</textarea></label>
+                </div>
+              </section>
+            </form>
+            <aside class="preview-panel">
+              <div class="preview-heading"><span>实时预览</span><span class="status-badge good"><i></i>可访问</span></div>
+              <div class="subscription-card">
+                <span class="brand-mark small">L/</span>
+                <div><p>CycleLink · 生产网络</p><strong>Priya Mehta</strong></div>
+                <span class="usage-ring" style="--usage:42">42%</span>
+              </div>
+              <div class="preview-stats"><span><small>剩余流量</small><strong>104.6 GB</strong></span><span><small>有效期</small><strong>38 天</strong></span></div>
+              <label class="preview-url"><span>订阅地址</span><div><code id="preview-url">https://sub.cyclelink.org/feed/9z3is74hjy2jswgh...</code><button type="button" class="icon-button copy-button" aria-label="复制订阅地址" data-copy-target="preview-url"><svg><use href="#i-copy"/></svg></button></div></label>
+              <div class="format-tabs"><button class="active">Mihomo</button><button>sing-box</button><button>URI</button></div>
+              <pre class="code-preview"><code><span class="code-key">mixed-port:</span> <span class="code-num">7890</span>
+<span class="code-key">allow-lan:</span> <span class="code-bool">false</span>
+<span class="code-key">mode:</span> rule
+<span class="code-key">proxies:</span>
+  - <span class="code-key">name:</span> 东京 · Reality
+    <span class="code-key">type:</span> vless
+  - <span class="code-key">name:</span> 新加坡 · HY2
+    <span class="code-key">type:</span> hysteria2</code></pre>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-hosts" data-view="hosts">
+          <div class="page-heading">
+            <div><p class="eyebrow">基础设施</p><h1>主机</h1><p>监控 sing-box 节点、协议入口和同步状态。</p></div>
+            <button class="button primary" data-open-host="新主机"><svg><use href="#i-plus"/></svg>添加主机</button>
+          </div>
+          <section class="host-map">
+            <div class="map-header"><span>全球节点拓扑</span><span><i></i>4 个节点在线</span></div>
+            <div class="map-stage" aria-label="节点网络拓扑示意">
+              <div class="map-route route-one"></div><div class="map-route route-two"></div><div class="map-route route-three"></div>
+              <button class="map-node tokyo" data-open-host="东京核心"><i></i><span><strong>东京</strong><small>38 ms</small></span></button>
+              <button class="map-node singapore" data-open-host="新加坡边缘"><i></i><span><strong>新加坡</strong><small>63 ms</small></span></button>
+              <button class="map-node frankfurt" data-open-host="法兰克福"><i></i><span><strong>法兰克福</strong><small>186 ms</small></span></button>
+              <button class="map-node losangeles warning" data-open-host="洛杉矶入口"><i></i><span><strong>洛杉矶</strong><small>228 ms</small></span></button>
+              <span class="map-origin">控制面 · 杭州</span>
+            </div>
+          </section>
+          <section class="table-panel host-table">
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>主机</th><th>状态</th><th>入口协议</th><th>CPU</th><th>吞吐</th><th>最后同步</th><th><span class="sr-only">操作</span></th></tr></thead>
+                <tbody>
+                  <tr><td><button class="identity-link" data-open-host="东京核心"><span class="flag">JP</span><span><strong>东京核心</strong><small>103.45.17.82 · Ubuntu 24.04</small></span></button></td><td><span class="status-badge good"><i></i>在线</span></td><td><span class="tag">VLESS</span><span class="tag">Reality</span></td><td class="numeric">34%</td><td class="numeric">318 Mbps</td><td>8 秒前</td><td><button class="icon-button small" aria-label="编辑东京核心" data-open-host="东京核心"><svg><use href="#i-more"/></svg></button></td></tr>
+                  <tr><td><button class="identity-link" data-open-host="新加坡边缘"><span class="flag">SG</span><span><strong>新加坡边缘</strong><small>18.141.202.73 · Debian 12</small></span></button></td><td><span class="status-badge good"><i></i>在线</span></td><td><span class="tag">HY2</span><span class="tag">TUIC</span></td><td class="numeric">51%</td><td class="numeric">406 Mbps</td><td>11 秒前</td><td><button class="icon-button small" aria-label="编辑新加坡边缘" data-open-host="新加坡边缘"><svg><use href="#i-more"/></svg></button></td></tr>
+                  <tr><td><button class="identity-link" data-open-host="法兰克福"><span class="flag">DE</span><span><strong>法兰克福</strong><small>3.71.186.44 · Ubuntu 24.04</small></span></button></td><td><span class="status-badge good"><i></i>在线</span></td><td><span class="tag">VLESS</span><span class="tag">Trojan</span></td><td class="numeric">27%</td><td class="numeric">174 Mbps</td><td>9 秒前</td><td><button class="icon-button small" aria-label="编辑法兰克福" data-open-host="法兰克福"><svg><use href="#i-more"/></svg></button></td></tr>
+                  <tr><td><button class="identity-link" data-open-host="洛杉矶入口"><span class="flag">US</span><span><strong>洛杉矶入口</strong><small>34.216.88.109 · Debian 12</small></span></button></td><td><span class="status-badge warning"><i></i>延迟偏高</span></td><td><span class="tag">VLESS</span><span class="tag">Reality</span></td><td class="numeric">76%</td><td class="numeric">521 Mbps</td><td>16 秒前</td><td><button class="icon-button small" aria-label="编辑洛杉矶入口" data-open-host="洛杉矶入口"><svg><use href="#i-more"/></svg></button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-deploy" data-view="deploy">
+          <div class="page-heading">
+            <div><p class="eyebrow">变更管理</p><h1>配置发布</h1><p>校验、快照并向全部 sing-box 节点分批推送配置。</p></div>
+            <div class="heading-actions"><button class="button secondary"><svg><use href="#i-rollback"/></svg>回滚</button><button class="button primary" id="publish-config"><svg><use href="#i-terminal"/></svg>校验并发布</button></div>
+          </div>
+          <section class="release-header">
+            <div><span class="release-version">v2026.07.25-05</span><span class="status-badge neutral"><i></i>草稿</span></div>
+            <p>添加首尔入口并更新 DNS 分流规则 · 编辑人 周航 · 6 分钟前</p>
+          </section>
+          <ol class="deploy-trail full" id="publish-trail">
+            <li class="current"><span>1</span><strong>草稿</strong><small>3 项变更</small></li>
+            <li><span>2</span><strong>校验</strong><small>语法与端口</small></li>
+            <li><span>3</span><strong>快照</strong><small>可安全回滚</small></li>
+            <li><span>4</span><strong>分批发布</strong><small>4 个节点</small></li>
+            <li><span>5</span><strong>健康确认</strong><small>连接与延迟</small></li>
+          </ol>
+          <div class="deploy-layout">
+            <section class="config-editor">
+              <div class="editor-tabs"><button class="active">config.json</button><button>route.json</button><button>dns.json</button><span>JSON</span></div>
+              <div class="editor-body">
+                <ol class="line-numbers" aria-hidden="true"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li></ol>
+                <pre><code>{
+  <span class="code-key">"log"</span>: {
+    <span class="code-key">"level"</span>: <span class="code-string">"info"</span>,
+    <span class="code-key">"timestamp"</span>: <span class="code-bool">true</span>
+  },
+  <span class="code-key">"inbounds"</span>: [{
+    <span class="code-key">"type"</span>: <span class="code-string">"vless"</span>,
+    <span class="code-key">"tag"</span>: <span class="code-string">"in-seoul-reality"</span>,
+    <span class="code-key">"listen_port"</span>: <span class="code-num">443</span>,
+    <span class="code-key">"users"</span>: <span class="code-variable">"$active_users"</span>
+  }],
+  <span class="code-key">"route"</span>: {
+    <span class="code-key">"rules"</span>: <span class="code-variable">"$managed_rules"</span>,
+    <span class="code-key">"final"</span>: <span class="code-string">"proxy"</span>
+  }
+}</code></pre>
+              </div>
+              <div class="editor-footer"><span><i class="good-dot"></i>JSON 语法有效</span><span>Ln 18, Col 2</span></div>
+            </section>
+            <aside class="validation-panel">
+              <div class="panel-heading"><div><p class="eyebrow">发布前检查</p><h2>3 项变更</h2></div><button class="icon-button small" aria-label="重新检查"><svg><use href="#i-refresh"/></svg></button></div>
+              <div class="check-list" id="validation-list">
+                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>配置语法</strong><small>通过 sing-box check</small></div></div>
+                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>端口冲突</strong><small>443 在目标节点可用</small></div></div>
+                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>证书与密钥</strong><small>Reality 密钥有效</small></div></div>
+                <div class="pending"><span>4</span><div><strong>节点连通性</strong><small>发布时再次确认</small></div></div>
+              </div>
+              <div class="change-summary">
+                <span><i class="add">+</i><strong>1</strong> 个入站</span>
+                <span><i class="modify">~</i><strong>2</strong> 条路由</span>
+                <span><i class="remove">−</i><strong>0</strong> 个删除</span>
+              </div>
+              <div class="target-nodes"><p>目标节点</p><label><input type="checkbox" checked><span>东京核心</span><small>38 ms</small></label><label><input type="checkbox" checked><span>新加坡边缘</span><small>63 ms</small></label><label><input type="checkbox" checked><span>法兰克福</span><small>186 ms</small></label><label><input type="checkbox" checked><span>洛杉矶入口</span><small class="warning-text">228 ms</small></label></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view not-found" id="view-not-found" data-view="not-found">
+          <span class="brand-mark">L/</span><p class="eyebrow">404 · 路由未找到</p><h1>这里没有可管理的资源</h1><p>地址可能已更改，或你没有访问权限。</p><button class="button primary" data-view-target="dashboard">返回仪表盘</button>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <nav class="mobile-nav" aria-label="移动端主导航">
+    <button class="active" data-view-target="dashboard"><svg><use href="#i-grid"/></svg><span>总览</span></button>
+    <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户</span></button>
+    <button data-view-target="subscriptions"><svg><use href="#i-link"/></svg><span>订阅</span></button>
+    <button data-view-target="hosts"><svg><use href="#i-server"/></svg><span>主机</span></button>
+    <button data-view-target="deploy"><svg><use href="#i-code"/></svg><span>发布</span></button>
+  </nav>
+
+  <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-labelledby="drawer-title" inert>
+    <div class="drawer-header"><div><p class="eyebrow" id="drawer-eyebrow">用户详情</p><h2 id="drawer-title">编辑用户</h2></div><button class="icon-button" id="drawer-close" aria-label="关闭详情"><svg><use href="#i-x"/></svg></button></div>
+    <div class="drawer-content" id="drawer-content"></div>
+    <div class="drawer-footer"><button class="button secondary" id="drawer-cancel">取消</button><button class="button primary" id="drawer-save">保存更改</button></div>
+  </aside>
+  <div class="drawer-scrim" id="drawer-scrim"></div>
+
+  <div class="toast-region" aria-live="polite" aria-atomic="true">
+    <div class="toast" id="toast"><span><svg><use href="#i-check"/></svg></span><div><strong id="toast-title">已保存</strong><p id="toast-message">设置已经更新。</p></div></div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
