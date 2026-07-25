@@ -6,6 +6,8 @@ RayLink is a precise, quiet operations console for teams running sing-box infras
 
 The primary signature is the deployment trail: every configuration change is shown as a traceable sequence from draft to validation, snapshot, rollout, and health confirmation.
 
+Users and subscriptions are separate business objects. A subscription plan defines service entitlement such as traffic, device count, node scope, and client support; a user receives one assigned plan and consumes it through the authenticated user center.
+
 ## 2. Color palette and roles
 
 | Token | Value | Role |
@@ -32,7 +34,8 @@ The reflex choices Inter, Space Grotesk, and IBM Plex Sans are rejected. The int
 | Page title | 30px | 600 | 1.08 | -0.022em |
 | Section title | 20px | 600 | 1.2 | -0.012em |
 | Body | 14px | 450 | 1.5 | normal |
-| Label | 12px | 600 | 1.3 | 0.04em |
+| Compact body | 10–12px | 450 | 1.5 | normal |
+| Label | 10px | 600 | 1.3 | 0.04em |
 | Data | 13px | 500 | 1.4 | normal, tabular numerals |
 
 ## 4. Component stylings

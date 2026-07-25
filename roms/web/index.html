@@ -216,7 +216,7 @@
           <section class="table-panel">
             <div class="table-scroll">
               <table>
-                <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>订阅协议</th><th>到期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
+                <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>订阅方案</th><th>到期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
                 <tbody id="user-table-body"></tbody>
               </table>
             </div>
@@ -226,55 +226,41 @@
 
         <section class="view" id="view-subscriptions" data-view="subscriptions">
           <div class="page-heading">
-            <div><p class="eyebrow">客户端分发</p><h1>订阅配置</h1><p>统一生成 Clash、Mihomo、sing-box 和原始链接。</p></div>
-            <button class="button primary" id="save-subscription"><svg><use href="#i-check"/></svg>保存设置</button>
+            <div><p class="eyebrow">服务策略</p><h1>订阅方案</h1><p>订阅定义流量、节点范围、设备数量和客户端能力，再分配给用户。</p></div>
+            <button class="button primary" data-new-plan><svg><use href="#i-plus"/></svg>新建方案</button>
           </div>
-          <div class="settings-layout">
-            <form class="settings-form" id="subscription-form" novalidate>
-              <section class="form-section">
-                <div class="section-intro"><span>01</span><div><h2>服务入口</h2><p>定义用户复制和扫码时看到的订阅地址。</p></div></div>
-                <div class="field-grid">
-                  <label class="field full"><span>订阅域名</span><input type="url" name="subdomain" value="https://sub.cyclelink.org" required><small class="field-hint">必须使用有效的 HTTPS 地址</small><small class="field-error"></small></label>
-                  <label class="field"><span>URI 前缀</span><div class="input-affix"><span>/</span><input name="prefix" value="feed"></div></label>
-                  <label class="field"><span>令牌长度</span><select name="tokenLength"><option>24 位</option><option selected>32 位</option><option>48 位</option></select></label>
-                </div>
-              </section>
-              <section class="form-section">
-                <div class="section-intro"><span>02</span><div><h2>输出格式</h2><p>决定用户默认获得哪一种客户端配置。</p></div></div>
-                <div class="format-options">
-                  <label><input type="checkbox" checked><span><strong>Clash / Mihomo</strong><small>YAML，包含策略组和路由规则</small></span></label>
-                  <label><input type="checkbox" checked><span><strong>sing-box</strong><small>JSON，适用于官方客户端</small></span></label>
-                  <label><input type="checkbox" checked><span><strong>原始 URI</strong><small>逐行输出各协议连接</small></span></label>
-                  <label><input type="checkbox"><span><strong>Surge</strong><small>兼容 Surge 5 配置格式</small></span></label>
-                </div>
-              </section>
-              <section class="form-section">
-                <div class="section-intro"><span>03</span><div><h2>客户端呈现</h2><p>控制客户端中显示的标题、支持入口和公告。</p></div></div>
-                <div class="field-grid">
-                  <label class="field"><span>订阅标题</span><input name="title" value="RayLink · 生产网络"></label>
-                  <label class="field"><span>刷新间隔</span><select><option>每 6 小时</option><option selected>每 12 小时</option><option>每 24 小时</option></select></label>
-                  <label class="field full"><span>公告</span><textarea rows="3">节点维护会提前 24 小时在订阅公告中通知。</textarea></label>
-                </div>
-              </section>
-            </form>
-            <aside class="preview-panel">
-              <div class="preview-heading"><span>实时预览</span><span class="status-badge good"><i></i>可访问</span></div>
-              <div class="subscription-card">
-                <span class="brand-mark small">R/</span>
-                <div><p>RayLink · 生产网络</p><strong>Priya Mehta</strong></div>
-                <span class="usage-ring" style="--usage:42">42%</span>
+          <div class="view-context"><span><i class="good-dot"></i>策略版本 v2026.07.25-04 已生效</span><span>发布人 林知夏 · 14:32</span></div>
+          <div class="subscription-layout">
+            <section class="plan-panel">
+              <div class="plan-summary">
+                <span><small>有效方案</small><strong id="plan-count">3</strong></span>
+                <span><small>已分配用户</small><strong id="assigned-user-count">27</strong></span>
+                <span><small>平均使用率</small><strong id="average-plan-usage">51.8%</strong></span>
               </div>
-              <div class="preview-stats"><span><small>剩余流量</small><strong>104.6 GB</strong></span><span><small>有效期</small><strong>38 天</strong></span></div>
-              <label class="preview-url"><span>订阅地址</span><div><code id="preview-url">https://sub.cyclelink.org/feed/9z3is74hjy2jswgh...</code><button type="button" class="icon-button copy-button" aria-label="复制订阅地址" data-copy-target="preview-url"><svg><use href="#i-copy"/></svg></button></div></label>
-              <div class="format-tabs"><button class="active">Mihomo</button><button>sing-box</button><button>URI</button></div>
-              <pre class="code-preview"><code><span class="code-key">mixed-port:</span> <span class="code-num">7890</span>
-<span class="code-key">allow-lan:</span> <span class="code-bool">false</span>
-<span class="code-key">mode:</span> rule
-<span class="code-key">proxies:</span>
-  - <span class="code-key">name:</span> 东京 · Reality
-    <span class="code-key">type:</span> vless
-  - <span class="code-key">name:</span> 新加坡 · HY2
-    <span class="code-key">type:</span> hysteria2</code></pre>
+              <div class="plan-list-heading">
+                <span>方案与权益</span><span>流量 / 设备</span><span>节点范围</span><span>用户</span><span></span>
+              </div>
+              <div id="plan-list"></div>
+              <div class="plan-policy-note">
+                <svg><use href="#i-shield"/></svg>
+                <div><strong>一个用户分配一个订阅方案</strong><p>流量、设备、节点和客户端能力由方案统一管理。修改方案后，所属用户在下次同步时自动获得新配置。</p></div>
+              </div>
+            </section>
+            <aside class="onboarding-panel">
+              <div class="preview-heading"><span>用户如何使用</span><span class="status-badge good"><i></i>用户中心在线</span></div>
+              <div class="portal-profile">
+                <span class="brand-mark small">R/</span>
+                <div><p>RayLink 用户中心</p><strong>Priya Mehta</strong><small>高速访问 · 剩余 244.6 GB</small></div>
+              </div>
+              <ol class="usage-steps">
+                <li><span>1</span><div><strong>管理员分配方案</strong><small>在用户详情中选择订阅方案</small></div></li>
+                <li><span>2</span><div><strong>用户登录用户中心</strong><small>使用账号和密码查看可用服务</small></div></li>
+                <li><span>3</span><div><strong>选择客户端并导入</strong><small>一键导入 Mihomo 或 sing-box</small></div></li>
+                <li><span>4</span><div><strong>系统同步用量</strong><small>流量、到期和设备状态回到用户账号</small></div></li>
+              </ol>
+              <label class="preview-url"><span>用户中心入口</span><div><code id="portal-url">https://sub.cyclelink.org/portal</code><button type="button" class="icon-button copy-button" aria-label="复制用户中心入口" data-copy-target="portal-url"><svg><use href="#i-copy"/></svg></button></div></label>
+              <div class="client-entry-list" id="client-entry-list"></div>
+              <p class="portal-note">用户只需要管理自己的账号和客户端，技术配置由 RayLink 根据所分配方案生成。</p>
             </aside>
           </div>
         </section>
