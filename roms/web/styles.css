@@ -893,7 +893,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .code-variable { color: oklch(0.77 0.1 265); }
 
 .host-map { margin-bottom: 20px; background: var(--surface-1); }
-.runtime-console { margin-bottom: 20px; background: var(--surface-1); }
+.runtime-console { margin-bottom: 24px; background: var(--surface-1); }
 .runtime-console-heading {
   display: flex;
   min-height: 104px;
@@ -901,9 +901,9 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   justify-content: space-between;
   gap: 24px;
   border-bottom: 1px solid var(--border);
-  padding: 20px;
+  padding: 24px;
 }
-.runtime-console-heading h2 { margin-top: 4px; font-size: 18px; }
+.runtime-console-heading h2 { margin-top: 4px; font-size: 20px; }
 .runtime-console-heading p:last-child { margin: 8px 0 0; color: var(--muted); font-size: 10px; }
 .runtime-build {
   display: flex;
@@ -911,7 +911,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   align-items: center;
   gap: 16px;
   border-bottom: 1px solid var(--border-subtle);
-  padding: 0 20px;
+  padding: 0 24px;
   color: var(--faint);
   font-size: 10px;
 }
@@ -922,7 +922,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 20px;
+  padding: 12px 24px;
 }
 .protocol-toolbar strong, .protocol-toolbar small { display: block; }
 .protocol-toolbar strong { color: var(--text-soft); font-size: 12px; font-weight: 600; }
@@ -942,13 +942,13 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .protocol-card.enabled { box-shadow: inset 2px 0 var(--accent); }
 .protocol-card header, .protocol-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .protocol-kind { color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; text-transform: uppercase; }
-.protocol-card h3 { margin-top: 20px; color: var(--text-soft); font-size: 14px; }
+.protocol-card h3 { margin-top: 24px; color: var(--text-soft); font-size: 14px; }
 .protocol-card > p { min-height: 48px; margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .protocol-meta { display: flex; gap: 8px; margin-top: 12px; }
 .protocol-meta span { padding: 4px 6px; background: var(--canvas); color: var(--faint); font-size: 9px; }
 .protocol-card footer { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
 .protocol-card footer a { color: var(--faint); font-size: 9px; }
-.protocol-card footer .button { min-height: 32px; padding: 0 10px; font-size: 9px; }
+.protocol-card footer .button { min-height: 40px; padding: 0 12px; font-size: 9px; }
 .protocol-subsection { display: grid; gap: 12px; padding: 16px; background: var(--canvas); }
 .protocol-subsection-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .protocol-subsection-heading strong, .protocol-subsection-heading small { display: block; }

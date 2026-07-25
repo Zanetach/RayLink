@@ -287,6 +287,8 @@ test("admin cannot enable Reality or QUIC transport when the sing-box build tags
       tls: {
         mode: "reality",
         serverName: "www.microsoft.com",
+        handshakeServer: "www.microsoft.com",
+        handshakePort: 443,
         privateKey: "private-key",
         publicKey: "public-key",
         shortId: "0123456789abcdef"
@@ -301,7 +303,12 @@ test("admin cannot enable Reality or QUIC transport when the sing-box build tags
     method: "PATCH",
     body: JSON.stringify({
       ...baseProfile,
-      tls: { mode: "none" },
+      tls: {
+        mode: "certificate",
+        serverName: "node.example.com",
+        certificatePath: "/tmp/cert.pem",
+        keyPath: "/tmp/key.pem"
+      },
       transport: { type: "quic" }
     })
   });

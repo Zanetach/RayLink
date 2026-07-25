@@ -8,6 +8,7 @@ import { buildUserClientConfig } from "./singbox/client-config.js";
 import { SingBoxInstaller } from "./singbox/installer.js";
 import { LocalSingBoxAdapter } from "./singbox/local-adapter.js";
 import {
+  normalizeProtocolConfig,
   protocolAvailability,
   protocolCatalog
 } from "./singbox/protocol-catalog.js";
@@ -336,32 +337,43 @@ export async function createRayLinkApp(options) {
         if (request.method === "PATCH" && protocolMatch) {
           const protocolType = decodeURIComponent(protocolMatch[1]);
           const input = await readJson(request);
-          if (input.enabled === true) {
+          const current = store.listProtocolConfigs().find((profile) => profile.type === protocolType);
+          if (!current) {
+            sendJson(response, 404, { error: { code: "PROTOCOL_NOT_FOUND", message: "协议不存在" } });
+            return;
+          }
+          const candidate = normalizeProtocolConfig({
+            ...current,
+            ...input,
+            type: protocolType,
+            tls: { ...current.tls, ...(input.tls || {}) },
+            transport: { ...current.transport, ...(input.transport || {}) },
+            options: input.options === undefined ? current.options : input.options
+          });
+          if (candidate.enabled) {
             const installation = await installer.status();
-            const catalog = protocolCatalog.find((candidate) => candidate.type === protocolType);
-            if (!catalog) {
-              sendJson(response, 404, { error: { code: "PROTOCOL_NOT_FOUND", message: "协议不存在" } });
-              return;
-            }
+            const catalog = protocolCatalog.find((entry) => entry.type === protocolType);
             const availability = protocolAvailability(catalog, installation);
             if (!availability.available) {
               sendJson(response, 422, {
                 error: {
                   code: "PROTOCOL_UNAVAILABLE",
-                  message: availability.platformSupported
-                    ? `当前 sing-box 构建缺少 ${availability.missingTags.join(", ") || "所需能力"}`
-                    : `当前平台不支持 ${catalog.name}`
+                  message: !availability.versionSupported
+                    ? `RayLink 当前协议 schema 支持 sing-box 1.13.x，检测到 ${installation.version || "未知版本"}`
+                    : availability.platformSupported
+                      ? `当前 sing-box 构建缺少 ${availability.missingTags.join(", ") || "所需能力"}`
+                      : `当前平台不支持 ${catalog.name}`
                 }
               });
               return;
             }
-            if (input.tls?.mode === "reality" && !availability.realityAvailable) {
+            if (candidate.tls.mode === "reality" && !availability.realityAvailable) {
               sendJson(response, 422, {
                 error: { code: "REALITY_UNAVAILABLE", message: "当前 sing-box 构建缺少 with_utls" }
               });
               return;
             }
-            if (input.transport?.type === "quic" && !availability.quicTransportAvailable) {
+            if (candidate.transport.type === "quic" && !availability.quicTransportAvailable) {
               sendJson(response, 422, {
                 error: { code: "QUIC_UNAVAILABLE", message: "当前 sing-box 构建缺少 with_quic" }
               });

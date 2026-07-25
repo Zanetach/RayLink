@@ -41,17 +41,20 @@ export class SingBoxInstaller {
 
   async install() {
     if (this.installing) throw installerError("INSTALLATION_IN_PROGRESS", "sing-box 正在安装", 409);
-    const existing = await this.status();
-    if (existing.installed) return { ...existing, alreadyInstalled: true };
     this.installing = true;
     try {
+      const existing = await this.status();
+      if (existing.installed) return { ...existing, alreadyInstalled: true };
       if (this.platform === "darwin") {
         await this.runner("brew", ["install", "sing-box"], {
           timeout: 10 * 60 * 1000,
           maxBuffer: 8 * 1024 * 1024
         });
       } else if (this.platform === "linux") {
-        await this.runner("sh", ["-c", "curl -fsSL https://sing-box.app/install.sh | sh"], {
+        await this.runner("sh", [
+          "-c",
+          "curl -fsSL https://sing-box.app/install.sh | sh -s -- --version 1.13.14"
+        ], {
           timeout: 10 * 60 * 1000,
           maxBuffer: 8 * 1024 * 1024
         });

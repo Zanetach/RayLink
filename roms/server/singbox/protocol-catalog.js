@@ -19,6 +19,7 @@ export const protocolCatalog = [
   protocol("naive", "Naive", 7443, "基于 HTTP/2 或 HTTP/3 的认证代理。", {
     authMode: "username-password",
     clientCapable: true,
+    clientRequiredTags: ["with_naive_outbound"],
     tls: "required"
   }),
   protocol("shadowtls", "ShadowTLS", 7444, "TLS 握手代理层，通常与其他入站组合使用。", {
@@ -88,6 +89,7 @@ export const protocolCatalog = [
     authMode: "none",
     clientCapable: false,
     exposure: "system",
+    platforms: ["linux", "darwin"],
     formLevel: "advanced"
   }),
   protocol("tproxy", "TProxy", 9092, "Linux TProxy 透明代理入口。", {
@@ -114,6 +116,7 @@ function protocol(type, name, defaultPort, description, overrides = {}) {
     transports: false,
     reality: false,
     requiredTags: [],
+    clientRequiredTags: [],
     platforms: ["linux", "darwin", "win32"],
     exposure: "public",
     formLevel: "managed",
@@ -143,9 +146,12 @@ export function defaultProtocolConfigs(shadowsocksPort = 8388) {
     },
     transport: {
       type: "none",
-      path: ""
+      path: "",
+      serviceName: ""
     },
-    options: {}
+    options: entry.type === "hysteria"
+      ? { up_mbps: 100, down_mbps: 100 }
+      : {}
   }));
 }
 
@@ -182,9 +188,10 @@ export function normalizeProtocolConfig(input) {
     },
     transport: {
       type: String(input.transport?.type || "none"),
-      path: String(input.transport?.path || "").trim()
+      path: String(input.transport?.path || "").trim(),
+      serviceName: String(input.transport?.serviceName || "").trim()
     },
-    options: isPlainObject(input.options) ? input.options : {}
+    options: normalizeProtocolOptions(type, input.options)
   };
   if (!profile.listen) throw protocolError("INVALID_LISTEN", "监听地址不能为空");
   if (!catalog.portless && (!Number.isInteger(profile.port) || profile.port < 1 || profile.port > 65_535)) {
@@ -201,6 +208,11 @@ export function normalizeProtocolConfig(input) {
   }
   if (profile.tls.mode === "reality") {
     if (!catalog.reality) throw protocolError("REALITY_NOT_SUPPORTED", `${catalog.name} 不支持 Reality`);
+    if (!Number.isInteger(profile.tls.handshakePort)
+      || profile.tls.handshakePort < 1
+      || profile.tls.handshakePort > 65_535) {
+      throw protocolError("INVALID_REALITY_PORT", "Reality 握手端口必须在 1–65535 之间");
+    }
     const required = ["serverName", "handshakeServer", "privateKey", "publicKey", "shortId"];
     if (required.some((field) => !profile.tls[field])) {
       throw protocolError("REALITY_FIELDS_REQUIRED", "Reality 需要服务器名称、握手地址、密钥对和 Short ID");
@@ -211,6 +223,9 @@ export function normalizeProtocolConfig(input) {
   }
   if (profile.transport.type !== "none" && !catalog.transports) {
     throw protocolError("TRANSPORT_NOT_SUPPORTED", `${catalog.name} 不支持 V2Ray Transport`);
+  }
+  if (profile.enabled && profile.transport.type === "quic" && profile.tls.mode === "none") {
+    throw protocolError("TRANSPORT_TLS_REQUIRED", "QUIC Transport 必须启用证书 TLS 或 Reality");
   }
   return profile;
 }
@@ -232,12 +247,19 @@ export function assertProtocolSet(profiles) {
 
 export function protocolAvailability(catalog, installation) {
   const tags = new Set(installation?.tags || []);
+  const requiredTags = [
+    ...catalog.requiredTags,
+    ...(catalog.clientCapable ? catalog.clientRequiredTags : [])
+  ];
+  const versionSupported = /^1\.13(?:\.|$)/.test(String(installation?.version || ""));
   return {
     ...catalog,
     available: installation?.installed === true
+      && versionSupported
       && catalog.platforms.includes(installation.platform)
-      && catalog.requiredTags.every((tag) => tags.has(tag)),
-    missingTags: catalog.requiredTags.filter((tag) => !tags.has(tag)),
+      && requiredTags.every((tag) => tags.has(tag)),
+    missingTags: requiredTags.filter((tag) => !tags.has(tag)),
+    versionSupported,
     platformSupported: catalog.platforms.includes(installation?.platform || ""),
     realityAvailable: catalog.reality && tags.has("with_utls"),
     quicTransportAvailable: catalog.transports && tags.has("with_quic")
@@ -353,7 +375,12 @@ function buildClientOutbound(profile, credential, server) {
     }, profile);
   }
   if (profile.type === "hysteria") {
-    return addClientTls({ ...common, auth_str: credential.runtimePassword }, profile);
+    return addClientTls({
+      ...common,
+      auth_str: credential.runtimePassword,
+      up_mbps: profile.options.up_mbps,
+      down_mbps: profile.options.down_mbps
+    }, profile);
   }
   if (["trojan", "anytls", "hysteria2"].includes(profile.type)) {
     return addClientTransport(addClientTls({ ...common, password: credential.runtimePassword }, profile), profile);
@@ -413,6 +440,13 @@ function addClientTls(outbound, profile) {
 
 function buildTransport(profile) {
   if (profile.transport.type === "none") return null;
+  if (profile.transport.type === "quic") return { type: "quic" };
+  if (profile.transport.type === "grpc") {
+    return {
+      type: "grpc",
+      ...(profile.transport.serviceName ? { service_name: profile.transport.serviceName } : {})
+    };
+  }
   return {
     type: profile.transport.type,
     ...(profile.transport.path ? { path: profile.transport.path } : {})
@@ -427,6 +461,26 @@ function addClientTransport(outbound, profile) {
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeProtocolOptions(type, value) {
+  const options = isPlainObject(value) ? value : {};
+  const reservedFields = ["type", "tag", "listen", "listen_port", "users", "tls", "transport"];
+  const reservedField = reservedFields.find((field) => Object.hasOwn(options, field));
+  if (reservedField) {
+    throw protocolError("PROTOCOL_OPTION_RESERVED", `附加 JSON 不能覆盖受管字段 ${reservedField}`);
+  }
+  if (type !== "hysteria") return options;
+  const upMbps = Number(options.up_mbps || 100);
+  const downMbps = Number(options.down_mbps || 100);
+  if (!Number.isFinite(upMbps) || upMbps <= 0 || !Number.isFinite(downMbps) || downMbps <= 0) {
+    throw protocolError("HYSTERIA_BANDWIDTH_REQUIRED", "Hysteria 上下行速率必须大于 0 Mbps");
+  }
+  return {
+    ...options,
+    up_mbps: upMbps,
+    down_mbps: downMbps
+  };
 }
 
 function protocolError(code, message, statusCode = 422) {

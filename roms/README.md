@@ -38,6 +38,7 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 - 设备指纹与设备数强制限制
 - 多 Runtime 节点编排和灰度发布
 - 完整的 outbound、endpoint、DNS 和路由规则图形化编辑器
+- 同一种协议的多个独立 inbound 实例
 - Mihomo 订阅转换
 - 邮件邀请、忘记密码、双因素认证和细粒度 RBAC
 
@@ -95,9 +96,11 @@ sing-box check -c data/sing-box/config.json
 6. 再切换到 `systemd`，确保 sing-box 服务读取 RayLink 生成的配置路径。
 7. 防火墙只开放 HTTPS 管理入口和实际代理端口。
 
-“一键安装”会在 macOS 上执行固定的 `brew install sing-box`，在 Linux 上执行
-sing-box 官方 `https://sing-box.app/install.sh`。生产服务账户必须拥有对应的包管理权限；
+“一键安装”会在 macOS 上执行固定的 `brew install sing-box`，在 Linux 上通过
+sing-box 官方 `https://sing-box.app/install.sh` 安装固定的 1.13.14。生产服务账户必须拥有对应的包管理权限；
 安装命令由后端白名单固定，不接受浏览器提交任意 shell。
+当前协议 schema 与 sing-box 1.13.x 绑定；检测到其他版本时会禁用协议保存，避免静默生成
+不兼容配置。
 
 可直接参考 [deploy/README.md](deploy/README.md) 和示例 systemd 单元。
 

@@ -330,9 +330,13 @@ function renderProtocols() {
     const enabled = profile?.enabled === true;
     const capability = protocol.available
       ? enabled ? "已启用" : protocol.formLevel === "advanced" ? "高级配置" : "可配置"
-      : protocol.platformSupported
-        ? `缺少 ${protocol.missingTags.join(", ") || "运行时"}`
-        : "当前平台不可用";
+      : !installation.installed
+        ? "未安装"
+        : !protocol.versionSupported
+          ? "版本不兼容"
+          : protocol.platformSupported
+            ? `缺少 ${protocol.missingTags.join(", ") || "运行时"}`
+            : "当前平台不可用";
     const statusClass = enabled ? "good" : protocol.available ? "neutral" : "warning";
     return `
       <article class="protocol-card ${enabled ? "enabled" : ""}">
@@ -728,9 +732,16 @@ function protocolDrawerMarkup(type) {
       ${protocol.transports ? `
         <p class="drawer-section-label">V2Ray Transport</p>
         <label class="field"><span>传输方式</span><select name="transportType">${transportOptions.map((value) => `<option value="${value}" ${profile.transport.type === value ? "selected" : ""}>${value === "none" ? "原生 TCP" : value}</option>`).join("")}</select></label>
-        <label class="field"><span>路径</span><input name="transportPath" value="${escapeHtml(profile.transport.path)}" placeholder="/raylink"></label>` : ""}
+        <label class="field"><span>HTTP / WS / HTTPUpgrade 路径</span><input name="transportPath" value="${escapeHtml(profile.transport.path)}" placeholder="/raylink"><small class="field-hint">QUIC 不使用路径；选择 gRPC 时填写下方 Service Name。</small></label>
+        <label class="field"><span>gRPC Service Name</span><input name="transportServiceName" value="${escapeHtml(profile.transport.serviceName)}" placeholder="raylink"></label>` : ""}
+      ${type === "hysteria" ? `
+        <p class="drawer-section-label">Hysteria 带宽</p>
+        <div class="quota-input">
+          <label class="field"><span>上传速率（Mbps）</span><input name="upMbps" type="number" min="1" value="${profile.options.up_mbps || 100}" required></label>
+          <label class="field"><span>下载速率（Mbps）</span><input name="downMbps" type="number" min="1" value="${profile.options.down_mbps || 100}" required></label>
+        </div>` : ""}
       <p class="drawer-section-label">高级选项</p>
-      <label class="field"><span>附加 JSON 字段</span><textarea name="options" rows="7" spellcheck="false">${escapeHtml(JSON.stringify(profile.options, null, 2))}</textarea><small class="field-hint">字段会合并进该 inbound；type、tag、监听地址和用户凭据仍由 RayLink 管理。</small><small class="field-error"></small></label>
+      <label class="field"><span>附加 JSON 字段</span><textarea name="options" rows="7" spellcheck="false">${escapeHtml(JSON.stringify(profile.options, null, 2))}</textarea><small class="field-hint">字段会合并进该 inbound；type、tag、监听、用户、TLS 和 Transport 由 RayLink 管理，不能在此覆盖。</small><small class="field-error"></small></label>
       <div class="source-note"><span>能力来源：sing-box ${escapeHtml(controlPlane.installation?.version || "未安装")}</span><a href="${escapeHtml(protocol.docsUrl)}" target="_blank" rel="noreferrer">查看官方字段 ↗</a></div>
     </form>`;
 }
@@ -933,6 +944,13 @@ async function saveProtocolForm(form) {
   }
   const protocol = controlPlane.protocolCatalog.find((item) => item.type === form.dataset.protocolType);
   const fieldValue = (name, fallback = "") => form.elements[name]?.value?.trim() ?? fallback;
+  if (protocol.type === "hysteria") {
+    advancedOptions = {
+      ...advancedOptions,
+      up_mbps: Number(fieldValue("upMbps", "100")),
+      down_mbps: Number(fieldValue("downMbps", "100"))
+    };
+  }
   await api(`/api/runtime/protocols/${encodeURIComponent(form.dataset.protocolType)}`, {
     method: "PATCH",
     body: JSON.stringify({
@@ -952,7 +970,8 @@ async function saveProtocolForm(form) {
       },
       transport: {
         type: fieldValue("transportType", "none"),
-        path: fieldValue("transportPath")
+        path: fieldValue("transportPath"),
+        serviceName: fieldValue("transportServiceName")
       },
       options: advancedOptions
     })

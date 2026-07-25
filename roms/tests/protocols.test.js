@@ -5,6 +5,8 @@ import {
   buildProtocolClientConfig,
   buildProtocolInbounds,
   defaultProtocolConfigs,
+  normalizeProtocolConfig,
+  protocolAvailability,
   protocolCatalog
 } from "../server/singbox/protocol-catalog.js";
 
@@ -100,5 +102,98 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.type === "selector").outbounds,
     ["raylink-shadowsocks", "raylink-vless"]
+  );
+});
+
+test("Hysteria client inherits the managed bandwidth values required by sing-box", () => {
+  const profiles = defaultProtocolConfigs().map((profile) => ({
+    ...profile,
+    enabled: profile.type === "hysteria",
+    tls: profile.type === "hysteria"
+      ? { ...profile.tls, mode: "certificate", serverName: "node.example.com" }
+      : profile.tls,
+    options: profile.type === "hysteria"
+      ? { up_mbps: 50, down_mbps: 100 }
+      : profile.options
+  }));
+  const config = buildProtocolClientConfig({
+    profiles,
+    credential: {
+      email: eligibleUsers[0].email,
+      runtimeUuid: eligibleUsers[0].runtimeUuid,
+      runtimePassword: eligibleUsers[0].runtimePassword,
+      serverPassword: "c2VydmVyLWtleS0xNg=="
+    },
+    server: "node.example.com"
+  });
+  const hysteria = config.outbounds.find((outbound) => outbound.type === "hysteria");
+
+  assert.equal(hysteria.up_mbps, 50);
+  assert.equal(hysteria.down_mbps, 100);
+});
+
+test("protocol availability is gated by schema version, platform and client build tags", () => {
+  const naive = protocolCatalog.find((protocol) => protocol.type === "naive");
+  const redirect = protocolCatalog.find((protocol) => protocol.type === "redirect");
+  const base = {
+    installed: true,
+    version: "1.13.14",
+    platform: "linux",
+    tags: []
+  };
+
+  assert.equal(protocolAvailability(naive, base).available, false);
+  assert.deepEqual(protocolAvailability(naive, base).missingTags, ["with_naive_outbound"]);
+  assert.equal(protocolAvailability(naive, { ...base, version: "1.12.0" }).versionSupported, false);
+  assert.equal(protocolAvailability(redirect, { ...base, platform: "win32" }).platformSupported, false);
+});
+
+test("transport schema emits service_name for gRPC and no path for QUIC", () => {
+  const profiles = defaultProtocolConfigs().map((profile) => {
+    if (profile.type === "vmess") {
+      return {
+        ...profile,
+        enabled: true,
+        transport: { type: "grpc", path: "/ignored", serviceName: "raylink" }
+      };
+    }
+    if (profile.type === "vless") {
+      return {
+        ...profile,
+        enabled: true,
+        transport: { type: "quic", path: "/ignored", serviceName: "" }
+      };
+    }
+    return { ...profile, enabled: false };
+  });
+  const [vmess, vless] = buildProtocolInbounds({
+    profiles,
+    users: eligibleUsers,
+    masterPassword: "c2VydmVyLWtleS0xNg=="
+  });
+
+  assert.deepEqual(vmess.transport, { type: "grpc", service_name: "raylink" });
+  assert.deepEqual(vless.transport, { type: "quic" });
+});
+
+test("advanced JSON cannot override fields managed by RayLink", () => {
+  assert.throws(
+    () => normalizeProtocolConfig({
+      ...defaultProtocolConfigs()[0],
+      options: { tls: { enabled: true } }
+    }),
+    (error) => error.code === "PROTOCOL_OPTION_RESERVED"
+  );
+});
+
+test("QUIC transport cannot be enabled without TLS", () => {
+  const vless = defaultProtocolConfigs().find((profile) => profile.type === "vless");
+  assert.throws(
+    () => normalizeProtocolConfig({
+      ...vless,
+      enabled: true,
+      transport: { type: "quic", path: "", serviceName: "" }
+    }),
+    (error) => error.code === "TRANSPORT_TLS_REQUIRED"
   );
 });
