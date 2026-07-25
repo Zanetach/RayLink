@@ -111,7 +111,7 @@ function navigate(viewName, updateHash = true) {
   }
 
   const headings = { dashboard: "仪表盘", users: "用户", subscriptions: "订阅配置", hosts: "主机", deploy: "配置发布", "not-found": "未找到" };
-  document.title = `${headings[resolvedView]} · Linehaul`;
+  document.title = `${headings[resolvedView]} · RayLink`;
   if (updateHash) history.pushState({ view: resolvedView }, "", `#/${resolvedView}`);
   elements.rail.classList.remove("open");
   elements.rail.toggleAttribute("inert", window.innerWidth <= 920);

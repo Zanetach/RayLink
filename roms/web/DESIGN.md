@@ -1,8 +1,8 @@
-# Linehaul interface system
+# RayLink interface system
 
 ## 1. Visual theme and atmosphere
 
-Linehaul is a precise, quiet operations console for teams running sing-box infrastructure. The interface uses a near-black graphite canvas, compact information density, low-radius geometry, and status color only when it conveys operational meaning.
+RayLink is a precise, quiet operations console for teams running sing-box infrastructure. The interface uses a near-black graphite canvas, compact information density, low-radius geometry, and status color only when it conveys operational meaning.
 
 The primary signature is the deployment trail: every configuration change is shown as a traceable sequence from draft to validation, snapshot, rollout, and health confirmation.
 

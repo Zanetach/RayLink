@@ -1,6 +1,6 @@
-# Linehaul web prototype
+# RayLink web prototype
 
-Linehaul 是一个面向 sing-box 多用户管理系统的高保真前端原型，当前覆盖：
+RayLink 是一个面向 sing-box 多用户管理系统的高保真前端原型，当前覆盖：
 
 - 运行仪表盘与节点健康状态
 - 用户、配额、有效期和协议权限管理
