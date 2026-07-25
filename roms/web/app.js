@@ -9,6 +9,11 @@ const clientCatalog = {
 
 const accountSummary = { totalUsers: 0, planAssignments: {} };
 
+const estimatedTrafficShape = {
+  download: [1.4, 1.1, 0.9, 0.8, 1.7, 3.2, 4.9, 6.6, 5.4, 7.1, 8.4, 7.6, 6.3],
+  upload: [0.3, 0.3, 0.2, 0.2, 0.5, 0.9, 1.4, 1.9, 1.6, 2.1, 2.4, 2.2, 1.8]
+};
+
 const controlPlane = {
   currentAdmin: null,
   hosts: [],
@@ -253,6 +258,7 @@ function renderDashboard() {
   setText("#dashboard-deployment-validation", latestAttempt?.status === "failed"
     ? `最近一次尝试失败：${latestAttempt.error}`
     : runtime.runtimeVersion ? `sing-box ${runtime.runtimeVersion}` : runtime.mode);
+  renderNetworkTrend({ activeUsers, ready });
   const policyStatus = activeDeployment ? `策略 ${activeDeployment.version} 已生效` : "尚未发布账号策略";
   const policyMeta = activeDeployment?.publishedAt
     ? `${activeDeployment.publisherUsername || "管理员"} · ${new Date(activeDeployment.publishedAt).toLocaleString("zh-CN")}`
@@ -261,6 +267,69 @@ function renderDashboard() {
   setText("#plan-policy-status", policyStatus);
   setText("#user-policy-meta", policyMeta);
   setText("#plan-policy-meta", policyMeta);
+}
+
+function renderNetworkTrend({ activeUsers, ready }) {
+  const downloadLine = document.querySelector("#dashboard-download-line");
+  const uploadLine = document.querySelector("#dashboard-upload-line");
+  const downloadArea = document.querySelector("#dashboard-download-area");
+  if (!downloadLine || !uploadLine || !downloadArea) return;
+
+  const demandFactor = ready && activeUsers > 0
+    ? Math.min(1.6, Math.max(0.55, activeUsers / 5))
+    : 0;
+  const download = estimatedTrafficShape.download.map((value) => value * demandFactor);
+  const upload = estimatedTrafficShape.upload.map((value) => value * demandFactor);
+  const peak = Math.max(...download, ...upload, 0);
+  const axisMax = Math.max(2, Math.ceil(peak / 2) * 2);
+  const downloadPath = trafficPath(download, axisMax);
+  const uploadPath = trafficPath(upload, axisMax);
+
+  downloadLine.setAttribute("d", downloadPath);
+  uploadLine.setAttribute("d", uploadPath);
+  downloadArea.setAttribute("d", `${downloadPath} L760 230 L0 230 Z`);
+
+  const setText = (selector, value) => {
+    const element = document.querySelector(selector);
+    if (element) element.textContent = value;
+  };
+  setText("#dashboard-download-total", `${estimatedGigabytes(download).toFixed(1)} GB`);
+  setText("#dashboard-upload-total", `${estimatedGigabytes(upload).toFixed(1)} GB`);
+  setText("#dashboard-traffic-peak", `${peak.toFixed(1)} Mbps`);
+  setText(
+    "#dashboard-traffic-current",
+    `${((download.at(-1) || 0) + (upload.at(-1) || 0)).toFixed(1)} Mbps`
+  );
+  setText("#dashboard-trend-updated", ready ? "刚刚更新" : "等待 Runtime");
+
+  const chartY = document.querySelector("#dashboard-chart-y");
+  if (chartY) {
+    chartY.innerHTML = [
+      axisMax,
+      axisMax * (2 / 3),
+      axisMax * (1 / 3),
+      0
+    ].map((value) => `<span>${value.toFixed(value % 1 === 0 ? 0 : 1)}</span>`).join("");
+  }
+}
+
+function trafficPath(values, maxValue) {
+  const width = 760;
+  const top = 20;
+  const bottom = 209;
+  return values.map((value, index) => {
+    const x = index * (width / Math.max(1, values.length - 1));
+    const y = bottom - (value / maxValue) * (bottom - top);
+    return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(" ");
+}
+
+function estimatedGigabytes(values) {
+  const intervalSeconds = 2 * 60 * 60;
+  const megabits = values.slice(1).reduce((total, value, index) => (
+    total + ((values[index] + value) / 2) * intervalSeconds
+  ), 0);
+  return megabits / 8 / 1000;
 }
 
 function renderHosts() {

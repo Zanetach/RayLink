@@ -163,6 +163,41 @@
               </div>
             </section>
           </div>
+
+          <section class="panel traffic-panel dashboard-network-trend" id="dashboard-network-trend" aria-labelledby="dashboard-network-trend-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">网络流量趋势</p>
+                <h2 id="dashboard-network-trend-title">最近 24 小时</h2>
+              </div>
+              <span class="status-badge neutral"><i></i>估算数据</span>
+            </div>
+            <div class="network-trend-summary" aria-label="网络流量摘要">
+              <span><small>24h 下行</small><strong id="dashboard-download-total">—</strong></span>
+              <span><small>24h 上行</small><strong id="dashboard-upload-total">—</strong></span>
+              <span><small>峰值速率</small><strong id="dashboard-traffic-peak">—</strong></span>
+              <span><small>当前速率</small><strong id="dashboard-traffic-current">—</strong></span>
+            </div>
+            <div class="chart-legend" aria-hidden="true">
+              <span><i class="line down"></i>下行</span>
+              <span><i class="line up"></i>上行</span>
+            </div>
+            <div class="traffic-chart" aria-label="最近 24 小时上行和下行速率趋势图">
+              <div class="chart-y" id="dashboard-chart-y"><span>—</span><span>—</span><span>—</span><span>0</span></div>
+              <svg viewBox="0 0 760 230" preserveAspectRatio="none" role="img">
+                <title>最近 24 小时网络流量趋势</title>
+                <g class="grid-lines"><path d="M0 20H760M0 83H760M0 146H760M0 209H760"/></g>
+                <path class="area-line down-area" id="dashboard-download-area" d="M0 209H760V230H0Z"/>
+                <path class="chart-line download" id="dashboard-download-line" d="M0 209H760"/>
+                <path class="chart-line upload" id="dashboard-upload-line" d="M0 209H760"/>
+              </svg>
+              <div class="chart-x"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>现在</span></div>
+            </div>
+            <div class="network-trend-note">
+              <span>当前根据用户累计用量生成趋势样例；接入 sing-box 流量采集器后切换为实时数据。</span>
+              <span id="dashboard-trend-updated">刚刚更新</span>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="view-users" data-view="users">
