@@ -26,7 +26,7 @@ RAYLINK_PUBLIC_IP=203.0.113.10 bash deploy/install-control-plane.sh
 从远程发布包安装时必须同时提供发布包地址和 SHA-256，安装器不会执行第三方动态脚本：
 
 ```bash
-RAYLINK_PACKAGE_URL=https://download.example.com/raylink-0.1.0.tar.gz \
+RAYLINK_PACKAGE_URL=https://github.com/Zanetach/RayLink/releases/download/v0.2.0/raylink-0.2.0-linux-amd64.tar.gz \
 RAYLINK_PACKAGE_SHA256=<发布页提供的校验值> \
 bash install-control-plane.sh
 ```
@@ -77,13 +77,13 @@ sudo bash deploy/build-runtime-artifact.sh 1.13.14 ./release-runtime amd64
 产物准备完成后构建正式安装包。默认要求 AMD64 和 ARM64 都齐全：
 
 ```bash
-bash deploy/package-release.sh 0.1.0
+bash deploy/package-release.sh 0.2.0
 ```
 
 若当前交付目标全部是 AMD/x86 VPS，可以只装配 AMD64：
 
 ```bash
-RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.1.0
+RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.2.0
 ```
 
 发布包只包含 `package.json`、`server/`、`web/` 和 `deploy/`，不会打包本地

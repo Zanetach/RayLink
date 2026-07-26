@@ -8,7 +8,7 @@ fail() {
 
 script_directory="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source_root="$(CDPATH= cd -- "$script_directory/.." && pwd)"
-release_version="${1:-0.1.0}"
+release_version="${1:-0.2.0}"
 output_path="${2:-$source_root/output/raylink-${release_version}.tar.gz}"
 release_arches="${RAYLINK_RELEASE_ARCHES:-amd64 arm64}"
 runtime_version="${RAYLINK_RUNTIME_VERSION:-1.13.14}"
@@ -17,6 +17,16 @@ printf '%s' "$release_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
   || fail "发布版本格式无效"
 command -v sha256sum >/dev/null 2>&1 || fail "需要 sha256sum"
 command -v tar >/dev/null 2>&1 || fail "需要 tar"
+command -v git >/dev/null 2>&1 || fail "需要 git"
+
+git_root="$(git -C "$source_root" rev-parse --show-toplevel 2>/dev/null)" \
+  || fail "发布包必须从 Git 工作区构建"
+source_prefix="$(git -C "$source_root" rev-parse --show-prefix)"
+source_prefix="${source_prefix%/}"
+git -C "$source_root" diff --quiet -- . \
+  || fail "应用源码存在未提交修改，请提交后再构建发布包"
+git -C "$source_root" diff --cached --quiet -- . \
+  || fail "应用源码存在已暂存但未提交的修改，请提交后再构建发布包"
 
 output_directory="$(dirname -- "$output_path")"
 install -d -m 0755 "$output_directory"
@@ -43,12 +53,24 @@ for runtime_arch in $release_arches; do
   printf '%s  %s\n' "$expected_runtime_sha256" "$runtime_artifact" | sha256sum -c -
 done
 
-cp -a \
-  "$source_root/package.json" \
-  "$source_root/server" \
-  "$source_root/web" \
-  "$source_root/deploy" \
-  "$package_root/"
+if [ -n "$source_prefix" ]; then
+  source_tree="HEAD:${source_prefix}"
+else
+  source_tree=HEAD
+fi
+git -C "$git_root" archive --format=tar "$source_tree" package.json server web deploy \
+  | tar -xf - -C "$package_root"
+
+install -d -m 0755 "$package_root/web/node/runtime"
+for runtime_arch in $release_arches; do
+  runtime_name="raylink-sing-box-${runtime_version}-linux-${runtime_arch}"
+  install -m 0755 \
+    "$source_root/web/node/runtime/$runtime_name" \
+    "$package_root/web/node/runtime/$runtime_name"
+  install -m 0644 \
+    "$source_root/web/node/runtime/${runtime_name}.sha256" \
+    "$package_root/web/node/runtime/${runtime_name}.sha256"
+done
 
 candidate_path="${output_path}.candidate"
 tar -czf "$candidate_path" -C "$temporary_root" "$(basename -- "$package_root")"
