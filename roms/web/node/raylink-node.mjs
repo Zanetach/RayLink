@@ -13,12 +13,12 @@ import {
   writeFile
 } from "node:fs/promises";
 import { arch, cpus, freemem, hostname, platform, totalmem } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const AGENT_VERSION = "0.3.0";
+const AGENT_VERSION = "0.4.0";
 
 async function pathExists(path) {
   try {
@@ -29,9 +29,12 @@ async function pathExists(path) {
   }
 }
 
-async function runCommand(command, args) {
+async function runCommand(command, args, options = {}) {
   try {
-    return await execFile(command, args, { timeout: 30_000 });
+    return await execFile(command, args, {
+      timeout: options.timeout || 30_000,
+      maxBuffer: options.maxBuffer || 1024 * 1024
+    });
   } catch (error) {
     const detail = String(error.stderr || error.stdout || error.message).trim();
     throw new Error(detail || `${command} 执行失败`);
@@ -135,6 +138,7 @@ export class NodeRuntimeAdapter {
     this.systemdUnit = options.systemdUnit || "raylink-sing-box.service";
     this.runtimeMode = options.runtimeMode || "systemd";
     this.commandRunner = options.commandRunner || runCommand;
+    this.healthCheckDelayMs = Math.max(0, Number(options.healthCheckDelayMs ?? 2_000) || 0);
   }
 
   get configPath() {
@@ -175,6 +179,177 @@ export class NodeRuntimeAdapter {
       };
     } finally {
       await rm(temporaryPath, { force: true });
+    }
+  }
+
+  async resolveBinaryPath() {
+    if (isAbsolute(this.binaryPath)) return this.binaryPath;
+    const { stdout } = await this.commandRunner("which", [this.binaryPath]);
+    const resolvedPath = String(stdout || "").trim().split(/\s+/)[0];
+    if (!resolvedPath || !isAbsolute(resolvedPath)) {
+      throw new Error("无法定位 sing-box 可执行文件");
+    }
+    return resolvedPath;
+  }
+
+  async restartAndVerify(expectedVersion) {
+    await this.commandRunner("systemctl", ["restart", this.systemdUnit]);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { stdout } = await this.commandRunner("systemctl", ["is-active", this.systemdUnit]);
+      if (String(stdout).trim() !== "active") {
+        throw new Error(`${this.systemdUnit} 未恢复运行`);
+      }
+      if (attempt < 2 && this.healthCheckDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, this.healthCheckDelayMs));
+      }
+    }
+    const version = await this.commandRunner(this.binaryPath, ["version"]);
+    const runtimeVersion = version.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown";
+    if (expectedVersion && runtimeVersion !== expectedVersion) {
+      throw new Error(
+        `${this.systemdUnit} 运行版本不匹配：期望 ${expectedVersion}，实际 ${runtimeVersion}`
+      );
+    }
+  }
+
+  async installOfficialVersion(version) {
+    await this.commandRunner("sh", [
+      "-c",
+      `curl -fsSL https://sing-box.app/install.sh | sh -s -- --version ${version}`
+    ], {
+      timeout: 10 * 60 * 1000,
+      maxBuffer: 8 * 1024 * 1024
+    });
+  }
+
+  async commandState(action, unit) {
+    try {
+      const { stdout } = await this.commandRunner("systemctl", [action, unit]);
+      return String(stdout || "").trim();
+    } catch (error) {
+      return String(error.stdout || error.message || "").trim();
+    }
+  }
+
+  async inspectConflictingSystemdService() {
+    if (this.runtimeMode !== "systemd" || this.systemdUnit === "sing-box.service") return null;
+    const units = await this.commandRunner(
+      "systemctl",
+      ["list-unit-files", "sing-box.service", "--no-legend"]
+    );
+    if (!String(units.stdout || "").includes("sing-box.service")) {
+      return { exists: false, enabled: false, active: false };
+    }
+    return {
+      exists: true,
+      enabled: await this.commandState("is-enabled", "sing-box.service") === "enabled",
+      active: await this.commandState("is-active", "sing-box.service") === "active"
+    };
+  }
+
+  async disableConflictingSystemdService() {
+    if (this.runtimeMode !== "systemd" || this.systemdUnit === "sing-box.service") return;
+    const units = await this.commandRunner(
+      "systemctl",
+      ["list-unit-files", "sing-box.service", "--no-legend"]
+    );
+    if (String(units.stdout || "").includes("sing-box.service")) {
+      await this.commandRunner("systemctl", ["disable", "--now", "sing-box.service"]);
+    }
+  }
+
+  async restoreConflictingSystemdService(previousState) {
+    if (!previousState) return;
+    const units = await this.commandRunner(
+      "systemctl",
+      ["list-unit-files", "sing-box.service", "--no-legend"]
+    );
+    if (!String(units.stdout || "").includes("sing-box.service")) return;
+    await this.commandRunner(
+      "systemctl",
+      [previousState.enabled ? "enable" : "disable", "sing-box.service"]
+    );
+    await this.commandRunner(
+      "systemctl",
+      [previousState.active ? "start" : "stop", "sing-box.service"]
+    );
+  }
+
+  async upgrade(task) {
+    const targetVersion = String(task?.targetVersion || "");
+    if (!/^1\.13\.\d+$/.test(targetVersion)) {
+      throw new Error("RayLink 当前只支持升级到 sing-box 1.13.x 稳定版本");
+    }
+    await mkdir(this.dataDir, { recursive: true, mode: 0o750 });
+    const resolvedBinaryPath = await this.resolveBinaryPath();
+    const backupPath = join(this.dataDir, "sing-box.previous.binary");
+    const previous = await this.commandRunner(this.binaryPath, ["version"]);
+    const previousVersion = previous.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown";
+    if (previousVersion === targetVersion) {
+      return { runtimeVersion: targetVersion, previousVersion, alreadyCurrent: true, rolledBack: false };
+    }
+    if (!await pathExists(this.configPath)) {
+      throw new Error("当前 Runtime 没有活动配置，请先完成配置发布");
+    }
+    const conflictingServiceState = await this.inspectConflictingSystemdService();
+    if (conflictingServiceState?.active) {
+      throw new Error(
+        "检测到非 RayLink 管理的 sing-box.service 正在运行，请先确认并停止该服务"
+      );
+    }
+    await copyFile(resolvedBinaryPath, backupPath);
+    await chmod(backupPath, 0o700);
+
+    try {
+      await this.installOfficialVersion(targetVersion);
+      const installed = await this.commandRunner(this.binaryPath, ["version"]);
+      const runtimeVersion = installed.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown";
+      if (runtimeVersion !== targetVersion) {
+        throw new Error(`升级后版本不匹配：期望 ${targetVersion}，实际 ${runtimeVersion}`);
+      }
+      const hasConfig = await pathExists(this.configPath);
+      if (hasConfig) {
+        await this.commandRunner(this.binaryPath, ["check", "-c", this.configPath]);
+        await this.disableConflictingSystemdService();
+        if (this.runtimeMode === "systemd") await this.restartAndVerify(targetVersion);
+      }
+      return { runtimeVersion, previousVersion, rolledBack: false };
+    } catch (error) {
+      let packageMetadataRestored = true;
+      try {
+        if (/^\d+\.\d+\.\d+$/.test(previousVersion)) {
+          try {
+            await this.installOfficialVersion(previousVersion);
+          } catch {
+            packageMetadataRestored = false;
+          }
+        }
+        await copyFile(backupPath, resolvedBinaryPath);
+        await chmod(resolvedBinaryPath, 0o755);
+        await this.restoreConflictingSystemdService(conflictingServiceState);
+        if (this.runtimeMode === "systemd" && await pathExists(this.configPath)) {
+          await this.restartAndVerify(previousVersion);
+        }
+      } catch (rollbackError) {
+        const failure = new Error(`sing-box 升级失败且回滚失败：${rollbackError.message}`);
+        failure.rolledBack = false;
+        failure.previousVersion = previousVersion;
+        throw failure;
+      }
+      if (!packageMetadataRestored) {
+        const failure = new Error(
+          `sing-box 升级失败，已恢复 ${previousVersion} 二进制和服务，但包管理器元数据未能降级`
+        );
+        failure.rolledBack = true;
+        failure.packageMetadataRestored = false;
+        failure.previousVersion = previousVersion;
+        throw failure;
+      }
+      const failure = new Error(`sing-box 升级失败，已回滚到 ${previousVersion}：${error.message}`);
+      failure.rolledBack = true;
+      failure.packageMetadataRestored = true;
+      failure.previousVersion = previousVersion;
+      throw failure;
     }
   }
 }
@@ -304,11 +479,21 @@ export class RayLinkNode {
     const task = await this.authenticatedRequest("/api/node/tasks/next");
     if (!task) return false;
     try {
-      if (task.kind !== "publish-config") throw new Error(`不支持的节点任务：${task.kind}`);
-      const result = await this.runtimeAdapter.publish(task.payload);
+      const result = task.kind === "publish-config"
+        ? await this.runtimeAdapter.publish(task.payload)
+        : task.kind === "upgrade-runtime"
+          ? await this.runtimeAdapter.upgrade(task.payload)
+          : (() => { throw new Error(`不支持的节点任务：${task.kind}`); })();
       await this.completeTask(task.id, task.attempt, "succeeded", result);
     } catch (error) {
-      await this.completeTask(task.id, task.attempt, "failed", { error: error.message });
+      await this.completeTask(task.id, task.attempt, "failed", {
+        error: error.message,
+        ...(error.previousVersion ? { previousVersion: error.previousVersion } : {}),
+        ...(typeof error.rolledBack === "boolean" ? { rolledBack: error.rolledBack } : {}),
+        ...(typeof error.packageMetadataRestored === "boolean"
+          ? { packageMetadataRestored: error.packageMetadataRestored }
+          : {})
+      });
     }
     return true;
   }

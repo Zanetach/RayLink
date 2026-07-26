@@ -1,7 +1,7 @@
 const users = [];
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
-const requiredNodeAgentVersion = "0.3.0";
+const requiredNodeAgentVersion = "0.4.0";
 
 const clientCatalog = {
   "mihomo": { name: "Mihomo", platforms: "macOS / Windows / Android", action: "一键导入" },
@@ -17,6 +17,7 @@ const controlPlane = {
   runtime: null,
   runtimePreview: null,
   installation: null,
+  runtimeUpdate: null,
   protocols: [],
   protocolCatalog: [],
   deployments: [],
@@ -119,6 +120,17 @@ function labelToScope(label) {
   return label.split(" + ").map((name) => Object.entries(scopeLabels).find(([, value]) => value === name)?.[0] || name);
 }
 
+function versionIsOlder(currentVersion, targetVersion) {
+  const current = String(currentVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  const target = String(targetVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!current || !target) return false;
+  for (let index = 1; index <= 3; index += 1) {
+    const difference = Number(target[index]) - Number(current[index]);
+    if (difference !== 0) return difference > 0;
+  }
+  return false;
+}
+
 function applyBootstrap(data) {
   users.splice(0, users.length, ...data.users.map((user) => ({
     id: user.id,
@@ -139,6 +151,7 @@ function applyBootstrap(data) {
   controlPlane.runtime = data.runtime;
   controlPlane.runtimePreview = data.runtimePreview;
   controlPlane.installation = data.installation;
+  controlPlane.runtimeUpdate = data.runtimeUpdate;
   controlPlane.protocols = data.protocols;
   controlPlane.protocolCatalog = data.protocolCatalog;
   controlPlane.deployments = data.deployments;
@@ -210,6 +223,13 @@ function renderDashboard() {
       && Date.now() - new Date(candidate.telemetry.updatedAt).getTime() <= 30_000;
   });
   const activeUsers = users.filter((user) => ["active", "warning"].includes(user.state)).length;
+  const update = controlPlane.runtimeUpdate;
+  const upgradableHosts = update?.latestVersion
+    ? hosts.filter((candidate) => versionIsOlder(
+      candidate.id === "local" ? controlPlane.installation?.version : candidate.runtimeVersion,
+      update.latestVersion
+    ))
+    : [];
   const setText = (selector, value) => {
     const element = document.querySelector(selector);
     if (element) element.textContent = value;
@@ -231,6 +251,15 @@ function renderDashboard() {
   setText("#dashboard-deployment-count", controlPlane.deployments.length);
   setText("#dashboard-latest-version", activeDeployment?.version || "尚未发布");
   setText("#dashboard-host-name", `${hosts.length} 台主机`);
+  const updateNotice = document.querySelector("#runtime-update-notice");
+  if (updateNotice) {
+    updateNotice.hidden = update?.compatible === false || upgradableHosts.length === 0;
+    setText("#runtime-update-notice-title", `sing-box ${update?.latestVersion || ""} 可升级`);
+    setText(
+      "#runtime-update-notice-copy",
+      `${upgradableHosts.length} 台 Runtime 可升级；系统会先备份并校验，失败自动恢复旧版本。`
+    );
+  }
   renderDashboardNodes({ hosts, runtime, ready });
   setText("#dashboard-deployment-version", activeDeployment?.version || "尚未发布");
   const deploymentStatus = document.querySelector("#dashboard-deployment-status");
@@ -459,6 +488,12 @@ function renderHosts() {
       ? (healthy ? "运行中" : runtime.state === "staged" ? "已暂存" : "待配置")
       : host.deploymentSync?.status === "revocation-pending"
         ? "撤权待同步"
+        : host.runtimeUpgrade?.pending
+          ? "Runtime 升级中"
+        : host.runtimeUpgrade?.status === "failed"
+          ? host.runtimeUpgrade.rolledBack && host.runtimeUpgrade.packageMetadataRestored !== false
+            ? "升级失败·已回滚"
+            : "升级失败·需检查"
         : host.deploymentSync?.status === "pending"
           ? "配置待同步"
       : host.agentVersion && host.agentVersion !== requiredNodeAgentVersion
@@ -466,7 +501,15 @@ function renderHosts() {
         : ({ pending: "等待接入", online: "在线", degraded: "发布失败" }[host.status] || "离线");
     const statusClass = host.deploymentSync?.status === "revocation-pending"
       ? "danger"
-      : healthy ? "good" : host.status === "degraded" || host.deploymentSync?.status === "pending" ? "warning" : "neutral";
+      : host.runtimeUpgrade?.status === "failed"
+        ? host.runtimeUpgrade.rolledBack && host.runtimeUpgrade.packageMetadataRestored !== false
+          ? "warning"
+          : "danger"
+      : healthy && !host.runtimeUpgrade?.pending
+        ? "good"
+        : host.status === "degraded" || host.deploymentSync?.status === "pending" || host.runtimeUpgrade?.pending
+          ? "warning"
+          : "neutral";
     const lastSeen = host.lastSeenAt
       ? new Intl.DateTimeFormat("zh-CN", {
           month: "2-digit",
@@ -665,14 +708,34 @@ function renderDiagnostics() {
 
 function renderSystem() {
   const installation = controlPlane.installation || { installed: false, version: null, platform: "unknown", architecture: null };
+  const update = controlPlane.runtimeUpdate;
   const version = document.querySelector("#system-version");
   const build = document.querySelector("#system-build");
+  const updateState = document.querySelector("#system-update-state");
+  const upgradeButton = document.querySelector("#upgrade-local-runtime");
   if (version) version.textContent = installation.installed
     ? `sing-box ${installation.version || ""}`
     : "sing-box 未安装";
   if (build) build.textContent = installation.installed
     ? `${installation.platform} / ${installation.architecture || "unknown"} · ${installation.tags?.length || 0} 个 build tags`
     : "可在服务工作区执行一键安装。";
+  if (updateState) {
+    updateState.textContent = update?.status === "error"
+      ? `检查失败：${update.error || "无法连接官方发布源"}`
+      : update?.blockedReason
+        ? `发现 ${update.latestVersion}，但${update.blockedReason}。`
+        : update?.updateAvailable
+          ? `发现稳定版 ${update.latestVersion}。升级前会备份二进制并验证现有配置。`
+          : update?.status === "ready"
+            ? `当前已是最新兼容稳定版${update.latestVersion ? `（${update.latestVersion}）` : ""}。`
+            : "尚未检查稳定版更新。";
+  }
+  if (upgradeButton) {
+    upgradeButton.hidden = update?.updateAvailable !== true || installation.platform !== "linux";
+    upgradeButton.textContent = update?.latestVersion
+      ? `安全升级到 ${update.latestVersion}`
+      : "安全升级";
+  }
 }
 
 function formatDate(value) {
@@ -863,6 +926,13 @@ function hostDrawerMarkup(hostId) {
   const nodeNeedsUpgrade = isRemote
     && host.enrolledAt
     && host.agentVersion !== requiredNodeAgentVersion;
+  const runtimeUpdate = controlPlane.runtimeUpdate;
+  const runtimeCanUpgrade = isRemote
+    && !nodeNeedsUpgrade
+    && runtimeUpdate?.compatible !== false
+    && runtimeUpdate?.latestVersion
+    && host.runtimeUpgrade?.pending !== true
+    && versionIsOlder(host.runtimeVersion, runtimeUpdate.latestVersion);
   const nodeUpgradeCommand = [
     'raylink_node_tmp="$(mktemp)"',
     `curl -fsSL ${shellQuote(`${location.origin}/node/raylink-node.mjs`)} -o "$raylink_node_tmp"`,
@@ -894,6 +964,15 @@ function hostDrawerMarkup(hostId) {
         : ""}
       ${nodeNeedsUpgrade
         ? `<p class="drawer-section-label">Node 升级</p><p class="field-hint">当前 ${escapeHtml(host.agentVersion || "旧版")} 不支持正式版任务租约和服务遥测。控制面会暂停向该节点派发配置，升级后自动恢复。</p><pre class="advanced-preview"><code id="node-upgrade-command">${escapeHtml(nodeUpgradeCommand)}</code></pre><button type="button" class="button secondary" data-copy-target="node-upgrade-command">${icon("copy")}复制升级命令</button>`
+        : ""}
+      ${runtimeCanUpgrade
+        ? `<p class="drawer-section-label">Runtime 升级</p><p class="field-hint">可从 ${escapeHtml(host.runtimeVersion || "未知版本")} 升级到稳定版 ${escapeHtml(runtimeUpdate.latestVersion)}。节点会备份当前二进制、校验现有配置并在失败时自动回滚。</p><button type="button" class="button primary" data-upgrade-host="${escapeHtml(host.id)}">${icon("arrow")}升级 sing-box</button>`
+        : ""}
+      ${isRemote && host.runtimeUpgrade?.pending
+        ? `<p class="drawer-section-label">Runtime 升级</p><div class="switch-row"><div><strong>升级任务执行中</strong><small>节点正在备份、安装、校验并重启服务。成功后心跳会更新版本；失败会自动恢复旧二进制。</small></div><span class="status-badge warning"><i></i>处理中</span></div>`
+        : ""}
+      ${isRemote && host.runtimeUpgrade?.status === "failed"
+        ? `<p class="drawer-section-label">最近升级结果</p><div class="switch-row"><div><strong>${host.runtimeUpgrade.rolledBack ? `升级失败，已恢复 ${escapeHtml(host.runtimeUpgrade.previousVersion || "旧版本")}` : "升级与自动回滚失败"}</strong><small>${escapeHtml(host.runtimeUpgrade.error || "节点未返回错误详情")}${host.runtimeUpgrade.packageMetadataRestored === false ? " · 包管理器元数据需人工检查" : ""}${host.runtimeUpgrade.finishedAt ? ` · ${escapeHtml(new Date(host.runtimeUpgrade.finishedAt).toLocaleString("zh-CN"))}` : ""}</small></div><span class="status-badge ${host.runtimeUpgrade.rolledBack && host.runtimeUpgrade.packageMetadataRestored !== false ? "warning" : "danger"}"><i></i>${host.runtimeUpgrade.rolledBack && host.runtimeUpgrade.packageMetadataRestored !== false ? "已回滚" : "需人工处理"}</span></div>`
         : ""}
     </form>`;
 }
@@ -1408,6 +1487,81 @@ async function installSingBox() {
   }
 }
 
+async function checkRuntimeUpdate() {
+  const button = document.querySelector("[data-check-runtime-update]");
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = `${icon("refresh")} 正在检查`;
+  }
+  try {
+    controlPlane.runtimeUpdate = await api("/api/runtime/update");
+    renderSystem();
+    const update = controlPlane.runtimeUpdate;
+    showToast(
+      update.updateAvailable ? "发现 sing-box 更新" : "版本检查完成",
+      update.blockedReason
+        || (update.updateAvailable
+          ? `稳定版 ${update.latestVersion} 可以安全升级。`
+          : "当前已是最新兼容稳定版。")
+    );
+  } catch (error) {
+    showToast("检查更新失败", error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = `${icon("refresh")} 检查更新`;
+    }
+  }
+}
+
+async function upgradeLocalRuntime() {
+  const button = document.querySelector("#upgrade-local-runtime");
+  if (!button || button.hidden || button.disabled) return;
+  if (!window.confirm(
+    "升级会重启本机 sing-box。RayLink 控制面、用户和订阅不会中断，但连接到这台 Runtime 的现有会话可能短暂重连。确认继续？"
+  )) return;
+  button.disabled = true;
+  button.innerHTML = `${icon("refresh")} 正在安全升级`;
+  try {
+    const result = await api("/api/runtime/upgrade", { method: "POST" });
+    await loadBootstrap();
+    showToast(
+      "sing-box 升级完成",
+      `已从 ${result.previousVersion} 升级到 ${result.version}，现有配置与服务检查通过。`
+    );
+  } catch (error) {
+    showToast(
+      error.code === "RUNTIME_UPGRADE_ROLLED_BACK" ? "升级失败，已自动回滚" : "升级失败",
+      error.message
+    );
+  } finally {
+    button.disabled = false;
+    renderSystem();
+  }
+}
+
+async function upgradeRemoteRuntime(hostId) {
+  const button = document.querySelector(`[data-upgrade-host="${CSS.escape(hostId)}"]`);
+  if (!window.confirm(
+    "升级会重启该主机的 sing-box。其他 Runtime 和 RayLink 控制面继续工作，但当前连接到该主机的会话可能短暂重连。确认继续？"
+  )) return;
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = `${icon("refresh")} 正在加入升级队列`;
+  }
+  try {
+    const queued = await api(`/api/hosts/${encodeURIComponent(hostId)}/runtime-upgrade`, {
+      method: "POST"
+    });
+    await loadBootstrap();
+    openHost(hostId);
+    showToast("远程升级已下发", `节点将升级到 ${queued.targetVersion}，失败时自动恢复旧版本。`);
+  } catch (error) {
+    showToast("远程升级失败", error.message);
+    if (button) button.disabled = false;
+  }
+}
+
 async function generateRealityKeypair(form) {
   const button = form.querySelector("[data-generate-reality]");
   button.disabled = true;
@@ -1465,6 +1619,12 @@ function openAdvancedConfig() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-open-runtime-updates]")) {
+    navigate("system");
+    selectWorkspaceTab("system", "maintenance");
+    return;
+  }
+
   const viewButton = event.target.closest("[data-view-target]");
   if (viewButton) {
     navigate(viewButton.dataset.viewTarget);
@@ -1560,6 +1720,22 @@ document.addEventListener("click", async (event) => {
     } catch (error) {
       showToast("诊断失败", error.message);
     }
+    return;
+  }
+
+  if (event.target.closest("[data-check-runtime-update]")) {
+    await checkRuntimeUpdate();
+    return;
+  }
+
+  if (event.target.closest("#upgrade-local-runtime")) {
+    await upgradeLocalRuntime();
+    return;
+  }
+
+  const hostUpgradeButton = event.target.closest("[data-upgrade-host]");
+  if (hostUpgradeButton) {
+    await upgradeRemoteRuntime(hostUpgradeButton.dataset.upgradeHost);
     return;
   }
 

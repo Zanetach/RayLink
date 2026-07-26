@@ -130,6 +130,12 @@
             </button>
           </div>
 
+          <section class="notice-card" id="runtime-update-notice" hidden>
+            <span><svg><use href="#i-refresh"/></svg></span>
+            <div><strong id="runtime-update-notice-title">发现 sing-box 更新</strong><p id="runtime-update-notice-copy">可以进入系统页面安全升级。</p></div>
+            <button class="button secondary" data-open-runtime-updates>查看升级</button>
+          </section>
+
           <section class="status-band" aria-label="运行状态摘要">
             <article><span>Runtime</span><strong id="dashboard-runtime-count">0<small>/ 1</small></strong><em id="dashboard-runtime-mode">等待发布</em></article>
             <article><span>可用用户</span><strong id="dashboard-eligible-users">0</strong><em>已写入配置</em></article>
@@ -441,7 +447,7 @@
             <article class="panel system-card"><span class="resource-icon">R</span><div><p class="eyebrow">Reality</p><h2>密钥按协议生成</h2><p>VLESS 等协议可在编辑抽屉中一键生成 Reality 密钥对。</p></div></article>
           </section>
           <section class="system-card-grid" data-system-panel="maintenance" hidden>
-            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><p class="eyebrow">版本</p><h2 id="system-version">检测中</h2><p id="system-build">正在读取当前二进制构建。</p><button class="button secondary" data-view-target="services">查看协议兼容性</button></div></article>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><p class="eyebrow">版本</p><h2 id="system-version">检测中</h2><p id="system-build">正在读取当前二进制构建。</p><p id="system-update-state">尚未检查稳定版更新。</p><div class="heading-actions"><button class="button secondary" data-check-runtime-update><svg><use href="#i-refresh"/></svg>检查更新</button><button class="button primary" id="upgrade-local-runtime" hidden><svg><use href="#i-arrow"/></svg>安全升级</button></div></div></article>
             <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-rollback"/></svg></span><div><p class="eyebrow">备份</p><h2>发布快照</h2><p>每次发布都会保留不可变配置快照，可在运维工作区回滚。</p><button class="button secondary" data-view-target="operations">查看发布记录</button></div></article>
           </section>
           <section class="resource-panel" data-system-panel="advanced" hidden>

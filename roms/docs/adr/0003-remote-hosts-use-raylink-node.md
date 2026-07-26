@@ -14,4 +14,14 @@ persistent exponential backoff until the Host confirms success. The control plan
 an offline Host cannot be made safe instantaneously, but it applies the latest revocation before normal queued work
 as soon as RayLink Node reconnects.
 
-Batched rollout, maintenance windows, remote historical rollback, certificate distribution, and traffic telemetry remain separate decisions.
+RayLink Node 0.4 also accepts an explicit `upgrade-runtime` task. It backs up the currently resolved
+sing-box binary, installs only a control-plane-approved stable version, checks the existing active
+configuration with the candidate binary, disables a conflicting package-managed systemd unit, restarts
+the RayLink-managed Runtime, and verifies that the service remains active across a bounded health window and
+still reports the expected version. A failed validation or restart restores the previous package version,
+exact binary, and prior systemd service state before reporting task failure. The control plane keeps the latest
+upgrade target, terminal state, rollback result and error visible on the Host. Reinstalling RayLink Node preserves an already
+installed compatible 1.13.x Runtime instead of downgrading it.
+
+Runtime upgrades are administrator-triggered and are not entitlement-critical tasks. Batched rollout,
+maintenance windows, certificate distribution, and traffic telemetry remain separate decisions.

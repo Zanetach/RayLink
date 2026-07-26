@@ -62,13 +62,16 @@ installed_sing_box_version=""
 if command -v sing-box >/dev/null 2>&1; then
   installed_sing_box_version="$(sing-box version 2>/dev/null | awk 'NR == 1 { print $3 }')"
 fi
-if [ "$installed_sing_box_version" != "$SING_BOX_VERSION" ]; then
-  curl -fsSL https://sing-box.app/install.sh | sh -s -- --version "$SING_BOX_VERSION"
-fi
+case "$installed_sing_box_version" in
+  1.13.*) ;;
+  *) curl -fsSL https://sing-box.app/install.sh | sh -s -- --version "$SING_BOX_VERSION" ;;
+esac
 sing_box_bin="$(command -v sing-box)"
 actual_sing_box_version="$("$sing_box_bin" version 2>/dev/null | awk 'NR == 1 { print $3 }')"
-[ "$actual_sing_box_version" = "$SING_BOX_VERSION" ] \
-  || fail "sing-box 版本不匹配：期望 $SING_BOX_VERSION，实际 ${actual_sing_box_version:-未知}"
+case "$actual_sing_box_version" in
+  1.13.*) ;;
+  *) fail "sing-box 版本不兼容：要求 1.13.x，实际 ${actual_sing_box_version:-未知}" ;;
+esac
 
 # The official package can enable its own runtime unit. RayLink owns the
 # configuration lifecycle, so keep exactly one sing-box service active.

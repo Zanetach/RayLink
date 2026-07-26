@@ -19,7 +19,7 @@ import { LocalTelemetryCollector } from "./telemetry.js";
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
-const REQUIRED_NODE_AGENT_VERSION = "0.3.0";
+const REQUIRED_NODE_AGENT_VERSION = "0.4.0";
 const defaultWebDir = fileURLToPath(new URL("../web", import.meta.url));
 
 const contentTypes = {
@@ -83,6 +83,17 @@ function httpError(code, message, statusCode) {
   error.code = code;
   error.statusCode = statusCode;
   return error;
+}
+
+function versionIsOlder(currentVersion, targetVersion) {
+  const current = String(currentVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  const target = String(targetVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!current || !target) return false;
+  for (let index = 1; index <= 3; index += 1) {
+    const difference = Number(target[index]) - Number(current[index]);
+    if (difference !== 0) return difference > 0;
+  }
+  return false;
 }
 
 function sendSubscriptionJson(request, response, body) {
@@ -189,6 +200,23 @@ export async function createRayLinkApp(options) {
   let telemetrySamplePromise = null;
   let entitlementReconcileTimer = null;
   let ruleSetRefreshTimer = null;
+  let runtimeUpdateTimer = null;
+  let localRuntimeOperation = null;
+  const runLocalRuntimeOperation = async (operation, callback) => {
+    if (localRuntimeOperation) {
+      throw httpError(
+        "RUNTIME_OPERATION_IN_PROGRESS",
+        `Runtime 正在执行${localRuntimeOperation}，请完成后再试`,
+        409
+      );
+    }
+    localRuntimeOperation = operation;
+    try {
+      return await callback();
+    } finally {
+      localRuntimeOperation = null;
+    }
+  };
   const sampleLocalTelemetry = () => {
     if (telemetrySamplePromise) return telemetrySamplePromise;
     telemetrySamplePromise = (async () => {
@@ -204,8 +232,24 @@ export async function createRayLinkApp(options) {
     return telemetrySamplePromise;
   };
   const installer = options.installer || new SingBoxInstaller({
-    binaryPath: options.singBoxBinary || "sing-box"
+    binaryPath: options.singBoxBinary || "sing-box",
+    dataDir: options.dataDir,
+    activeConfigPath: runtimeAdapter.activePath,
+    runtimeMode: options.runtimeMode || "dry-run",
+    systemdUnit: options.systemdUnit || "sing-box.service",
+    fetchImpl: options.runtimeReleaseFetch
   });
+  const runtimeUpdateCheckIntervalMs = Math.max(
+    0,
+    Number(options.runtimeUpdateCheckIntervalMs ?? 6 * 60 * 60 * 1000)
+  );
+  const refreshRuntimeUpdate = () => {
+    if (typeof installer.checkForUpdates !== "function") return Promise.resolve(null);
+    return installer.checkForUpdates().catch((error) => {
+      console.warn(`[RayLink] sing-box update check failed: ${error.message}`);
+      return null;
+    });
+  };
   const buildClientConfigForUser = async (userId) => {
     const credential = store.clientCredential(userId);
     if (!credential) throw httpError("USER_NOT_FOUND", "用户不存在", 404);
@@ -250,7 +294,10 @@ export async function createRayLinkApp(options) {
   };
   const reconcileUserEntitlements = async (publisherAdminId) => {
     try {
-      const result = await runtimeManager.reconcile(publisherAdminId);
+      const result = await runLocalRuntimeOperation(
+        "配置同步",
+        () => runtimeManager.reconcile(publisherAdminId)
+      );
       return {
         status: result.changed ? "published" : "current",
         reason: result.reason || null
@@ -542,6 +589,9 @@ export async function createRayLinkApp(options) {
             runtimePreview: runtimeManager.preview(),
             deployments: store.listDeployments(),
             installation,
+            runtimeUpdate: typeof installer.releaseStatus === "function"
+              ? installer.releaseStatus()
+              : null,
             protocols: store.listProtocolConfigs(),
             protocolCatalog: protocolCatalog.map((protocol) => protocolAvailability(protocol, installation))
           });
@@ -559,7 +609,42 @@ export async function createRayLinkApp(options) {
         }
 
         if (request.method === "POST" && url.pathname === "/api/runtime/install") {
-          sendJson(response, 200, await installer.install());
+          sendJson(
+            response,
+            200,
+            await runLocalRuntimeOperation("安装", () => installer.install())
+          );
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/runtime/update") {
+          if (typeof installer.checkForUpdates !== "function") {
+            throw httpError("UPDATE_CHECK_UNAVAILABLE", "当前 Runtime 不支持在线版本检查", 501);
+          }
+          sendJson(response, 200, await installer.checkForUpdates());
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/runtime/upgrade") {
+          if (
+            typeof installer.checkForUpdates !== "function"
+            || typeof installer.upgrade !== "function"
+          ) {
+            throw httpError("RUNTIME_UPGRADE_UNAVAILABLE", "当前 Runtime 不支持在线升级", 501);
+          }
+          const update = await installer.checkForUpdates();
+          if (!update.updateAvailable) {
+            throw httpError(
+              update.blockedReason ? "RUNTIME_UPGRADE_INCOMPATIBLE" : "RUNTIME_ALREADY_CURRENT",
+              update.blockedReason || "当前 sing-box 已是可用的最新稳定版本",
+              409
+            );
+          }
+          const upgraded = await runLocalRuntimeOperation(
+            "在线升级",
+            () => installer.upgrade(update.latestVersion)
+          );
+          sendJson(response, 200, upgraded);
           return;
         }
 
@@ -630,7 +715,11 @@ export async function createRayLinkApp(options) {
         }
 
         if (request.method === "POST" && url.pathname === "/api/deployments") {
-          sendJson(response, 201, await runtimeManager.publish(admin.id));
+          sendJson(
+            response,
+            201,
+            await runLocalRuntimeOperation("配置发布", () => runtimeManager.publish(admin.id))
+          );
           return;
         }
 
@@ -639,7 +728,10 @@ export async function createRayLinkApp(options) {
           sendJson(
             response,
             201,
-            await runtimeManager.rollback(decodeURIComponent(rollbackMatch[1]), admin.id)
+            await runLocalRuntimeOperation(
+              "配置回滚",
+              () => runtimeManager.rollback(decodeURIComponent(rollbackMatch[1]), admin.id)
+            )
           );
           return;
         }
@@ -678,6 +770,49 @@ export async function createRayLinkApp(options) {
             201,
             store.rotateNodeEnrollmentToken(decodeURIComponent(enrollmentTokenMatch[1]))
           );
+          return;
+        }
+
+        const runtimeUpgradeMatch = url.pathname.match(/^\/api\/hosts\/([^/]+)\/runtime-upgrade$/);
+        if (request.method === "POST" && runtimeUpgradeMatch) {
+          const hostId = decodeURIComponent(runtimeUpgradeMatch[1]);
+          const host = store.getHost(hostId);
+          if (!host || host.kind !== "remote") {
+            throw httpError("REMOTE_HOST_NOT_FOUND", "远程主机不存在", 404);
+          }
+          if (!host.enrolledAt) {
+            throw httpError("NODE_NOT_ENROLLED", "远程主机尚未完成 RayLink Node 接入", 409);
+          }
+          if (host.agentVersion !== REQUIRED_NODE_AGENT_VERSION) {
+            throw httpError(
+              "NODE_UPGRADE_REQUIRED",
+              `请先将 RayLink Node 升级到 ${REQUIRED_NODE_AGENT_VERSION}`,
+              409
+            );
+          }
+          if (typeof installer.checkForUpdates !== "function") {
+            throw httpError("UPDATE_CHECK_UNAVAILABLE", "当前 Runtime 不支持在线版本检查", 501);
+          }
+          const update = await installer.checkForUpdates();
+          if (!update.compatible || !update.latestVersion) {
+            throw httpError(
+              "RUNTIME_UPGRADE_INCOMPATIBLE",
+              update.blockedReason || "最新稳定版与当前 RayLink 不兼容",
+              409
+            );
+          }
+          if (!versionIsOlder(host.runtimeVersion, update.latestVersion)) {
+            throw httpError("RUNTIME_ALREADY_CURRENT", "该主机已是最新版本", 409);
+          }
+          const taskId = store.queueNodeTask(host.id, "upgrade-runtime", {
+            targetVersion: update.latestVersion,
+            requestedAt: new Date().toISOString()
+          }, { maxAttempts: 1 });
+          sendJson(response, 202, {
+            taskId,
+            status: "queued",
+            targetVersion: update.latestVersion
+          });
           return;
         }
 
@@ -736,15 +871,24 @@ export async function createRayLinkApp(options) {
       telemetryTimer = setInterval(sampleLocalTelemetry, telemetryIntervalMs);
       telemetryTimer.unref?.();
       entitlementReconcileTimer = setInterval(() => {
-        runtimeManager.reconcile().catch((error) => {
+        runLocalRuntimeOperation("配置同步", () => runtimeManager.reconcile()).catch((error) => {
           console.warn(`[RayLink] Entitlement reconciliation failed: ${error.message}`);
         });
       }, entitlementReconcileIntervalMs);
       entitlementReconcileTimer.unref?.();
       ruleSetRefreshTimer = setInterval(refreshRuleSets, 60 * 60 * 1000);
       ruleSetRefreshTimer.unref?.();
+      if (runtimeUpdateCheckIntervalMs > 0) {
+        refreshRuntimeUpdate();
+        runtimeUpdateTimer = setInterval(refreshRuntimeUpdate, runtimeUpdateCheckIntervalMs);
+        runtimeUpdateTimer.unref?.();
+      }
     },
     async close() {
+      if (runtimeUpdateTimer) {
+        clearInterval(runtimeUpdateTimer);
+        runtimeUpdateTimer = null;
+      }
       if (ruleSetRefreshTimer) {
         clearInterval(ruleSetRefreshTimer);
         ruleSetRefreshTimer = null;

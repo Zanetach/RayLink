@@ -15,6 +15,7 @@ async function startTestApp(overrides = {}) {
     publicOrigin: "http://127.0.0.1",
     runtimeMode: "dry-run",
     nodeHeartbeatMinIntervalMs: 0,
+    runtimeUpdateCheckIntervalMs: 0,
     ruleSetCache: {
       prepare: async () => {},
       available: () => false,
@@ -363,6 +364,118 @@ test("admin detects sing-box, enables a protocol profile and triggers one-click 
   });
   assert.equal(conflictResponse.status, 422);
   assert.equal((await conflictResponse.json()).error.code, "PROTOCOL_PORT_CONFLICT");
+});
+
+test("admin checks, upgrades the local Runtime and queues a remote Runtime upgrade", async (t) => {
+  let localVersion = "1.13.12";
+  let upgradeCalls = 0;
+  const release = () => ({
+    status: "ready",
+    currentVersion: localVersion,
+    latestVersion: "1.13.13",
+    updateAvailable: localVersion !== "1.13.13",
+    compatible: true,
+    checkedAt: "2026-07-26T08:00:00.000Z",
+    releaseUrl: "https://github.com/SagerNet/sing-box/releases/tag/v1.13.13"
+  });
+  const installer = {
+    async status() {
+      return {
+        installed: true,
+        version: localVersion,
+        platform: "linux",
+        architecture: "amd64",
+        tags: ["with_quic"],
+        binaryPath: "/usr/local/bin/sing-box"
+      };
+    },
+    releaseStatus: release,
+    async checkForUpdates() {
+      return release();
+    },
+    async upgrade(targetVersion) {
+      upgradeCalls += 1;
+      localVersion = targetVersion;
+      return { ...await this.status(), previousVersion: "1.13.12", rolledBack: false };
+    }
+  };
+  const testApp = await startTestApp({ installer });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const checkResponse = await api(testApp.baseUrl, cookie, "/api/runtime/update");
+  assert.equal(checkResponse.status, 200);
+  assert.equal((await checkResponse.json()).latestVersion, "1.13.13");
+
+  const upgradeResponse = await api(testApp.baseUrl, cookie, "/api/runtime/upgrade", {
+    method: "POST"
+  });
+  assert.equal(upgradeResponse.status, 200);
+  assert.equal((await upgradeResponse.json()).version, "1.13.13");
+  assert.equal(upgradeCalls, 1);
+
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "新加坡升级节点",
+      address: "upgrade-sg.example.com",
+      region: "singapore"
+    })
+  })).json();
+  const enrolled = await (await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "upgrade-sg",
+      agentVersion: "0.4.0",
+      runtimeVersion: "1.13.12"
+    })
+  })).json();
+
+  const remoteUpgrade = await api(
+    testApp.baseUrl,
+    cookie,
+    `/api/hosts/${encodeURIComponent(enrolled.hostId)}/runtime-upgrade`,
+    { method: "POST" }
+  );
+  assert.equal(remoteUpgrade.status, 202);
+  const queued = await remoteUpgrade.json();
+  assert.equal(queued.targetVersion, "1.13.13");
+
+  const task = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: {
+      authorization: `Bearer ${enrolled.nodeSecret}`,
+      "x-raylink-host-id": enrolled.hostId
+    }
+  })).json();
+  assert.equal(task.kind, "upgrade-runtime");
+  assert.equal(task.payload.targetVersion, "1.13.13");
+  await fetch(`${testApp.baseUrl}/api/node/tasks/${encodeURIComponent(task.id)}/complete`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${enrolled.nodeSecret}`,
+      "content-type": "application/json",
+      "x-raylink-host-id": enrolled.hostId
+    },
+    body: JSON.stringify({
+      attempt: task.attempt,
+      status: "failed",
+      result: {
+        error: "candidate failed health window",
+        previousVersion: "1.13.12",
+        rolledBack: true,
+        packageMetadataRestored: true
+      }
+    })
+  });
+  const afterFailure = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  const failedHost = afterFailure.hosts.find((host) => host.id === enrolled.hostId);
+  assert.equal(failedHost.runtimeUpgrade.status, "failed");
+  assert.equal(failedHost.runtimeUpgrade.rolledBack, true);
+  assert.equal(failedHost.runtimeUpgrade.previousVersion, "1.13.12");
+  assert.equal(failedHost.runtimeUpgrade.packageMetadataRestored, true);
+  assert.equal(failedHost.runtimeUpgrade.error, "candidate failed health window");
 });
 
 test("admin cannot enable Reality or QUIC transport when the sing-box build tags are missing", async (t) => {
@@ -934,7 +1047,7 @@ test("user subscription includes every online host allowed by the user node scop
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "x64",
-      agentVersion: "0.3.0",
+      agentVersion: "0.4.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1047,7 +1160,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
   assert.equal(blockedResponse.status, 426);
   const blocked = await blockedResponse.json();
   assert.equal(blocked.error.code, "NODE_UPGRADE_REQUIRED");
-  assert.equal(blocked.requiredVersion, "0.3.0");
+  assert.equal(blocked.requiredVersion, "0.4.0");
 
   const beforeUpgrade = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
   const waitingHost = beforeUpgrade.hosts.find((host) => host.id === enrolled.hostId);
@@ -1057,7 +1170,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
     method: "POST",
     headers: { ...nodeHeaders, "content-type": "application/json" },
     body: JSON.stringify({
-      agentVersion: "0.3.0",
+      agentVersion: "0.4.0",
       runtimeVersion: "1.13.12",
       telemetry: { serviceStatus: "running" }
     })
@@ -1101,7 +1214,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.3.0",
+      agentVersion: "0.4.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1174,7 +1287,7 @@ test("remote entitlement revocation is critical, retryable and visible until app
       hostname: "revoke-node",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.3.0",
+      agentVersion: "0.4.0",
       runtimeVersion: "1.13.12"
     })
   })).json();
@@ -1393,6 +1506,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /节点运行情况/);
   assert.match(indexHtml, /dashboard-node-health-grid/);
   assert.match(indexHtml, /来自 RayLink Node 的真实遥测/);
+  assert.match(indexHtml, /安全升级/);
+  assert.match(indexHtml, /data-check-runtime-update/);
   assert.doesNotMatch(indexHtml, /按启用账号数量缩放趋势样例/);
 
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
@@ -1418,7 +1533,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);
   const nodeRuntime = await nodeRuntimeResponse.text();
   assert.match(nodeRuntime, /class RayLinkNode/);
-  assert.match(nodeRuntime, /AGENT_VERSION = "0\.3\.0"/);
+  assert.match(nodeRuntime, /AGENT_VERSION = "0\.4\.0"/);
+  assert.match(nodeRuntime, /upgrade-runtime/);
 
   const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);
   assert.equal(portalResponse.status, 200);

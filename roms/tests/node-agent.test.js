@@ -156,6 +156,158 @@ test("RayLink Node reports a failed task without swallowing the next poll cycle"
   });
 });
 
+test("RayLink Node applies a runtime upgrade task and reports the new version", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-upgrade-task-"));
+  const calls = [];
+  const upgrades = [];
+  const responses = [
+    jsonResponse({ hostId: "host-fra", nodeSecret: "node-secret" }, 201),
+    jsonResponse({ ok: true }),
+    jsonResponse({
+      id: "task-upgrade-1",
+      kind: "upgrade-runtime",
+      attempt: 1,
+      payload: { targetVersion: "1.13.13" }
+    }),
+    jsonResponse({ ok: true })
+  ];
+  const node = new RayLinkNode({
+    serverUrl: "https://panel.example.com",
+    enrollmentToken: "one-time-token",
+    statePath: join(directory, "node.json"),
+    metadataProvider: async () => ({ hostname: "fra-vps-02" }),
+    runtimeAdapter: {
+      async upgrade(task) {
+        upgrades.push(task);
+        return { runtimeVersion: task.targetVersion, rolledBack: false };
+      }
+    },
+    fetchFn: async (url, init = {}) => {
+      calls.push({ url, init });
+      return responses.shift();
+    }
+  });
+
+  await node.pollOnce();
+
+  assert.deepEqual(upgrades, [{ targetVersion: "1.13.13" }]);
+  const completion = calls.find((call) => call.url.endsWith("/api/node/tasks/task-upgrade-1/complete"));
+  assert.deepEqual(JSON.parse(completion.init.body), {
+    attempt: 1,
+    status: "succeeded",
+    result: { runtimeVersion: "1.13.13", rolledBack: false }
+  });
+});
+
+test("RayLink Node reports an automatic Runtime rollback to the control plane", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-upgrade-report-"));
+  const calls = [];
+  const responses = [
+    jsonResponse({ hostId: "host-fra", nodeSecret: "node-secret" }, 201),
+    jsonResponse({ ok: true }),
+    jsonResponse({
+      id: "task-upgrade-failed",
+      kind: "upgrade-runtime",
+      attempt: 1,
+      payload: { targetVersion: "1.13.13" }
+    }),
+    jsonResponse({ ok: true })
+  ];
+  const node = new RayLinkNode({
+    serverUrl: "https://panel.example.com",
+    enrollmentToken: "one-time-token",
+    statePath: join(directory, "node.json"),
+    metadataProvider: async () => ({ hostname: "fra-vps-02" }),
+    runtimeAdapter: {
+      async upgrade() {
+        const error = new Error("candidate failed health window");
+        error.previousVersion = "1.13.12";
+        error.rolledBack = true;
+        throw error;
+      }
+    },
+    fetchFn: async (url, init = {}) => {
+      calls.push({ url, init });
+      return responses.shift();
+    }
+  });
+
+  await node.pollOnce();
+
+  const completion = calls.find(
+    (call) => call.url.endsWith("/api/node/tasks/task-upgrade-failed/complete")
+  );
+  assert.deepEqual(JSON.parse(completion.init.body), {
+    attempt: 1,
+    status: "failed",
+    result: {
+      error: "candidate failed health window",
+      previousVersion: "1.13.12",
+      rolledBack: true
+    }
+  });
+});
+
+test("node runtime upgrade rolls the binary back when the new build rejects the active config", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-upgrade-rollback-"));
+  const binaryPath = join(directory, "sing-box");
+  const configPath = join(directory, "config.json");
+  await writeFile(binaryPath, "previous-binary");
+  await writeFile(configPath, "{}");
+  let version = "1.13.12";
+  let restarts = 0;
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath,
+    healthCheckDelayMs: 0,
+    commandRunner: async (command, args) => {
+      if (command === "sh") {
+        version = args[1].match(/--version\s+(\d+\.\d+\.\d+)/)?.[1] || version;
+        await writeFile(binaryPath, "broken-binary");
+        return { stdout: "", stderr: "" };
+      }
+      if (command === binaryPath && args[0] === "version") {
+        return { stdout: `sing-box version ${version}\n`, stderr: "" };
+      }
+      if (command === binaryPath && args[0] === "check") throw new Error("candidate rejected config");
+      if (command === "systemctl" && args[0] === "restart") {
+        restarts += 1;
+        return { stdout: "", stderr: "" };
+      }
+      return { stdout: "active\n", stderr: "" };
+    }
+  });
+
+  await assert.rejects(adapter.upgrade({ targetVersion: "1.13.13" }), /已回滚/);
+  assert.equal(await readFile(binaryPath, "utf8"), "previous-binary");
+  assert.equal(restarts, 1);
+});
+
+test("node runtime refuses an upgrade before touching a Host without an active config", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-upgrade-unconfigured-"));
+  const binaryPath = join(directory, "sing-box");
+  await writeFile(binaryPath, "previous-binary");
+  let installCalls = 0;
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath,
+    healthCheckDelayMs: 0,
+    commandRunner: async (command, args) => {
+      if (command === "sh") installCalls += 1;
+      if (command === binaryPath && args[0] === "version") {
+        return { stdout: "sing-box version 1.13.12\n", stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    }
+  });
+
+  await assert.rejects(
+    adapter.upgrade({ targetVersion: "1.13.13" }),
+    /没有活动配置/
+  );
+  assert.equal(installCalls, 0);
+});
+
 test("node telemetry reports interval CPU, memory, network and service health", async () => {
   const samples = [
     {

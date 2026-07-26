@@ -147,6 +147,9 @@ function normalizeTelemetry(input = {}) {
 
 function hostFromRow(row) {
   const lastSeenAt = row.last_seen_at || null;
+  const latestUpgradePayload = parseJson(row.latest_upgrade_payload_json, {}) || {};
+  const latestUpgradeEnvelope = parseJson(row.latest_upgrade_result_json, {}) || {};
+  const latestUpgradeResult = latestUpgradeEnvelope.result || {};
   const remoteOffline = (row.kind || "local") === "remote"
     && lastSeenAt
     && Date.now() - new Date(lastSeenAt).getTime() > 45_000;
@@ -182,6 +185,23 @@ function hostFromRow(row) {
       status: Number(row.pending_task_count || 0) > 0
         ? row.critical_pending ? "revocation-pending" : "pending"
         : "current"
+    },
+    runtimeUpgrade: {
+      pending: Number(row.pending_upgrade_count || 0) > 0,
+      status: Number(row.pending_upgrade_count || 0) > 0
+        ? "pending"
+        : row.latest_upgrade_status || "never",
+      targetVersion: latestUpgradePayload.targetVersion || null,
+      previousVersion: latestUpgradeResult.previousVersion || null,
+      runtimeVersion: latestUpgradeResult.runtimeVersion || null,
+      rolledBack: typeof latestUpgradeResult.rolledBack === "boolean"
+        ? latestUpgradeResult.rolledBack
+        : null,
+      packageMetadataRestored: typeof latestUpgradeResult.packageMetadataRestored === "boolean"
+        ? latestUpgradeResult.packageMetadataRestored
+        : null,
+      error: latestUpgradeResult.error || null,
+      finishedAt: row.latest_upgrade_finished_at || null
     }
   };
 }
@@ -669,12 +689,47 @@ export class RayLinkStore {
   listHosts() {
     return this.db.prepare(`
       SELECT hosts.*,
-             SUM(CASE WHEN node_tasks.status IN ('pending', 'claimed') THEN 1 ELSE 0 END)
+             SUM(CASE
+               WHEN node_tasks.kind = 'publish-config'
+                 AND node_tasks.status IN ('pending', 'claimed')
+               THEN 1 ELSE 0
+             END)
                AS pending_task_count,
              MAX(CASE
-               WHEN node_tasks.status IN ('pending', 'claimed') AND node_tasks.priority >= 100
+               WHEN node_tasks.kind = 'publish-config'
+                 AND node_tasks.status IN ('pending', 'claimed')
+                 AND node_tasks.priority >= 100
                THEN 1 ELSE 0
-             END) AS critical_pending
+             END) AS critical_pending,
+             SUM(CASE
+               WHEN node_tasks.kind = 'upgrade-runtime'
+                 AND node_tasks.status IN ('pending', 'claimed')
+               THEN 1 ELSE 0
+             END) AS pending_upgrade_count,
+             (
+               SELECT status FROM node_tasks AS latest_upgrade
+               WHERE latest_upgrade.host_id = hosts.id
+                 AND latest_upgrade.kind = 'upgrade-runtime'
+               ORDER BY latest_upgrade.created_at DESC LIMIT 1
+             ) AS latest_upgrade_status,
+             (
+               SELECT payload_json FROM node_tasks AS latest_upgrade
+               WHERE latest_upgrade.host_id = hosts.id
+                 AND latest_upgrade.kind = 'upgrade-runtime'
+               ORDER BY latest_upgrade.created_at DESC LIMIT 1
+             ) AS latest_upgrade_payload_json,
+             (
+               SELECT result_json FROM node_tasks AS latest_upgrade
+               WHERE latest_upgrade.host_id = hosts.id
+                 AND latest_upgrade.kind = 'upgrade-runtime'
+               ORDER BY latest_upgrade.created_at DESC LIMIT 1
+             ) AS latest_upgrade_result_json,
+             (
+               SELECT finished_at FROM node_tasks AS latest_upgrade
+               WHERE latest_upgrade.host_id = hosts.id
+                 AND latest_upgrade.kind = 'upgrade-runtime'
+               ORDER BY latest_upgrade.created_at DESC LIMIT 1
+             ) AS latest_upgrade_finished_at
       FROM hosts
       LEFT JOIN node_tasks ON node_tasks.host_id = hosts.id
       GROUP BY hosts.id
@@ -689,7 +744,9 @@ export class RayLinkStore {
       WHERE hosts.id = 'local'
          OR EXISTS (
            SELECT 1 FROM node_tasks
-           WHERE node_tasks.host_id = hosts.id AND node_tasks.status = 'succeeded'
+           WHERE node_tasks.host_id = hosts.id
+             AND node_tasks.kind = 'publish-config'
+             AND node_tasks.status = 'succeeded'
          )
       ORDER BY hosts.created_at
     `).all().map(hostFromRow);
@@ -980,6 +1037,11 @@ export class RayLinkStore {
         this.db.prepare(`
           DELETE FROM node_tasks
           WHERE host_id = ? AND kind = 'publish-config' AND status = 'pending'
+        `).run(hostId);
+      } else if (kind === "upgrade-runtime") {
+        this.db.prepare(`
+          DELETE FROM node_tasks
+          WHERE host_id = ? AND kind = 'upgrade-runtime' AND status = 'pending'
         `).run(hostId);
       }
       this.db.prepare(`

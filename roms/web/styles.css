@@ -1307,6 +1307,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .notice-card svg { width: 18px; height: 18px; }
 .notice-card strong { color: var(--text-soft); font-size: 11px; }
 .notice-card p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.6; }
+#runtime-update-notice { grid-template-columns: 32px 1fr auto; align-items: center; margin-bottom: 14px; }
 
 @media (hover: hover) {
   .nav-item:hover, .icon-button:hover, .profile-button:hover, .node-row:hover { background-color: var(--surface-2); color: var(--text); }
