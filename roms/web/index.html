@@ -63,9 +63,6 @@
         <button class="nav-item" data-view-target="users">
           <svg><use href="#i-users"/></svg><span>用户</span><span class="nav-count">27</span>
         </button>
-        <button class="nav-item" data-view-target="services">
-          <svg><use href="#i-link"/></svg><span>服务</span><span class="nav-count" id="service-nav-count">0</span>
-        </button>
         <button class="nav-item" data-view-target="policies">
           <svg><use href="#i-shield"/></svg><span>策略</span>
         </button>
@@ -249,53 +246,6 @@
           </div>
         </section>
 
-        <section class="view" id="view-services" data-view="services">
-          <div class="page-heading">
-            <div><p class="eyebrow">连接与协议</p><h1>服务</h1><p>用一个工作区管理 sing-box 入站服务、出站能力和端点。</p></div>
-            <button class="button primary" data-service-tab="inbounds"><svg><use href="#i-link"/></svg>浏览入站协议</button>
-          </div>
-          <div class="workspace-tabs" role="tablist" aria-label="服务类型">
-            <button class="active" data-service-tab="inbounds" role="tab" aria-selected="true">入站服务 <span id="inbound-tab-count">0</span></button>
-            <button data-service-tab="outbounds" role="tab" aria-selected="false">出站节点 <span>1</span></button>
-            <button data-service-tab="endpoints" role="tab" aria-selected="false">端点 <span>0</span></button>
-          </div>
-          <section class="runtime-console" aria-labelledby="runtime-console-title">
-            <header class="runtime-console-heading">
-              <div>
-                <p class="eyebrow">入站服务</p>
-                <h2 id="runtime-console-title">协议入口</h2>
-                <p id="runtime-installation-copy">正在检测本机 sing-box。</p>
-              </div>
-              <button class="button primary" id="install-sing-box"><svg><use href="#i-terminal"/></svg>一键安装 sing-box</button>
-            </header>
-            <div class="runtime-build" id="runtime-build-details">
-              <span>版本检测中</span>
-            </div>
-            <div class="protocol-toolbar">
-              <div><strong id="enabled-protocol-count">0 个协议已启用</strong><small>保存协议后，在“配置发布”中校验并生效。</small></div>
-              <a href="https://sing-box.sagernet.org/configuration/inbound/" target="_blank" rel="noreferrer">官方协议文档 ↗</a>
-            </div>
-            <div class="protocol-grid" id="protocol-grid"></div>
-          </section>
-          <section class="resource-panel" data-service-panel="outbounds" hidden>
-            <div class="resource-panel-heading">
-              <div><p class="eyebrow">出站节点</p><h2>流量出口</h2><p>当前生产配置使用 direct 出站；本版本尚未开放高级出站的界面写入。</p></div>
-              <span class="status-badge good"><i></i>已接入运行时</span>
-            </div>
-            <div class="resource-list">
-              <article><span class="resource-icon"><svg><use href="#i-arrow"/></svg></span><div><strong>direct</strong><small>默认直连出口 · route.final</small></div><span class="tag">direct</span><span class="status-badge good"><i></i>启用</span></article>
-            </div>
-          </section>
-          <section class="resource-panel" data-service-panel="endpoints" hidden>
-            <div class="empty-resource">
-              <span class="resource-icon"><svg><use href="#i-link"/></svg></span>
-              <h2>尚未创建端点</h2>
-              <p>端点用于管理 WireGuard、Tailscale 等网络接口。它们不会影响当前入站服务。</p>
-              <button class="button secondary" data-advanced-json><svg><use href="#i-code"/></svg>查看配置 JSON</button>
-            </div>
-          </section>
-        </section>
-
         <section class="view" id="view-policies" data-view="policies">
           <div class="page-heading">
             <div><p class="eyebrow">流量决策</p><h1>策略</h1><p>集中查看当前运行配置中的路由、DNS 和规则集，默认策略保持简单。</p></div>
@@ -415,7 +365,7 @@
 
         <section class="view" id="view-system" data-view="system">
           <div class="page-heading">
-            <div><p class="eyebrow">平台与 Runtime</p><h1>系统</h1><p>管理主机、安装状态、证书、版本和备份；高频业务配置放在服务与策略中。</p></div>
+            <div><p class="eyebrow">平台与 Runtime</p><h1>系统</h1><p>管理主机、主机入口协议、安装状态、证书、版本和备份。</p></div>
             <button class="button primary" data-new-host><svg><use href="#i-plus"/></svg>添加主机</button>
           </div>
           <div class="workspace-tabs" role="tablist" aria-label="系统设置">
@@ -443,7 +393,7 @@
             </section>
           </div>
           <section class="system-card-grid" data-system-panel="certificates" hidden>
-            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><p class="eyebrow">TLS 资产</p><h2>证书路径由协议管理</h2><p>在“服务 → 入站服务”编辑支持 TLS 的协议，可指定证书和私钥路径。</p><button class="text-button" data-view-target="services">前往入站服务 <svg><use href="#i-arrow"/></svg></button></div></article>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><p class="eyebrow">TLS 资产</p><h2>证书路径由主机协议管理</h2><p>打开一台主机，在“入口协议”中配置支持 TLS 的协议及证书路径。</p><button class="text-button" data-system-tab="hosts">查看主机 <svg><use href="#i-arrow"/></svg></button></div></article>
             <article class="panel system-card"><span class="resource-icon">R</span><div><p class="eyebrow">Reality</p><h2>密钥按协议生成</h2><p>VLESS 等协议可在编辑抽屉中一键生成 Reality 密钥对。</p></div></article>
           </section>
           <section class="system-card-grid" data-system-panel="maintenance" hidden>
@@ -466,7 +416,7 @@
   <nav class="mobile-nav" aria-label="移动端主导航">
     <button class="active" data-view-target="dashboard"><svg><use href="#i-grid"/></svg><span>总览</span></button>
     <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户</span></button>
-    <button data-view-target="services"><svg><use href="#i-link"/></svg><span>服务</span></button>
+    <button data-view-target="system"><svg><use href="#i-server"/></svg><span>主机</span></button>
     <button data-view-target="operations"><svg><use href="#i-terminal"/></svg><span>运维</span></button>
   </nav>
 

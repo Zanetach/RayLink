@@ -8,7 +8,7 @@ The primary signature is the deployment trail: every configuration change is sho
 
 Each user owns an independent entitlement. The user workspace creates and edits identity, traffic allowance, expiry, node scope, and client capabilities in one flow.
 
-The information architecture uses six stable destinations: Overview, Users, Services, Policies, Operations, and System. High-frequency managed fields stay in simple forms; raw configuration is exposed as an advanced, read-only preview so the interface never implies that an unconnected control has changed the runtime.
+The information architecture uses five stable destinations: Overview, Users, Policies, Operations, and System. Inbound protocol instances belong to a Host and are configured from that Host's detail drawer; there is no standalone Services destination. High-frequency managed fields stay in simple forms; raw configuration is exposed as an advanced, read-only preview so the interface never implies that an unconnected control has changed the runtime.
 
 ## 2. Color palette and roles
 
@@ -48,6 +48,7 @@ The reflex choices Inter, Space Grotesk, and IBM Plex Sans are rejected. The int
 - Tables are cardless operational surfaces with hairline row dividers, sticky headers, right-aligned numeric data, and compact 48px rows.
 - Navigation is a 232px rail with one sliding accent indicator and restrained active fill.
 - User management has one rail destination and one primary create-user flow; entitlement fields live in the user drawer.
+- Host management owns inbound protocol instances. A protocol saved on one Host never changes another Host.
 - Drawers are fixed detail surfaces at the right edge. They retain page context and never behave like centered modals.
 
 ## 5. Layout principles

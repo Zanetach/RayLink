@@ -7,7 +7,8 @@ function deploymentVersion(prefix = "v", now = new Date()) {
 }
 
 function compile(store, listenPort, hostId = "local") {
-  const config = buildSingBoxConfig(store.runtimeSnapshot(hostId), { listenPort });
+  const snapshot = store.runtimeSnapshot(hostId);
+  const config = buildSingBoxConfig(snapshot, { listenPort });
   const configText = `${JSON.stringify(config, null, 2)}\n`;
   const checksum = createHash("sha256").update(configText).digest("hex");
   const eligibleUsers = new Set(
@@ -17,7 +18,8 @@ function compile(store, listenPort, hostId = "local") {
     config,
     configText,
     checksum,
-    eligibleUsers
+    eligibleUsers,
+    protocols: snapshot.protocols
   };
 }
 
@@ -81,11 +83,25 @@ export class RuntimeManager {
       }
       remoteDeployments.push({ host, remote, sealedTlsBundle, tlsAssets });
     }
+    const hostSnapshots = remoteDeployments.map(({
+      host,
+      remote,
+      sealedTlsBundle,
+      tlsAssets
+    }) => ({
+      hostId: host.id,
+      config: remote.config,
+      checksum: remote.checksum,
+      protocols: remote.protocols,
+      ...(sealedTlsBundle ? { sealedTlsBundle, tlsAssets } : {})
+    }));
     const deployment = await this.publishCompiled({
       ...compiled,
+      hostSnapshots,
       version: deploymentVersion(),
       publisherAdminId
     });
+    this.store.markHostProtocolsApplied("local", compiled.protocols);
     for (const { host, remote, sealedTlsBundle, tlsAssets } of remoteDeployments) {
       const revokesCredentials = options.forceCritical === true
         || (options.detectRevocation === true && removesRuntimeCredentials(
@@ -96,6 +112,7 @@ export class RuntimeManager {
         version: deployment.version,
         checksum: remote.checksum,
         configText: remote.configText,
+        protocols: remote.protocols,
         ...(sealedTlsBundle ? { sealedTlsBundle, tlsAssets } : {}),
         reason: options.reason || "deployment"
       }, {
@@ -128,17 +145,54 @@ export class RuntimeManager {
   async rollback(sourceDeploymentId, publisherAdminId = null) {
     const snapshot = this.store.deploymentSnapshot(sourceDeploymentId);
     const configText = `${JSON.stringify(snapshot.config, null, 2)}\n`;
-    return this.publishCompiled({
+    const deployment = await this.publishCompiled({
       config: snapshot.config,
       configText,
       checksum: createHash("sha256").update(configText).digest("hex"),
       eligibleUsers: snapshot.eligibleUsers,
+      protocols: snapshot.protocols,
+      hostSnapshots: snapshot.hostSnapshots,
       version: deploymentVersion("r"),
       publisherAdminId
     });
+    this.store.markHostProtocolsApplied("local", snapshot.protocols);
+    let remoteQueued = 0;
+    for (const remote of snapshot.hostSnapshots) {
+      const host = this.store.getHost(remote.hostId);
+      if (!host || host.kind !== "remote" || !host.enrolledAt) continue;
+      const configText = `${JSON.stringify(remote.config, null, 2)}\n`;
+      const revokesCredentials = removesRuntimeCredentials(
+        this.store.latestAppliedNodeConfig(host.id),
+        remote.config
+      );
+      this.store.queueNodeTask(host.id, "publish-config", {
+        version: deployment.version,
+        checksum: remote.checksum || createHash("sha256").update(configText).digest("hex"),
+        configText,
+        protocols: remote.protocols,
+        ...(remote.sealedTlsBundle
+          ? { sealedTlsBundle: remote.sealedTlsBundle, tlsAssets: remote.tlsAssets || [] }
+          : {}),
+        reason: "rollback"
+      }, {
+        priority: revokesCredentials ? "critical" : "normal",
+        maxAttempts: revokesCredentials ? 0 : 5
+      });
+      remoteQueued += 1;
+    }
+    return { ...deployment, remoteQueued };
   }
 
-  async publishCompiled({ config, configText, checksum, eligibleUsers, version, publisherAdminId }) {
+  async publishCompiled({
+    config,
+    configText,
+    checksum,
+    eligibleUsers,
+    protocols,
+    hostSnapshots = [],
+    version,
+    publisherAdminId
+  }) {
     if (this.publishing) {
       const error = new Error("已有配置正在发布，请稍后重试");
       error.code = "DEPLOYMENT_IN_PROGRESS";
@@ -153,6 +207,8 @@ export class RuntimeManager {
         configJson: config,
         checksum,
         eligibleUsers,
+        protocols,
+        hostSnapshots,
         publisherAdminId
       });
       const runtime = await this.adapter.publish({

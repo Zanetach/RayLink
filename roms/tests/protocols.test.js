@@ -120,10 +120,21 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.equal(config.experimental.cache_file.enabled, true);
 });
 
-test("multi-host client configuration exposes every entitled node through one selector", () => {
-  const profiles = defaultProtocolConfigs(8388);
+test("multi-host client configuration exposes each host's enabled protocols through one selector", () => {
+  const tokyoProfiles = defaultProtocolConfigs(8388);
+  const frankfurtProfiles = defaultProtocolConfigs(8388).map((profile) => {
+    if (profile.type === "shadowsocks") return { ...profile, enabled: false };
+    if (profile.type === "vless") {
+      return {
+        ...profile,
+        enabled: true,
+        port: 8443,
+        tls: { ...profile.tls, mode: "none" }
+      };
+    }
+    return profile;
+  });
   const config = buildMultiHostProtocolClientConfig({
-    profiles,
     credential: {
       email: eligibleUsers[0].email,
       runtimeUuid: eligibleUsers[0].runtimeUuid,
@@ -131,22 +142,37 @@ test("multi-host client configuration exposes every entitled node through one se
       serverPassword: "c2VydmVyLWtleS0xNg=="
     },
     hosts: [
-      { id: "local", name: "Tokyo", address: "tokyo.example.com" },
-      { id: "fra-02", name: "Frankfurt", address: "fra.example.com" }
+      {
+        id: "local",
+        name: "Tokyo",
+        address: "tokyo.example.com",
+        protocols: tokyoProfiles
+      },
+      {
+        id: "fra-02",
+        name: "Frankfurt",
+        address: "fra.example.com",
+        protocols: frankfurtProfiles
+      }
     ]
   });
 
-  const servers = config.outbounds
-    .filter((outbound) => outbound.type === "shadowsocks")
-    .map((outbound) => outbound.server);
-  assert.deepEqual(servers, ["tokyo.example.com", "fra.example.com"]);
+  assert.deepEqual(
+    config.outbounds
+      .filter((outbound) => ["shadowsocks", "vless"].includes(outbound.type))
+      .map((outbound) => [outbound.type, outbound.server]),
+    [
+      ["shadowsocks", "tokyo.example.com"],
+      ["vless", "fra.example.com"]
+    ]
+  );
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.tag === "raylink-auto").outbounds,
-    ["raylink-fastest", "raylink-local-shadowsocks", "raylink-fra-02-shadowsocks"]
+    ["raylink-fastest", "raylink-local-shadowsocks", "raylink-fra-02-vless"]
   );
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.tag === "raylink-fastest").outbounds,
-    ["raylink-local-shadowsocks", "raylink-fra-02-shadowsocks"]
+    ["raylink-local-shadowsocks", "raylink-fra-02-vless"]
   );
 });
 

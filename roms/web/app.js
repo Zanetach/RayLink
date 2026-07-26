@@ -4,9 +4,7 @@ let bootstrapRefreshInFlight = false;
 const requiredNodeAgentVersion = "0.5.0";
 
 const clientCatalog = {
-  "mihomo": { name: "Mihomo", platforms: "macOS / Windows / Android", action: "一键导入" },
-  "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "一键导入" },
-  "download": { name: "其他客户端", platforms: "下载兼容配置文件", action: "下载配置" }
+  "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "下载配置" }
 };
 
 const accountSummary = { totalUsers: 0 };
@@ -18,7 +16,6 @@ const controlPlane = {
   runtimePreview: null,
   installation: null,
   runtimeUpdate: null,
-  protocols: [],
   protocolCatalog: [],
   deployments: [],
   telemetry: { windowHours: 24, networkSeries: [] },
@@ -178,7 +175,6 @@ function applyBootstrap(data) {
   controlPlane.runtimePreview = data.runtimePreview;
   controlPlane.installation = data.installation;
   controlPlane.runtimeUpdate = data.runtimeUpdate;
-  controlPlane.protocols = data.protocols;
   controlPlane.protocolCatalog = data.protocolCatalog;
   controlPlane.deployments = data.deployments;
   controlPlane.telemetry = data.telemetry || { windowHours: 24, networkSeries: [] };
@@ -226,7 +222,6 @@ function renderRuntime() {
   const listenPort = document.querySelector("#managed-listen-port");
   if (listenPort && controlPlane.runtimePreview) listenPort.textContent = controlPlane.runtimePreview.listenPort;
   renderHosts();
-  renderProtocols();
   renderConfigPreview();
   renderDashboard();
   renderOperations();
@@ -506,10 +501,10 @@ function renderHosts() {
     return;
   }
   const runtime = controlPlane.runtime || { state: "unknown", mode: "dry-run" };
-  const enabledProtocols = controlPlane.protocols.filter((profile) => profile.enabled);
-  const protocolLabels = enabledProtocols
-    .map((profile) => controlPlane.protocolCatalog.find((item) => item.type === profile.type)?.name || profile.type);
   elements.hostBody.innerHTML = hosts.map((host) => {
+    const protocolLabels = (host.protocols || [])
+      .filter((profile) => profile.enabled)
+      .map((profile) => controlPlane.protocolCatalog.find((item) => item.type === profile.type)?.name || profile.type);
     const isLocal = host.kind !== "remote";
     const healthy = isLocal
       ? runtime.state === "running"
@@ -577,75 +572,11 @@ function renderHosts() {
   });
 }
 
-function renderProtocols() {
-  const installation = controlPlane.installation || {
-    installed: false,
-    version: null,
-    platform: "unknown",
-    architecture: null,
-    tags: []
-  };
-  const installButton = document.querySelector("#install-sing-box");
-  const installCopy = document.querySelector("#runtime-installation-copy");
-  const buildDetails = document.querySelector("#runtime-build-details");
-  const protocolGrid = document.querySelector("#protocol-grid");
-  if (!installButton || !installCopy || !buildDetails || !protocolGrid) return;
-
-  installButton.disabled = installation.installed;
-  installButton.classList.toggle("secondary", installation.installed);
-  installButton.classList.toggle("primary", !installation.installed);
-  installButton.innerHTML = installation.installed
-    ? `${icon("check")} 已安装 ${escapeHtml(installation.version || "")}`
-    : `${icon("terminal")} 一键安装 sing-box`;
-  installCopy.textContent = installation.installed
-    ? `已检测到 sing-box ${installation.version}，协议能力来自当前二进制构建。`
-    : "当前主机未检测到 sing-box。安装完成后才能启用和发布协议。";
-  buildDetails.innerHTML = installation.installed
-    ? `<span>${escapeHtml(installation.platform)} / ${escapeHtml(installation.architecture || "unknown")}</span><span>${installation.tags.length} 个 build tags</span><code>${escapeHtml(installation.binaryPath)}</code>`
-    : `<span>${escapeHtml(installation.platform)} · 未安装</span><span>macOS 使用 Homebrew，Linux 使用官方安装脚本</span>`;
-
-  const profiles = new Map(controlPlane.protocols.map((profile) => [profile.type, profile]));
-  protocolGrid.innerHTML = controlPlane.protocolCatalog.map((protocol) => {
-    const profile = profiles.get(protocol.type);
-    const enabled = profile?.enabled === true;
-    const capability = protocol.available
-      ? enabled ? "已启用" : protocol.formLevel === "advanced" ? "高级配置" : "可配置"
-      : !installation.installed
-        ? "未安装"
-        : !protocol.versionSupported
-          ? "版本不兼容"
-          : protocol.platformSupported
-            ? `缺少 ${protocol.missingTags.join(", ") || "运行时"}`
-            : "当前平台不可用";
-    const statusClass = enabled ? "good" : protocol.available ? "neutral" : "warning";
-    return `
-      <article class="protocol-card ${enabled ? "enabled" : ""}">
-        <header><span class="protocol-kind">${escapeHtml(protocol.type)}</span><span class="status-badge ${statusClass}"><i></i>${escapeHtml(capability)}</span></header>
-        <h3>${escapeHtml(protocol.name)}</h3>
-        <p>${escapeHtml(protocol.description)}</p>
-        <div class="protocol-meta">
-          <span>${protocol.defaultPort ? `默认 ${protocol.defaultPort}` : "无固定端口"}</span>
-          <span>${protocol.tls === "required" ? "需要 TLS" : protocol.realityAvailable ? "支持 Reality" : "标准入站"}</span>
-        </div>
-        <footer>
-          <a href="${escapeHtml(protocol.sourceUrl)}" target="_blank" rel="noreferrer">源码 ↗</a>
-          <button class="button secondary" data-protocol="${escapeHtml(protocol.type)}" ${protocol.available ? "" : "disabled"}>${enabled ? "编辑配置" : "配置协议"}</button>
-        </footer>
-      </article>`;
-  }).join("");
-
-  const enabledCount = controlPlane.protocols.filter((profile) => profile.enabled).length;
-  document.querySelector("#enabled-protocol-count").textContent = `${enabledCount} 个协议已启用`;
-  const inboundTabCount = document.querySelector("#inbound-tab-count");
-  if (inboundTabCount) inboundTabCount.textContent = enabledCount;
-  const serviceNavCount = document.querySelector("#service-nav-count");
-  if (serviceNavCount) serviceNavCount.textContent = enabledCount;
-}
-
 function renderConfigPreview() {
   const preview = document.querySelector("#managed-config-preview");
   if (!preview) return;
-  const inbounds = controlPlane.protocols.filter((profile) => profile.enabled).map((profile) => ({
+  const localProtocols = controlPlane.hosts.find((host) => host.id === "local")?.protocols || [];
+  const inbounds = localProtocols.filter((profile) => profile.enabled).map((profile) => ({
     type: profile.type,
     tag: profile.type === "shadowsocks" ? "managed-shadowsocks" : `raylink-${profile.type}`,
     ...(profile.port ? { listen_port: profile.port } : {}),
@@ -707,7 +638,9 @@ function renderDiagnostics() {
   if (!target) return;
   const installation = controlPlane.installation || { installed: false, version: null };
   const host = controlPlane.hosts[0];
-  const enabledProtocols = controlPlane.protocols.filter((profile) => profile.enabled);
+  const enabledProtocols = controlPlane.hosts
+    .flatMap((candidate) => candidate.protocols || [])
+    .filter((profile) => profile.enabled);
   const eligibleUsers = controlPlane.runtimePreview?.eligibleUsers || 0;
   const checks = [
     {
@@ -852,7 +785,6 @@ function navigate(viewName, updateHash = true) {
   const headings = {
     dashboard: "总览",
     users: "用户",
-    services: "服务",
     policies: "策略",
     operations: "运维",
     system: "系统",
@@ -914,12 +846,6 @@ function userDrawerMarkup(user = {}) {
   const nodeGroupOptions = [...new Set(standardNodeGroups)]
     .map((nodeGroup) => `<option ${nodeGroup === selectedNodeGroup ? "selected" : ""}>${escapeHtml(nodeGroup)}</option>`)
     .join("");
-  const capabilityRows = Object.entries(clientCatalog).map(([capabilityId, client]) => {
-    const available = capabilityId === "sing-box";
-    const selected = user.clients?.includes(capabilityId) || (isNew && available);
-    return `
-      <div class="switch-row"><div><strong>${client.name}</strong><small>${available ? client.platforms : `${client.platforms} · 即将支持`}</small></div><button type="button" class="switch ${selected ? "on" : ""}" data-capability="${capabilityId}" role="switch" aria-checked="${selected}" ${available ? "" : "disabled"}></button></div>`;
-  }).join("");
   return `
     <form class="drawer-form" id="user-drawer-form" data-user-id="${escapeHtml(user.id || "")}">
       <div class="drawer-profile">
@@ -936,8 +862,7 @@ function userDrawerMarkup(user = {}) {
       <p class="drawer-section-label">用户权益</p>
       <label class="field"><span>流量额度（GB）</span><input name="quota" type="number" min="1" step="1" value="${Number(user.quota || 120)}" required><small class="field-error"></small></label>
       <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select><small class="field-hint">该用户只能获取所选区域的客户端配置</small></label>
-      <p class="drawer-section-label">客户端能力</p>
-      ${capabilityRows}
+      <div class="switch-row"><div><strong>sing-box 配置</strong><small>用户中心自动提供多节点 sing-box JSON 配置</small></div><span class="status-badge good"><i></i>固定启用</span></div>
       <p class="drawer-section-label">账号状态</p>
       <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用自己的流量、节点与客户端权益</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
@@ -991,6 +916,23 @@ function hostDrawerMarkup(hostId) {
     : host.deploymentSync?.status === "pending"
       ? `有 ${host.deploymentSync.pendingTaskCount} 项配置等待节点应用。`
       : "节点配置已与控制面同步。";
+  const protocolRows = (host.protocols || []).map((profile) => {
+    const catalog = (host.protocolCatalog || controlPlane.protocolCatalog)
+      .find((item) => item.type === profile.type);
+    const name = catalog?.name || profile.type;
+    const port = profile.port ? `:${profile.port}` : "无固定端口";
+    const applied = host.appliedProtocols?.find((item) => item.type === profile.type);
+    const pending = applied
+      ? JSON.stringify(profile) !== JSON.stringify(applied)
+      : profile.enabled;
+    const stateLabel = pending ? "待发布" : profile.enabled ? "运行配置" : "未启用";
+    const stateClass = pending ? "warning" : profile.enabled ? "good" : "neutral";
+    return `
+      <button type="button" class="switch-row protocol-host-row" data-host-protocol="${escapeHtml(profile.type)}" data-host-id="${escapeHtml(host.id)}">
+        <div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(profile.listen)}${escapeHtml(port)} · ${profile.tls?.mode === "reality" ? "Reality" : profile.tls?.mode === "certificate" ? "TLS" : "标准入口"}</small></div>
+        <span class="status-badge ${stateClass}"><i></i>${stateLabel}</span>
+      </button>`;
+  }).join("");
   return `
     <form class="drawer-form" id="host-drawer-form" data-host-id="${escapeHtml(host.id)}">
       <div class="drawer-profile"><span class="avatar">${escapeHtml(host.name.slice(0, 1))}</span><div><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></div></div>
@@ -998,9 +940,13 @@ function hostDrawerMarkup(hostId) {
       <label class="field"><span>名称</span><input name="hostname" value="${escapeHtml(host.name)}" placeholder="例如：东京生产节点" required></label>
       <label class="field"><span>公网 IP 或域名</span><input name="address" value="${escapeHtml(host.address)}" placeholder="node.example.com" required></label>
       <label class="field"><span>区域标识</span><input name="region" value="${escapeHtml(host.region)}" pattern="[A-Za-z0-9-]{2,32}" placeholder="tokyo" required></label>
-      <p class="drawer-section-label">sing-box 入口</p>
-      <div class="switch-row"><div><strong>Shadowsocks 2022</strong><small>端口由服务端环境变量统一设置；保存后用户配置立即使用新地址</small></div><span class="status-badge good"><i></i>已启用</span></div>
+      <p class="drawer-section-label">入口协议</p>
+      <p class="field-hint">协议属于当前主机。启用后请在“运维”中发布配置，用户订阅会自动聚合可用主机上的入口。</p>
+      <div class="host-protocol-list">${protocolRows}</div>
       <div class="switch-row"><div><strong>${isRemote ? "RayLink Node" : "Runtime 模式"}</strong><small>${escapeHtml(runtimeCopy)}</small></div><span class="status-badge neutral"><i></i>${escapeHtml(isRemote ? host.status : controlPlane.runtime?.state || "unknown")}</span></div>
+      ${!isRemote && !controlPlane.installation?.installed
+        ? `<button type="button" class="button primary" id="install-sing-box">${icon("terminal")}一键安装 sing-box</button><p class="field-hint">安装完成后即可在当前主机启用入口协议。</p>`
+        : ""}
       <div class="switch-row"><div><strong>用户流量计量</strong><small>${usageMeteringDescription(host.usageMetering)}</small></div><span class="status-badge ${host.usageMetering?.status === "healthy" ? "good" : host.usageMetering?.status === "error" ? "danger" : "warning"}"><i></i>${usageMeteringLabel(host.usageMetering)}</span></div>
       ${isRemote ? `<div class="switch-row"><div><strong>TLS 资产安全通道</strong><small>${host.assetEncryptionReady ? "节点 X25519 公钥已登记；证书私钥将以节点专属密封包下发。" : "请升级并重启 RayLink Node，使其生成并上报资产加密公钥。"}</small></div><span class="status-badge ${host.assetEncryptionReady ? "good" : "warning"}"><i></i>${host.assetEncryptionReady ? "已就绪" : "待升级"}</span></div>` : ""}
       ${isRemote ? `<div class="switch-row"><div><strong>配置同步</strong><small>${escapeHtml(deploymentSyncCopy)}</small></div><span class="status-badge ${host.deploymentSync?.critical ? "danger" : host.deploymentSync?.pendingTaskCount ? "warning" : "good"}"><i></i>${escapeHtml(host.deploymentSync?.status === "revocation-pending" ? "撤权待同步" : host.deploymentSync?.status === "pending" ? "待同步" : "已同步")}</span></div>` : ""}
@@ -1081,9 +1027,15 @@ function enrollmentResultMarkup(created) {
     </div>`;
 }
 
-function protocolDrawerMarkup(type) {
-  const protocol = controlPlane.protocolCatalog.find((item) => item.type === type);
-  const profile = controlPlane.protocols.find((item) => item.type === type);
+function protocolDrawerMarkup(hostId, type) {
+  const host = controlPlane.hosts.find((item) => item.id === hostId);
+  const protocol = (host?.protocolCatalog || controlPlane.protocolCatalog)
+    .find((item) => item.type === type);
+  const profile = host?.protocols?.find((item) => item.type === type);
+  const applied = host?.appliedProtocols?.find((item) => item.type === type);
+  const pending = applied
+    ? JSON.stringify(profile) !== JSON.stringify(applied)
+    : profile.enabled;
   const tlsModes = [
     ["none", "不启用 TLS"],
     ["certificate", "证书 TLS"],
@@ -1098,14 +1050,14 @@ function protocolDrawerMarkup(type) {
     "httpupgrade"
   ];
   return `
-    <form class="drawer-form" id="protocol-drawer-form" data-protocol-type="${escapeHtml(type)}">
+    <form class="drawer-form" id="protocol-drawer-form" data-host-id="${escapeHtml(hostId)}" data-protocol-type="${escapeHtml(type)}">
       <div class="drawer-profile">
         <span class="avatar">${escapeHtml(type.slice(0, 2).toUpperCase())}</span>
         <div><strong>${escapeHtml(protocol.name)}</strong><small>${escapeHtml(protocol.description)}</small></div>
-        <span class="status-badge ${profile.enabled ? "good" : "neutral"}"><i></i>${profile.enabled ? "已启用" : "未启用"}</span>
+        <span class="status-badge ${pending ? "warning" : profile.enabled ? "good" : "neutral"}"><i></i>${pending ? "待发布" : profile.enabled ? "运行配置" : "未启用"}</span>
       </div>
       <div class="switch-row">
-        <div><strong>启用此入站</strong><small>保存后进入草稿，点击“配置发布”才会写入 Runtime。</small></div>
+        <div><strong>在 ${escapeHtml(host.name)} 启用</strong><small>该设置只影响当前主机；保存后进入待发布状态。</small></div>
         <button type="button" class="switch ${profile.enabled ? "on" : ""}" data-protocol-enabled role="switch" aria-checked="${profile.enabled}"></button>
       </div>
       <p class="drawer-section-label">监听设置</p>
@@ -1144,17 +1096,19 @@ function protocolDrawerMarkup(type) {
         </div>` : ""}
       <p class="drawer-section-label">高级选项</p>
       <label class="field"><span>附加 JSON 字段</span><textarea name="options" rows="7" spellcheck="false">${escapeHtml(JSON.stringify(profile.options, null, 2))}</textarea><small class="field-hint">字段会合并进该 inbound；type、tag、监听、用户、TLS 和 Transport 由 RayLink 管理，不能在此覆盖。</small><small class="field-error"></small></label>
-      <div class="source-note"><span>能力来源：sing-box ${escapeHtml(controlPlane.installation?.version || "未安装")}</span><a href="${escapeHtml(protocol.docsUrl)}" target="_blank" rel="noreferrer">查看官方字段 ↗</a></div>
+      <div class="source-note"><span>能力来源：${escapeHtml(host.name)} · sing-box ${escapeHtml(host.runtimeVersion || (host.id === "local" ? controlPlane.installation?.version : null) || "未上报")}</span><a href="${escapeHtml(protocol.docsUrl)}" target="_blank" rel="noreferrer">查看官方字段 ↗</a></div>
     </form>`;
 }
 
-function openProtocol(type) {
-  const protocol = controlPlane.protocolCatalog.find((item) => item.type === type);
-  if (!protocol) return;
+function openProtocol(hostId, type) {
+  const host = controlPlane.hosts.find((item) => item.id === hostId);
+  const protocol = (host?.protocolCatalog || controlPlane.protocolCatalog)
+    .find((item) => item.type === type);
+  if (!protocol || !host) return;
   openDrawer({
     title: protocol.name,
-    eyebrow: "入站协议配置",
-    content: protocolDrawerMarkup(type),
+    eyebrow: `${host.name} · 入口协议`,
+    content: protocolDrawerMarkup(hostId, type),
     saveLabel: "保存协议"
   });
 }
@@ -1252,6 +1206,7 @@ async function downloadPortalConfig() {
 
 function validateDrawerForm(form) {
   let valid = true;
+  form.querySelector("[data-form-error]")?.remove();
   form.querySelectorAll(".field-error").forEach((error) => error.classList.remove("visible"));
   form.querySelectorAll("[required]").forEach((input) => {
     if (input.checkValidity()) return;
@@ -1270,18 +1225,61 @@ function validateDrawerForm(form) {
   return valid;
 }
 
+function showDrawerFormError(form, error) {
+  const fieldByCode = {
+    INVALID_LISTEN: "listen",
+    INVALID_PROTOCOL_PORT: "port",
+    PROTOCOL_PORT_CONFLICT: "port",
+    TLS_REQUIRED: "tlsMode",
+    INVALID_TLS_MODE: "tlsMode",
+    TLS_CERTIFICATE_REQUIRED: "certificatePath",
+    REALITY_FIELDS_REQUIRED: "privateKey",
+    INVALID_REALITY_PORT: "handshakePort",
+    REALITY_NOT_SUPPORTED: "tlsMode",
+    REALITY_UNAVAILABLE: "tlsMode",
+    INVALID_TRANSPORT: "transportType",
+    TRANSPORT_NOT_SUPPORTED: "transportType",
+    TRANSPORT_TLS_REQUIRED: "transportType",
+    QUIC_UNAVAILABLE: "transportType",
+    PROTOCOL_OPTION_RESERVED: "options",
+    INVALID_PROTOCOL_JSON: "options",
+    HYSTERIA_BANDWIDTH_REQUIRED: "upMbps"
+  };
+  const input = form.elements[fieldByCode[error.code]];
+  const field = input?.closest(".field");
+  if (field) {
+    let message = field.querySelector(".field-error");
+    if (!message) {
+      message = document.createElement("small");
+      message.className = "field-error";
+      field.appendChild(message);
+    }
+    message.textContent = error.message;
+    message.classList.add("visible");
+    input.focus();
+    return;
+  }
+  let message = form.querySelector("[data-form-error]");
+  if (!message) {
+    message = document.createElement("p");
+    message.className = "auth-error";
+    message.dataset.formError = "";
+    form.querySelector(".drawer-profile")?.after(message);
+  }
+  message.textContent = error.message;
+  message.classList.add("visible");
+}
+
 async function saveUserForm(form) {
   const userId = form.dataset.userId;
   const name = form.elements.name.value.trim();
   const email = form.elements.email.value.trim();
-  const enabledClients = [...form.querySelectorAll(".switch[data-capability].on")]
-    .map((button) => button.dataset.capability);
   const payload = {
     name,
     email,
     quotaGb: Number(form.elements.quota.value),
     nodeScope: labelToScope(form.elements.nodeGroup.value),
-    clientFormats: enabledClients,
+    clientFormats: ["sing-box"],
     expiresAt: form.elements.expires.value,
     usedGb: Number(form.elements.usedGb.value),
     state: form.querySelector("[data-user-enabled]").classList.contains("on") ? "active" : "disabled",
@@ -1330,7 +1328,9 @@ async function saveProtocolForm(form) {
     throw error;
   }
   if (!advancedOptions || Array.isArray(advancedOptions) || typeof advancedOptions !== "object") {
-    throw new Error("附加 JSON 必须是对象");
+    const error = new Error("附加 JSON 必须是对象");
+    error.code = "INVALID_PROTOCOL_JSON";
+    throw error;
   }
   const protocol = controlPlane.protocolCatalog.find((item) => item.type === form.dataset.protocolType);
   const fieldValue = (name, fallback = "") => form.elements[name]?.value?.trim() ?? fallback;
@@ -1341,7 +1341,7 @@ async function saveProtocolForm(form) {
       down_mbps: Number(fieldValue("downMbps", "100"))
     };
   }
-  await api(`/api/runtime/protocols/${encodeURIComponent(form.dataset.protocolType)}`, {
+  await api(`/api/hosts/${encodeURIComponent(form.dataset.hostId)}/protocols/${encodeURIComponent(form.dataset.protocolType)}`, {
     method: "PATCH",
     body: JSON.stringify({
       enabled: form.querySelector("[data-protocol-enabled]").classList.contains("on"),
@@ -1422,6 +1422,7 @@ async function saveDrawer() {
     }
     if (form.id === "protocol-drawer-form") await saveProtocolForm(form);
   } catch (error) {
+    if (form) showDrawerFormError(form, error);
     showToast("保存失败", error.message);
     elements.drawerSave.disabled = false;
     elements.drawerSave.textContent = previousLabel;
@@ -1524,6 +1525,7 @@ async function installSingBox() {
   try {
     const installation = await api("/api/runtime/install", { method: "POST" });
     await loadBootstrap();
+    if (elements.drawer.classList.contains("open")) openHost("local");
     showToast("sing-box 已安装", `当前版本 ${installation.version}，可以开始配置协议。`);
   } catch (error) {
     showToast("安装失败", error.message);
@@ -1639,10 +1641,6 @@ function selectWorkspaceTab(kind, value) {
     panel.hidden = panel.dataset[`${kind}Panel`] !== value;
   });
 
-  if (kind === "service") {
-    const inboundPanel = document.querySelector("#view-services .runtime-console");
-    if (inboundPanel) inboundPanel.hidden = value !== "inbounds";
-  }
 }
 
 function openAdvancedConfig() {
@@ -1712,15 +1710,9 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const protocolButton = event.target.closest("[data-protocol]");
+  const protocolButton = event.target.closest("[data-host-protocol]");
   if (protocolButton) {
-    openProtocol(protocolButton.dataset.protocol);
-    return;
-  }
-
-  const serviceTab = event.target.closest("[data-service-tab]");
-  if (serviceTab) {
-    selectWorkspaceTab("service", serviceTab.dataset.serviceTab);
+    openProtocol(protocolButton.dataset.hostId, protocolButton.dataset.hostProtocol);
     return;
   }
 

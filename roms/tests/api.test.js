@@ -56,6 +56,26 @@ async function api(baseUrl, cookie, path, options = {}) {
   });
 }
 
+async function enableHostShadowsocks(baseUrl, cookie, hostId, port = 8388) {
+  const response = await api(
+    baseUrl,
+    cookie,
+    `/api/hosts/${encodeURIComponent(hostId)}/protocols/shadowsocks`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        enabled: true,
+        listen: "::",
+        port,
+        tls: { mode: "none" },
+        transport: { type: "none" },
+        options: {}
+      })
+    }
+  );
+  assert.equal(response.status, 200);
+}
+
 test("authenticated bootstrap returns users with independent entitlements", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -78,7 +98,7 @@ test("authenticated bootstrap returns users with independent entitlements", asyn
   assert.equal(user.quotaGb, 120);
   assert.equal("deviceLimit" in user, false);
   assert.deepEqual(user.nodeScope, ["tokyo", "singapore"]);
-  assert.deepEqual(user.clientFormats, ["mihomo", "sing-box"]);
+  assert.deepEqual(user.clientFormats, ["sing-box"]);
   assert.equal("planId" in user, false);
   assert.equal("passwordHash" in body.users[0], false);
   assert.equal("runtimeCredential" in body.users[0], false);
@@ -325,14 +345,14 @@ test("admin detects sing-box, enables a protocol profile and triggers one-click 
   const initialResponse = await api(testApp.baseUrl, cookie, "/api/bootstrap");
   const initial = await initialResponse.json();
   assert.equal(initial.installation.installed, false);
-  assert.equal(initial.protocols.find((profile) => profile.type === "shadowsocks").enabled, true);
+  assert.equal(initial.hosts[0].protocols.find((profile) => profile.type === "shadowsocks").enabled, true);
   assert.ok(initial.protocolCatalog.some((protocol) => protocol.type === "hysteria2"));
 
   const installResponse = await api(testApp.baseUrl, cookie, "/api/runtime/install", { method: "POST" });
   assert.equal(installResponse.status, 200);
   assert.equal((await installResponse.json()).version, "1.13.12");
 
-  const updateResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vless", {
+  const updateResponse = await api(testApp.baseUrl, cookie, "/api/hosts/local/protocols/vless", {
     method: "PATCH",
     body: JSON.stringify({
       enabled: true,
@@ -351,7 +371,7 @@ test("admin detects sing-box, enables a protocol profile and triggers one-click 
   assert.equal(preview.inboundCount, 2);
   assert.deepEqual(preview.protocols, ["shadowsocks", "vless"]);
 
-  const conflictResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vmess", {
+  const conflictResponse = await api(testApp.baseUrl, cookie, "/api/hosts/local/protocols/vmess", {
     method: "PATCH",
     body: JSON.stringify({
       enabled: true,
@@ -364,6 +384,143 @@ test("admin detects sing-box, enables a protocol profile and triggers one-click 
   });
   assert.equal(conflictResponse.status, 422);
   assert.equal((await conflictResponse.json()).error.code, "PROTOCOL_PORT_CONFLICT");
+});
+
+test("protocol profiles belong to one host and never enable the same protocol on another host", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "新加坡入口",
+      address: "sg.example.com",
+      region: "singapore"
+    })
+  })).json();
+
+  const pendingUpdate = await api(
+    testApp.baseUrl,
+    cookie,
+    `/api/hosts/${encodeURIComponent(created.host.id)}/protocols/vless`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        enabled: true,
+        listen: "::",
+        port: 8443,
+        tls: { mode: "none" },
+        transport: { type: "none" },
+        options: {}
+      })
+    }
+  );
+  assert.equal(pendingUpdate.status, 409);
+  assert.equal((await pendingUpdate.json()).error.code, "HOST_CAPABILITIES_UNKNOWN");
+
+  const enrollResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "sg-vps-01",
+      platform: "linux",
+      architecture: "amd64",
+      agentVersion: "0.5.0",
+      runtimeVersion: "1.13.12",
+      buildTags: ["with_quic", "with_utls"]
+    })
+  });
+  assert.equal(enrollResponse.status, 201);
+
+  const updateResponse = await api(
+    testApp.baseUrl,
+    cookie,
+    `/api/hosts/${encodeURIComponent(created.host.id)}/protocols/vless`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        enabled: true,
+        listen: "::",
+        port: 8443,
+        tls: { mode: "none" },
+        transport: { type: "none" },
+        options: {}
+      })
+    }
+  );
+  assert.equal(updateResponse.status, 200);
+
+  const bootstrap = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  const localVless = bootstrap.hosts
+    .find((host) => host.id === "local")
+    .protocols.find((profile) => profile.type === "vless");
+  const remoteVless = bootstrap.hosts
+    .find((host) => host.id === created.host.id)
+    .protocols.find((profile) => profile.type === "vless");
+  assert.equal(localVless.enabled, false);
+  assert.equal(remoteVless.enabled, true);
+});
+
+test("client delivery keeps using the applied host protocols until the next deployment succeeds", async (t) => {
+  const testApp = await startTestApp({ proxyHost: "node.example.com" });
+  t.after(() => testApp.close());
+  const adminCookie = await login(testApp.baseUrl);
+  await api(testApp.baseUrl, adminCookie, "/api/deployments", { method: "POST" });
+  const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = portalLogin.headers.getSetCookie()[0].split(";")[0];
+
+  const update = await api(testApp.baseUrl, adminCookie, "/api/hosts/local/protocols/vless", {
+    method: "PATCH",
+    body: JSON.stringify({
+      enabled: true,
+      listen: "::",
+      port: 8443,
+      tls: { mode: "none" },
+      transport: { type: "none" },
+      options: {}
+    })
+  });
+  assert.equal(update.status, 200);
+
+  const beforePublish = await (await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  })).json();
+  assert.deepEqual(
+    beforePublish.outbounds.filter((outbound) => ["shadowsocks", "vless"].includes(outbound.type))
+      .map((outbound) => outbound.type),
+    ["shadowsocks"]
+  );
+
+  await api(testApp.baseUrl, adminCookie, "/api/deployments", { method: "POST" });
+  const afterPublish = await (await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  })).json();
+  assert.deepEqual(
+    afterPublish.outbounds.filter((outbound) => ["shadowsocks", "vless"].includes(outbound.type))
+      .map((outbound) => outbound.type),
+    ["shadowsocks", "vless"]
+  );
+});
+
+test("admin surface keeps protocols on hosts and exposes only sing-box client delivery", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const response = await fetch(`${testApp.baseUrl}/`);
+  const html = await response.text();
+  const script = await (await fetch(`${testApp.baseUrl}/app.js`)).text();
+
+  assert.doesNotMatch(html, /data-view="services"/);
+  assert.doesNotMatch(html, /data-view-target="services"/);
+  assert.doesNotMatch(script, /Mihomo|mihomo|Clash/);
+  assert.match(html, /入口协议/);
 });
 
 test("admin checks, upgrades the local Runtime and queues a remote Runtime upgrade", async (t) => {
@@ -503,7 +660,7 @@ test("admin cannot enable Reality or QUIC transport when the sing-box build tags
     options: {}
   };
 
-  const realityResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vless", {
+  const realityResponse = await api(testApp.baseUrl, cookie, "/api/hosts/local/protocols/vless", {
     method: "PATCH",
     body: JSON.stringify({
       ...baseProfile,
@@ -522,7 +679,7 @@ test("admin cannot enable Reality or QUIC transport when the sing-box build tags
   assert.equal(realityResponse.status, 422);
   assert.equal((await realityResponse.json()).error.code, "REALITY_UNAVAILABLE");
 
-  const quicResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vless", {
+  const quicResponse = await api(testApp.baseUrl, cookie, "/api/hosts/local/protocols/vless", {
     method: "PATCH",
     body: JSON.stringify({
       ...baseProfile,
@@ -1055,6 +1212,7 @@ test("user subscription includes every online host allowed by the user node scop
   });
   assert.equal(enrollResponse.status, 201);
   const nodeCredential = await enrollResponse.json();
+  await enableHostShadowsocks(testApp.baseUrl, cookie, nodeCredential.hostId);
 
   const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
     method: "POST",
@@ -1221,6 +1379,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
     })
   });
   const enrolled = await enrollResponse.json();
+  await enableHostShadowsocks(testApp.baseUrl, cookie, enrolled.hostId);
   const nodeHeaders = {
     authorization: `Bearer ${enrolled.nodeSecret}`,
     "x-raylink-host-id": enrolled.hostId
@@ -1293,6 +1452,7 @@ test("remote entitlement revocation is critical, retryable and visible until app
       runtimeVersion: "1.13.12"
     })
   })).json();
+  await enableHostShadowsocks(testApp.baseUrl, cookie, enrolled.hostId);
   const nodeHeaders = {
     authorization: `Bearer ${enrolled.nodeSecret}`,
     "x-raylink-host-id": enrolled.hostId

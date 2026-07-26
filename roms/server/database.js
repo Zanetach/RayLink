@@ -26,7 +26,7 @@ const seedPlans = [
     quotaGb: 120,
     legacyDeviceLimit: 3,
     nodeScope: ["tokyo", "singapore"],
-    clientFormats: ["mihomo", "sing-box"],
+    clientFormats: ["sing-box"],
     description: "适合日常办公和开发",
     tone: "standard"
   },
@@ -36,7 +36,7 @@ const seedPlans = [
     quotaGb: 320,
     legacyDeviceLimit: 5,
     nodeScope: ["all"],
-    clientFormats: ["mihomo", "sing-box", "download"],
+    clientFormats: ["sing-box"],
     description: "面向高流量研发团队",
     tone: "premium"
   },
@@ -46,7 +46,7 @@ const seedPlans = [
     quotaGb: 36,
     legacyDeviceLimit: 1,
     nodeScope: ["tokyo"],
-    clientFormats: ["mihomo", "sing-box"],
+    clientFormats: ["sing-box"],
     description: "外部协作和短期项目",
     tone: "temporary"
   }
@@ -94,13 +94,12 @@ function validateUserEntitlement({ quotaGb, nodeScope, clientFormats }) {
   ) {
     throw domainError("INVALID_NODE_SCOPE", "节点范围必须使用有效的区域标识");
   }
-  const supportedFormats = new Set(["mihomo", "sing-box", "download"]);
   if (
     !Array.isArray(clientFormats)
-    || !clientFormats.includes("sing-box")
-    || clientFormats.some((format) => !supportedFormats.has(format))
+    || clientFormats.length !== 1
+    || clientFormats[0] !== "sing-box"
   ) {
-    throw domainError("INVALID_CLIENT_FORMATS", "用户权益必须包含 sing-box 客户端格式");
+    throw domainError("INVALID_CLIENT_FORMATS", "RayLink 当前仅下发 sing-box 客户端配置");
   }
 }
 
@@ -186,6 +185,9 @@ function hostFromRow(row) {
     agentVersion: row.agent_version || null,
     runtimeVersion: row.runtime_version || null,
     buildTags,
+    appliedProtocols: row.applied_protocols_json
+      ? normalizeProtocolConfigs(parseJson(row.applied_protocols_json, []))
+      : [],
     assetEncryptionReady: Boolean(row.encryption_public_key),
     usageMetering: {
       supported: usageSupported,
@@ -346,6 +348,7 @@ export class RayLinkStore {
         agent_version TEXT,
         runtime_version TEXT,
         build_tags_json TEXT NOT NULL DEFAULT '[]',
+        applied_protocols_json TEXT,
         encryption_public_key TEXT,
         usage_last_sample_at TEXT,
         usage_last_error TEXT,
@@ -368,6 +371,13 @@ export class RayLinkStore {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS host_protocols (
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        config_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(host_id, type)
       );
       CREATE TABLE IF NOT EXISTS deployments (
         id TEXT PRIMARY KEY,
@@ -505,6 +515,7 @@ export class RayLinkStore {
       ["agent_version", "TEXT"],
       ["runtime_version", "TEXT"],
       ["build_tags_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["applied_protocols_json", "TEXT"],
       ["encryption_public_key", "TEXT"],
       ["usage_last_sample_at", "TEXT"],
       ["usage_last_error", "TEXT"],
@@ -533,6 +544,11 @@ export class RayLinkStore {
           node_scope_json = COALESCE(node_scope_json, (SELECT node_scope_json FROM plans WHERE plans.id = users.plan_id), '["all"]'),
           client_formats_json = COALESCE(client_formats_json, (SELECT client_formats_json FROM plans WHERE plans.id = users.plan_id), '["sing-box"]')
     `);
+    this.db.prepare(`
+      UPDATE users
+      SET client_formats_json = '["sing-box"]'
+      WHERE client_formats_json IS NULL OR client_formats_json <> '["sing-box"]'
+    `).run();
   }
 
   seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData }) {
@@ -623,6 +639,32 @@ export class RayLinkStore {
       INSERT OR IGNORE INTO settings (key, value, updated_at)
       VALUES ('runtime_protocols', ?, ?)
     `).run(JSON.stringify(defaultProtocolConfigs(initialListenPort)), createdAt);
+    const legacyProtocols = this.db.prepare(
+      "SELECT value FROM settings WHERE key = 'runtime_protocols'"
+    ).get();
+    this.seedHostProtocolConfigs(
+      "local",
+      normalizeProtocolConfigs(parseJson(legacyProtocols?.value, []))
+    );
+    this.db.prepare(`
+      UPDATE hosts
+      SET applied_protocols_json = ?, updated_at = ?
+      WHERE id = 'local' AND applied_protocols_json IS NULL
+    `).run(
+      JSON.stringify(normalizeProtocolConfigs(parseJson(legacyProtocols?.value, []))),
+      createdAt
+    );
+  }
+
+  seedHostProtocolConfigs(hostId, profiles) {
+    const insert = this.db.prepare(`
+      INSERT OR IGNORE INTO host_protocols (host_id, type, config_json, updated_at)
+      VALUES (?, ?, ?, ?)
+    `);
+    const timestamp = nowIso();
+    for (const profile of profiles) {
+      insert.run(hostId, profile.type, JSON.stringify(profile), timestamp);
+    }
   }
 
   async authenticateAdmin(username, password) {
@@ -967,7 +1009,10 @@ export class RayLinkStore {
       LEFT JOIN node_tasks ON node_tasks.host_id = hosts.id
       GROUP BY hosts.id
       ORDER BY hosts.created_at
-    `).all().map(hostFromRow);
+    `).all().map((row) => {
+      const host = hostFromRow(row);
+      return { ...host, protocols: this.listHostProtocolConfigs(host.id) };
+    });
   }
 
   recordUsageSnapshot(hostId, input = {}) {
@@ -1139,12 +1184,30 @@ export class RayLinkStore {
              AND node_tasks.status = 'succeeded'
          )
       ORDER BY hosts.created_at
-    `).all().map(hostFromRow);
+    `).all().map((row) => {
+      const host = hostFromRow(row);
+      return { ...host, protocols: this.listHostProtocolConfigs(host.id) };
+    });
+  }
+
+  markHostProtocolsApplied(hostId, profiles = this.listHostProtocolConfigs(hostId)) {
+    const normalized = normalizeProtocolConfigs(profiles);
+    const result = this.db.prepare(`
+      UPDATE hosts
+      SET applied_protocols_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(JSON.stringify(normalized), nowIso(), hostId);
+    if (Number(result.changes) === 0) {
+      throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    }
+    return normalized;
   }
 
   getHost(id) {
     const row = this.db.prepare("SELECT * FROM hosts WHERE id = ?").get(id);
-    return row ? hostFromRow(row) : null;
+    if (!row) return null;
+    const host = hostFromRow(row);
+    return { ...host, protocols: this.listHostProtocolConfigs(id) };
   }
 
   nodeEncryptionPublicKey(hostId) {
@@ -1173,6 +1236,10 @@ export class RayLinkStore {
       hashSessionSecret(enrollmentToken),
       timestamp,
       timestamp
+    );
+    this.seedHostProtocolConfigs(
+      id,
+      defaultProtocolConfigs().map((profile) => ({ ...profile, enabled: false }))
     );
     return { host: this.getHost(id), enrollmentToken };
   }
@@ -1539,7 +1606,7 @@ export class RayLinkStore {
 
   completeNodeTask(hostId, taskId, input = {}) {
     const task = this.db.prepare(`
-      SELECT id, kind, status, attempt_count, max_attempts
+      SELECT id, kind, status, attempt_count, max_attempts, payload_json
       FROM node_tasks
       WHERE id = ? AND host_id = ?
     `).get(taskId, hostId);
@@ -1596,6 +1663,12 @@ export class RayLinkStore {
       timestamp,
       hostId
     );
+    if (succeeded && task.kind === "publish-config") {
+      const payload = parseJson(task.payload_json, {});
+      if (Array.isArray(payload.protocols)) {
+        this.markHostProtocolsApplied(hostId, payload.protocols);
+      }
+    }
     return {
       id: taskId,
       status,
@@ -1795,17 +1868,25 @@ export class RayLinkStore {
       host,
       masterPassword: setting.value,
       users,
-      protocols: this.listProtocolConfigs()
+      protocols: this.listHostProtocolConfigs(hostId)
     };
   }
 
-  listProtocolConfigs() {
-    const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'runtime_protocols'").get();
-    return normalizeProtocolConfigs(parseJson(setting?.value, []));
+  listHostProtocolConfigs(hostId) {
+    const hostExists = this.db.prepare("SELECT 1 FROM hosts WHERE id = ?").get(hostId);
+    if (!hostExists) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    const rows = this.db.prepare(`
+      SELECT type, config_json
+      FROM host_protocols
+      WHERE host_id = ?
+    `).all(hostId);
+    const stored = new Map(rows.map((row) => [row.type, parseJson(row.config_json, null)]));
+    const defaults = defaultProtocolConfigs().map((profile) => ({ ...profile, enabled: false }));
+    return normalizeProtocolConfigs(defaults.map((profile) => stored.get(profile.type) || profile));
   }
 
-  updateProtocolConfig(type, input) {
-    const profiles = this.listProtocolConfigs();
+  prepareHostProtocolConfig(hostId, type, input) {
+    const profiles = this.listHostProtocolConfigs(hostId);
     const index = profiles.findIndex((profile) => profile.type === type);
     if (index < 0) throw domainError("PROTOCOL_NOT_FOUND", "sing-box 入站协议不存在", 404);
     const current = profiles[index];
@@ -1817,15 +1898,31 @@ export class RayLinkStore {
       transport: { ...current.transport, ...(input.transport || {}) },
       options: input.options === undefined ? current.options : input.options
     });
-    const candidate = profiles.toSpliced(index, 1, next);
-    assertProtocolSet(candidate);
-    this.db.prepare(`
-      UPDATE settings SET value = ?, updated_at = ? WHERE key = 'runtime_protocols'
-    `).run(JSON.stringify(candidate), nowIso());
+    assertProtocolSet(profiles.toSpliced(index, 1, next));
     return next;
   }
 
-  createDeployment({ version, configJson, checksum, eligibleUsers, publisherAdminId = null }) {
+  updateHostProtocolConfig(hostId, type, input) {
+    const next = this.prepareHostProtocolConfig(hostId, type, input);
+    this.db.prepare(`
+      INSERT INTO host_protocols (host_id, type, config_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(host_id, type) DO UPDATE SET
+        config_json = excluded.config_json,
+        updated_at = excluded.updated_at
+    `).run(hostId, type, JSON.stringify(next), nowIso());
+    return next;
+  }
+
+  createDeployment({
+    version,
+    configJson,
+    checksum,
+    eligibleUsers,
+    protocols = [],
+    hostSnapshots = [],
+    publisherAdminId = null
+  }) {
     const id = randomUUID();
     this.db.prepare(`
       INSERT INTO deployments (
@@ -1834,7 +1931,13 @@ export class RayLinkStore {
     `).run(
       id,
       version,
-      JSON.stringify({ config: configJson, checksum, eligibleUsers }),
+      JSON.stringify({
+        config: configJson,
+        checksum,
+        eligibleUsers,
+        protocols,
+        hostSnapshots
+      }),
       publisherAdminId,
       nowIso()
     );
@@ -1887,13 +1990,22 @@ export class RayLinkStore {
     if (!row) throw domainError("DEPLOYMENT_NOT_FOUND", "部署记录不存在", 404);
     const metadata = parseJson(row.config_json, {});
     if (!metadata.config) throw domainError("DEPLOYMENT_SNAPSHOT_MISSING", "部署快照不可用", 409);
+    const inboundTypes = new Set(metadata.config.inbounds?.map((inbound) => inbound.type) || []);
+    const protocols = Array.isArray(metadata.protocols) && metadata.protocols.length
+      ? normalizeProtocolConfigs(metadata.protocols)
+      : this.listHostProtocolConfigs("local").map((profile) => ({
+          ...profile,
+          enabled: inboundTypes.has(profile.type)
+        }));
     return {
       id: row.id,
       version: row.version,
       status: row.status,
       config: metadata.config,
       checksum: metadata.checksum,
-      eligibleUsers: metadata.eligibleUsers
+      eligibleUsers: metadata.eligibleUsers,
+      protocols,
+      hostSnapshots: Array.isArray(metadata.hostSnapshots) ? metadata.hostSnapshots : []
     };
   }
 

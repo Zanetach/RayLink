@@ -294,13 +294,13 @@ export function buildProtocolClientConfig({ profiles, credential, server, ruleSe
 }
 
 export function buildMultiHostProtocolClientConfig({
-  profiles,
   credential,
   hosts,
   ruleSetBaseUrl = null
 }) {
-  const managed = profiles.filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
   const protocolOutbounds = hosts.flatMap((host) => {
+    const managed = (host.protocols || [])
+      .filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
     const hostTag = String(host.id || host.name || "node")
       .toLowerCase()
       .replace(/[^a-z0-9-]+/g, "-")

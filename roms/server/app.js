@@ -15,7 +15,6 @@ import {
 import { LocalSingBoxAdapter } from "./singbox/local-adapter.js";
 import { ManagedRuleSetCache } from "./singbox/rule-set-cache.js";
 import {
-  normalizeProtocolConfig,
   protocolAvailability,
   protocolCatalog
 } from "./singbox/protocol-catalog.js";
@@ -472,7 +471,10 @@ export async function createRayLinkApp(options) {
       const regionAllowed = credential.nodeScope.includes("all")
         || credential.nodeScope.includes(host.region);
       return connected && regionAllowed;
-    });
+    }).map((host) => ({
+      ...host,
+      protocols: host.appliedProtocols
+    }));
     if (
       !["active", "warning"].includes(credential.state)
       || credential.portalStatus !== "active"
@@ -488,8 +490,6 @@ export async function createRayLinkApp(options) {
     return buildUserClientConfig({
       credential,
       hosts: eligibleHosts,
-      port: listenPort,
-      protocols: store.listProtocolConfigs(),
       ruleSetBaseUrl: ruleSetCache.available()
         ? new URL("/rule-sets/", currentPublicOrigin()).toString()
         : null
@@ -925,8 +925,27 @@ export async function createRayLinkApp(options) {
         if (request.method === "GET" && url.pathname === "/api/bootstrap") {
           const installation = await refreshLocalRuntimeCapabilities();
           const runtime = await runtimeManager.status();
+          const bootstrap = store.bootstrap(admin);
+          const hosts = bootstrap.hosts.map((host) => {
+            const capabilities = host.id === "local"
+              ? installation
+              : {
+                  installed: Boolean(host.runtimeVersion),
+                  version: host.runtimeVersion,
+                  platform: host.platform || "linux",
+                  architecture: host.architecture,
+                  tags: host.buildTags
+                };
+            return {
+              ...host,
+              protocolCatalog: protocolCatalog.map(
+                (protocol) => protocolAvailability(protocol, capabilities)
+              )
+            };
+          });
           sendJson(response, 200, {
-            ...store.bootstrap(admin),
+            ...bootstrap,
+            hosts,
             telemetry: store.telemetryOverview(),
             runtime,
             runtimePreview: runtimeManager.preview(),
@@ -935,7 +954,6 @@ export async function createRayLinkApp(options) {
             runtimeUpdate: typeof installer.releaseStatus === "function"
               ? installer.releaseStatus()
               : null,
-            protocols: store.listProtocolConfigs(),
             protocolCatalog: protocolCatalog.map((protocol) => protocolAvailability(protocol, installation))
           });
           return;
@@ -996,28 +1014,41 @@ export async function createRayLinkApp(options) {
           return;
         }
 
-        const protocolMatch = url.pathname.match(/^\/api\/runtime\/protocols\/([^/]+)$/);
+        const protocolMatch = url.pathname.match(/^\/api\/hosts\/([^/]+)\/protocols\/([^/]+)$/);
         if (request.method === "PATCH" && protocolMatch) {
-          const protocolType = decodeURIComponent(protocolMatch[1]);
+          const hostId = decodeURIComponent(protocolMatch[1]);
+          const protocolType = decodeURIComponent(protocolMatch[2]);
           const input = await readJson(request);
-          const current = store.listProtocolConfigs().find((profile) => profile.type === protocolType);
-          if (!current) {
-            sendJson(response, 404, { error: { code: "PROTOCOL_NOT_FOUND", message: "协议不存在" } });
+          const host = store.getHost(hostId);
+          if (!host) {
+            sendJson(response, 404, { error: { code: "HOST_NOT_FOUND", message: "主机不存在" } });
             return;
           }
-          const candidate = normalizeProtocolConfig({
-            ...current,
-            ...input,
-            type: protocolType,
-            tls: { ...current.tls, ...(input.tls || {}) },
-            transport: { ...current.transport, ...(input.transport || {}) },
-            options: input.options === undefined ? current.options : input.options
-          });
+          const candidate = store.prepareHostProtocolConfig(hostId, protocolType, input);
           if (candidate.enabled) {
-            const installation = await installer.status();
+            if (host.kind === "remote" && !host.runtimeVersion) {
+              throw httpError(
+                "HOST_CAPABILITIES_UNKNOWN",
+                "远程主机尚未上报 sing-box 能力，请先完成 RayLink Node 接入",
+                409
+              );
+            }
+            const installation = host.id === "local"
+              ? await installer.status()
+              : host.runtimeVersion
+                ? {
+                    installed: true,
+                    version: host.runtimeVersion,
+                    platform: host.platform,
+                    architecture: host.architecture,
+                    tags: host.buildTags
+                  }
+                : null;
             const catalog = protocolCatalog.find((entry) => entry.type === protocolType);
-            const availability = protocolAvailability(catalog, installation);
-            if (!availability.available) {
+            const availability = installation
+              ? protocolAvailability(catalog, installation)
+              : null;
+            if (availability && !availability.available) {
               sendJson(response, 422, {
                 error: {
                   code: "PROTOCOL_UNAVAILABLE",
@@ -1030,20 +1061,20 @@ export async function createRayLinkApp(options) {
               });
               return;
             }
-            if (candidate.tls.mode === "reality" && !availability.realityAvailable) {
+            if (availability && candidate.tls.mode === "reality" && !availability.realityAvailable) {
               sendJson(response, 422, {
                 error: { code: "REALITY_UNAVAILABLE", message: "当前 sing-box 构建缺少 with_utls" }
               });
               return;
             }
-            if (candidate.transport.type === "quic" && !availability.quicTransportAvailable) {
+            if (availability && candidate.transport.type === "quic" && !availability.quicTransportAvailable) {
               sendJson(response, 422, {
                 error: { code: "QUIC_UNAVAILABLE", message: "当前 sing-box 构建缺少 with_quic" }
               });
               return;
             }
           }
-          sendJson(response, 200, store.updateProtocolConfig(protocolType, input));
+          sendJson(response, 200, store.updateHostProtocolConfig(hostId, protocolType, input));
           return;
         }
 
