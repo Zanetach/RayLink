@@ -12,6 +12,9 @@ export function loadConfig(env = process.env) {
   const host = env.RAYLINK_HOST || "127.0.0.1";
   const port = positiveInteger(env.RAYLINK_PORT, 4173, "RAYLINK_PORT");
   const publicOrigin = env.RAYLINK_PUBLIC_ORIGIN || `http://${host}:${port}`;
+  if (env.NODE_ENV === "production" && new URL(publicOrigin).protocol !== "https:") {
+    throw new Error("RAYLINK_PUBLIC_ORIGIN must use HTTPS in production");
+  }
   const runtimeMode = env.RAYLINK_RUNTIME_MODE || "dry-run";
   if (!["dry-run", "systemd"].includes(runtimeMode)) {
     throw new Error("RAYLINK_RUNTIME_MODE must be dry-run or systemd");
@@ -32,6 +35,7 @@ export function loadConfig(env = process.env) {
     publicOrigin,
     proxyHost: env.RAYLINK_PROXY_HOST || new URL(publicOrigin).hostname,
     runtimeMode,
+    preferMeteredRuntime: env.RAYLINK_USER_METERING !== "false",
     singBoxBinary: env.SING_BOX_BIN || "sing-box",
     systemdUnit: env.SING_BOX_SYSTEMD_UNIT || "sing-box.service",
     listenPort: positiveInteger(env.RAYLINK_PROXY_PORT, 8388, "RAYLINK_PROXY_PORT")

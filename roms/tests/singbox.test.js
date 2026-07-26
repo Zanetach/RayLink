@@ -89,3 +89,32 @@ test("sing-box config contains one credential per eligible user", () => {
   }]);
   assert.equal(config.outbounds[0].type, "direct");
 });
+
+test("metering-capable Runtime enables loopback V2Ray Stats for eligible users only", () => {
+  const config = buildSingBoxConfig({
+    host: {
+      id: "remote-1",
+      region: "tokyo",
+      buildTags: ["with_quic", "with_v2ray_api"]
+    },
+    masterPassword: "MDEyMzQ1Njc4OWFiY2RlZg==",
+    users: [{
+      email: "metered@example.com",
+      state: "active",
+      portalStatus: "active",
+      usedGb: 0,
+      quotaGb: 10,
+      expiresAt: "2027-01-31",
+      runtimePassword: "YWJjZGVmZ2hpamtsbW5vcA==",
+      nodeScope: ["all"]
+    }]
+  }, { now: new Date("2026-07-26T00:00:00.000Z") });
+
+  assert.deepEqual(config.experimental.v2ray_api, {
+    listen: "127.0.0.1:10085",
+    stats: {
+      enabled: true,
+      users: ["metered@example.com"]
+    }
+  });
+});

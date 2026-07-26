@@ -372,11 +372,12 @@ test("admin checks, upgrades the local Runtime and queues a remote Runtime upgra
   const release = () => ({
     status: "ready",
     currentVersion: localVersion,
-    latestVersion: "1.13.13",
-    updateAvailable: localVersion !== "1.13.13",
+    latestVersion: "1.13.14",
+    approvedVersion: "1.13.14",
+    updateAvailable: localVersion !== "1.13.14",
     compatible: true,
     checkedAt: "2026-07-26T08:00:00.000Z",
-    releaseUrl: "https://github.com/SagerNet/sing-box/releases/tag/v1.13.13"
+    releaseUrl: "https://github.com/SagerNet/sing-box/releases/tag/v1.13.14"
   });
   const installer = {
     async status() {
@@ -405,13 +406,13 @@ test("admin checks, upgrades the local Runtime and queues a remote Runtime upgra
 
   const checkResponse = await api(testApp.baseUrl, cookie, "/api/runtime/update");
   assert.equal(checkResponse.status, 200);
-  assert.equal((await checkResponse.json()).latestVersion, "1.13.13");
+  assert.equal((await checkResponse.json()).latestVersion, "1.13.14");
 
   const upgradeResponse = await api(testApp.baseUrl, cookie, "/api/runtime/upgrade", {
     method: "POST"
   });
   assert.equal(upgradeResponse.status, 200);
-  assert.equal((await upgradeResponse.json()).version, "1.13.13");
+  assert.equal((await upgradeResponse.json()).version, "1.13.14");
   assert.equal(upgradeCalls, 1);
 
   const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
@@ -428,8 +429,9 @@ test("admin checks, upgrades the local Runtime and queues a remote Runtime upgra
     body: JSON.stringify({
       token: created.enrollmentToken,
       hostname: "upgrade-sg",
-      agentVersion: "0.4.0",
-      runtimeVersion: "1.13.12"
+      agentVersion: "0.5.0",
+      runtimeVersion: "1.13.14",
+      buildTags: ["with_quic"]
     })
   })).json();
 
@@ -441,7 +443,7 @@ test("admin checks, upgrades the local Runtime and queues a remote Runtime upgra
   );
   assert.equal(remoteUpgrade.status, 202);
   const queued = await remoteUpgrade.json();
-  assert.equal(queued.targetVersion, "1.13.13");
+  assert.equal(queued.targetVersion, "1.13.14");
 
   const task = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
     headers: {
@@ -450,7 +452,7 @@ test("admin checks, upgrades the local Runtime and queues a remote Runtime upgra
     }
   })).json();
   assert.equal(task.kind, "upgrade-runtime");
-  assert.equal(task.payload.targetVersion, "1.13.13");
+  assert.equal(task.payload.targetVersion, "1.13.14");
   await fetch(`${testApp.baseUrl}/api/node/tasks/${encodeURIComponent(task.id)}/complete`, {
     method: "POST",
     headers: {
@@ -1047,7 +1049,7 @@ test("user subscription includes every online host allowed by the user node scop
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "x64",
-      agentVersion: "0.4.0",
+      agentVersion: "0.5.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1160,7 +1162,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
   assert.equal(blockedResponse.status, 426);
   const blocked = await blockedResponse.json();
   assert.equal(blocked.error.code, "NODE_UPGRADE_REQUIRED");
-  assert.equal(blocked.requiredVersion, "0.4.0");
+  assert.equal(blocked.requiredVersion, "0.5.0");
 
   const beforeUpgrade = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
   const waitingHost = beforeUpgrade.hosts.find((host) => host.id === enrolled.hostId);
@@ -1170,7 +1172,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
     method: "POST",
     headers: { ...nodeHeaders, "content-type": "application/json" },
     body: JSON.stringify({
-      agentVersion: "0.4.0",
+      agentVersion: "0.5.0",
       runtimeVersion: "1.13.12",
       telemetry: { serviceStatus: "running" }
     })
@@ -1214,7 +1216,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.4.0",
+      agentVersion: "0.5.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1287,7 +1289,7 @@ test("remote entitlement revocation is critical, retryable and visible until app
       hostname: "revoke-node",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.4.0",
+      agentVersion: "0.5.0",
       runtimeVersion: "1.13.12"
     })
   })).json();
@@ -1491,6 +1493,105 @@ test("recorded usage at the user quota removes the user from runtime and blocks 
   assert.equal((await configResponse.json()).error.code, "ENTITLEMENT_INACTIVE");
 });
 
+test("RayLink Node reports real cumulative user counters idempotently and enforces quota", async (t) => {
+  const testApp = await startTestApp({ seedDemoData: false });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const userResponse = await api(testApp.baseUrl, cookie, "/api/users", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Usage User",
+      email: "usage@example.com",
+      password: "password-123",
+      portalStatus: "active",
+      state: "active",
+      quotaGb: 1,
+      nodeScope: ["singapore"],
+      clientFormats: ["sing-box"],
+      expiresAt: "2027-01-01"
+    })
+  });
+  assert.ok([201, 202].includes(userResponse.status));
+  const user = await userResponse.json();
+  const hostResponse = await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Usage Host",
+      address: "usage.example.com",
+      region: "singapore"
+    })
+  });
+  const createdHost = await hostResponse.json();
+  const enrolled = await (await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: createdHost.enrollmentToken,
+      agentVersion: "0.5.0",
+      runtimeVersion: "1.13.14",
+      buildTags: ["with_v2ray_api"]
+    })
+  })).json();
+  const nodeHeaders = {
+    "content-type": "application/json",
+    authorization: `Bearer ${enrolled.nodeSecret}`,
+    "x-raylink-host-id": enrolled.hostId
+  };
+  const initialDeployment = await api(testApp.baseUrl, cookie, "/api/deployments", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+  assert.equal(initialDeployment.status, 201);
+  const failedStatus = await fetch(`${testApp.baseUrl}/api/node/usage/status`, {
+    method: "POST",
+    headers: nodeHeaders,
+    body: JSON.stringify({ status: "error", error: "stats endpoint unavailable" })
+  });
+  assert.equal(failedStatus.status, 200);
+  assert.equal((await failedStatus.json()).usageMetering.status, "error");
+  const usage = {
+    sampleId: "usage-sample-0001",
+    runtimeInstanceId: "runtime-instance-0001",
+    observedAt: "2026-07-26T12:00:00.000Z",
+    users: [{
+      name: user.email,
+      uplinkBytes: 400 * 1024 ** 2,
+      downlinkBytes: 700 * 1024 ** 2
+    }]
+  };
+  const first = await fetch(`${testApp.baseUrl}/api/node/usage`, {
+    method: "POST",
+    headers: nodeHeaders,
+    body: JSON.stringify(usage)
+  });
+  assert.equal(first.status, 200);
+  const result = await first.json();
+  assert.equal(result.appliedBytes, 1_100 * 1024 ** 2);
+  assert.deepEqual(result.quotaExceededUserIds, [user.id]);
+  assert.equal(result.runtimeSync.status, "published");
+  assert.equal(testApp.app.store.getHost(enrolled.hostId).usageMetering.status, "healthy");
+
+  const revocationTaskResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: {
+      authorization: `Bearer ${enrolled.nodeSecret}`,
+      "x-raylink-host-id": enrolled.hostId
+    }
+  });
+  assert.equal(revocationTaskResponse.status, 200);
+  const revocationTask = await revocationTaskResponse.json();
+  assert.equal(revocationTask.kind, "publish-config");
+  assert.equal(revocationTask.priority, "critical");
+  assert.equal(revocationTask.payload.configText.includes(user.email), false);
+
+  const duplicate = await fetch(`${testApp.baseUrl}/api/node/usage`, {
+    method: "POST",
+    headers: nodeHeaders,
+    body: JSON.stringify(usage)
+  });
+  assert.equal((await duplicate.json()).duplicate, true);
+  assert.ok(testApp.app.store.getUser(user.id).usedGb > 1);
+});
+
 test("control plane serves the RayLink web application on the same origin", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -1519,21 +1620,25 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(nodeInstallerResponse.headers.get("content-type"), /text\/plain/);
   const nodeInstaller = await nodeInstallerResponse.text();
   assert.match(nodeInstaller, /raylink-node\.service/);
-  assert.match(nodeInstaller, /installed_sing_box_version/);
+  assert.match(nodeInstaller, /build-metered-runtime\.sh/);
   assert.match(nodeInstaller, /systemctl is-active --quiet sing-box\.service/);
   assert.match(nodeInstaller, /systemctl disable sing-box\.service/);
   assert.doesNotMatch(nodeInstaller, /disable --now sing-box\.service/);
-  assert.ok(
-    nodeInstaller.indexOf("systemctl is-active --quiet sing-box.service")
-      < nodeInstaller.indexOf("https://sing-box.app/install.sh")
+  assert.doesNotMatch(nodeInstaller, /sing-box\.app\/install\.sh/);
+  const meteredBuilderResponse = await fetch(
+    `${testApp.baseUrl}/node/build-metered-runtime.sh`
   );
+  assert.equal(meteredBuilderResponse.status, 200);
+  const meteredBuilder = await meteredBuilderResponse.text();
+  assert.match(meteredBuilder, /with_v2ray_api/);
+  assert.match(meteredBuilder, /sha256sum -c/);
 
   const nodeRuntimeResponse = await fetch(`${testApp.baseUrl}/node/raylink-node.mjs`);
   assert.equal(nodeRuntimeResponse.status, 200);
   assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);
   const nodeRuntime = await nodeRuntimeResponse.text();
   assert.match(nodeRuntime, /class RayLinkNode/);
-  assert.match(nodeRuntime, /AGENT_VERSION = "0\.4\.0"/);
+  assert.match(nodeRuntime, /AGENT_VERSION = "0\.5\.0"/);
   assert.match(nodeRuntime, /upgrade-runtime/);
 
   const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);

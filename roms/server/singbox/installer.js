@@ -3,13 +3,18 @@ import { randomBytes } from "node:crypto";
 import { access, chmod, copyFile, mkdir } from "node:fs/promises";
 import { platform as currentPlatform, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const TARGET_VERSION = "1.13.12";
+export const APPROVED_METERED_RUNTIME_VERSION = "1.13.14";
+const TARGET_VERSION = APPROVED_METERED_RUNTIME_VERSION;
 const SUPPORTED_VERSION_SERIES = "1.13";
 const LATEST_RELEASE_URL = "https://api.github.com/repos/SagerNet/sing-box/releases/latest";
 const LATEST_RELEASE_REDIRECT_URL = "https://github.com/SagerNet/sing-box/releases/latest";
+const defaultMeteredRuntimeBuilder = fileURLToPath(
+  new URL("../../web/node/build-metered-runtime.sh", import.meta.url)
+);
 
 export class SingBoxInstaller {
   constructor({
@@ -21,6 +26,8 @@ export class SingBoxInstaller {
     activeConfigPath = null,
     runtimeMode = "dry-run",
     systemdUnit = "sing-box.service",
+    preferMeteredRuntime = false,
+    meteredRuntimeBuilder = defaultMeteredRuntimeBuilder,
     clock = () => new Date(),
     healthCheckDelayMs = 2_000
   } = {}) {
@@ -32,6 +39,8 @@ export class SingBoxInstaller {
     this.activeConfigPath = activeConfigPath;
     this.runtimeMode = runtimeMode;
     this.systemdUnit = systemdUnit;
+    this.preferMeteredRuntime = this.platform === "linux" || Boolean(preferMeteredRuntime);
+    this.meteredRuntimeBuilder = meteredRuntimeBuilder;
     this.clock = clock;
     this.healthCheckDelayMs = Math.max(0, Number(healthCheckDelayMs) || 0);
     this.installing = false;
@@ -90,6 +99,7 @@ export class SingBoxInstaller {
         existing.installed
         && normalizeVersion(existing.version)
         && compareVersions(existing.version, TARGET_VERSION) >= 0
+        && (!this.preferMeteredRuntime || existing.tags.includes("with_v2ray_api"))
       ) {
         return { ...existing, alreadyInstalled: true };
       }
@@ -99,13 +109,11 @@ export class SingBoxInstaller {
           maxBuffer: 8 * 1024 * 1024
         });
       } else if (this.platform === "linux") {
-        await this.runner("sh", [
-          "-c",
-          "curl -fsSL https://sing-box.app/install.sh | sh -s -- --version 1.13.12"
-        ], {
-          timeout: 10 * 60 * 1000,
-          maxBuffer: 8 * 1024 * 1024
-        });
+        const outputPath = isAbsolute(this.binaryPath)
+          ? this.binaryPath
+          : "/usr/local/bin/raylink-sing-box";
+        await this.installMeteredVersion(TARGET_VERSION, outputPath);
+        this.binaryPath = outputPath;
       } else {
         throw installerError(
           "INSTALLATION_UNSUPPORTED",
@@ -117,10 +125,20 @@ export class SingBoxInstaller {
       if (!installed.installed) {
         throw installerError("INSTALLATION_NOT_DETECTED", "安装命令已完成，但未找到 sing-box 可执行文件", 500);
       }
-      if (installed.version !== TARGET_VERSION) {
+      const expectedVersion = this.platform === "linux"
+        ? TARGET_VERSION
+        : installed.version;
+      if (installed.version !== expectedVersion) {
         throw installerError(
           "INSTALLATION_VERSION_MISMATCH",
-          `期望 sing-box ${TARGET_VERSION}，实际检测到 ${installed.version || "未知版本"}`,
+          `期望 sing-box ${expectedVersion}，实际检测到 ${installed.version || "未知版本"}`,
+          500
+        );
+      }
+      if (this.preferMeteredRuntime && !installed.tags.includes("with_v2ray_api")) {
+        throw installerError(
+          "METERING_BUILD_MISSING",
+          "计量版 sing-box 安装完成，但未检测到 with_v2ray_api",
           500
         );
       }
@@ -148,18 +166,31 @@ export class SingBoxInstaller {
         throw new Error("最新稳定版本信息无效");
       }
       const newerVersionAvailable = current.installed
-        && compareVersions(latestVersion, current.version) > 0;
-      const compatible = isSupportedVersion(latestVersion);
+        && compareVersions(TARGET_VERSION, current.version) > 0;
+      const meteringMigrationRequired = this.preferMeteredRuntime
+        && current.installed
+        && current.version === TARGET_VERSION
+        && !current.tags.includes("with_v2ray_api");
+      const discoveredVersionApproved = latestVersion === TARGET_VERSION;
+      const compatible = this.preferMeteredRuntime
+        ? true
+        : isSupportedVersion(latestVersion);
       this.updateState = {
         status: "ready",
         currentVersion: current.version,
-        latestVersion,
+        latestVersion: this.preferMeteredRuntime ? TARGET_VERSION : latestVersion,
+        discoveredVersion: latestVersion,
+        approvedVersion: this.preferMeteredRuntime ? TARGET_VERSION : null,
         newerVersionAvailable,
-        updateAvailable: newerVersionAvailable && compatible,
+        meteringMigrationRequired,
+        updateAvailable: (newerVersionAvailable || meteringMigrationRequired) && compatible,
         compatible,
         checkedAt: this.clock().toISOString(),
         releaseUrl: String(release.releaseUrl || ""),
-        blockedReason: newerVersionAvailable && !compatible
+        approvalNotice: this.preferMeteredRuntime && !discoveredVersionApproved
+          ? `官方稳定版 ${latestVersion} 尚未进入计量版审批清单；当前批准版本为 ${TARGET_VERSION}`
+          : null,
+        blockedReason: !this.preferMeteredRuntime && newerVersionAvailable && !compatible
           ? `sing-box ${latestVersion} 超出 RayLink 当前支持的 ${SUPPORTED_VERSION_SERIES}.x 系列`
           : null
       };
@@ -211,10 +242,10 @@ export class SingBoxInstaller {
 
   async upgrade(targetVersion) {
     const normalizedTarget = normalizeVersion(targetVersion);
-    if (!normalizedTarget || !isSupportedVersion(normalizedTarget)) {
+    if (normalizedTarget !== APPROVED_METERED_RUNTIME_VERSION) {
       throw installerError(
         "RUNTIME_UPGRADE_UNSUPPORTED",
-        `RayLink 当前只支持升级到 sing-box ${SUPPORTED_VERSION_SERIES}.x 稳定版本`,
+        `RayLink 当前只批准升级到 sing-box ${APPROVED_METERED_RUNTIME_VERSION} 计量版`,
         422
       );
     }
@@ -233,6 +264,7 @@ export class SingBoxInstaller {
     let previous = null;
     let conflictingServiceState = null;
     let resolvedBinaryPath = null;
+    let meteredUpgrade = false;
     const backupDir = join(this.dataDir, "sing-box-upgrade");
     const backupPath = join(backupDir, "sing-box.previous");
     try {
@@ -240,7 +272,10 @@ export class SingBoxInstaller {
       if (!previous.installed) {
         throw installerError("RUNTIME_NOT_INSTALLED", "请先安装 sing-box", 409);
       }
-      if (compareVersions(normalizedTarget, previous.version) <= 0) {
+      const needsMeteredRebuild = this.preferMeteredRuntime
+        && normalizedTarget === previous.version
+        && !previous.tags.includes("with_v2ray_api");
+      if (compareVersions(normalizedTarget, previous.version) <= 0 && !needsMeteredRebuild) {
         return {
           ...previous,
           previousVersion: previous.version,
@@ -273,12 +308,16 @@ export class SingBoxInstaller {
       await chmod(backupPath, 0o700);
       backupCreated = true;
 
-      await this.installOfficialVersion(normalizedTarget);
+      meteredUpgrade = true;
+      await this.installMeteredVersion(normalizedTarget, resolvedBinaryPath);
       const installed = await this.status();
       if (installed.version !== normalizedTarget) {
         throw new Error(
           `升级后版本不匹配：期望 ${normalizedTarget}，实际 ${installed.version || "未知"}`
         );
+      }
+      if (meteredUpgrade && !installed.tags.includes("with_v2ray_api")) {
+        throw new Error("升级后的 Runtime 丢失 with_v2ray_api，拒绝切换");
       }
       if (this.activeConfigPath && await pathExists(this.activeConfigPath)) {
         await this.runner(this.binaryPath, ["check", "-c", this.activeConfigPath], {
@@ -310,15 +349,7 @@ export class SingBoxInstaller {
         if (error.statusCode) throw error;
         throw installerError("RUNTIME_UPGRADE_FAILED", String(error.message || error), 500);
       }
-      let packageMetadataRestored = true;
       try {
-        if (normalizeVersion(previous?.version)) {
-          try {
-            await this.installOfficialVersion(previous.version);
-          } catch {
-            packageMetadataRestored = false;
-          }
-        }
         await copyFile(backupPath, resolvedBinaryPath);
         await chmod(resolvedBinaryPath, 0o755);
         await this.restoreConflictingSystemdService(conflictingServiceState);
@@ -327,13 +358,6 @@ export class SingBoxInstaller {
         throw installerError(
           "RUNTIME_UPGRADE_ROLLBACK_FAILED",
           `sing-box 升级失败且自动回滚失败：${rollbackError.message}`,
-          500
-        );
-      }
-      if (!packageMetadataRestored) {
-        throw installerError(
-          "RUNTIME_UPGRADE_PARTIAL_ROLLBACK",
-          `sing-box 升级失败，${previous?.version || "原版本"}二进制和服务已恢复，但包管理器元数据未能降级，请人工检查`,
           500
         );
       }
@@ -381,12 +405,13 @@ export class SingBoxInstaller {
     }
   }
 
-  async installOfficialVersion(version) {
+  async installMeteredVersion(version, outputPath) {
     await this.runner("sh", [
-      "-c",
-      `curl -fsSL https://sing-box.app/install.sh | sh -s -- --version ${version}`
+      this.meteredRuntimeBuilder,
+      version,
+      outputPath
     ], {
-      timeout: 10 * 60 * 1000,
+      timeout: 20 * 60 * 1000,
       maxBuffer: 8 * 1024 * 1024
     });
   }

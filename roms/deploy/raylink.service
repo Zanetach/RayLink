@@ -16,7 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/raylink
+ReadWritePaths=/var/lib/raylink /usr/local/bin
 LockPersonality=true
 RestrictSUIDSGID=true
 

@@ -53,6 +53,7 @@ const seedPlans = [
 ];
 
 const LEGACY_ENTITLEMENT_PLAN_ID = "user-entitlement";
+const GIBIBYTE = 1024 ** 3;
 
 const seedUsers = [
   ["林知夏", "LZ", "lin.zhixia@meridian-log.cn", "active", "active", 74.3, "standard", "2026-10-18"],
@@ -111,7 +112,9 @@ function userFromRow(row) {
     email: row.email,
     portalStatus: row.portal_status,
     state: row.state,
-    usedGb: row.used_gb,
+    usedGb: row.used_bytes === null || row.used_bytes === undefined
+      ? row.used_gb
+      : Number(row.used_bytes) / GIBIBYTE,
     quotaGb: row.quota_gb,
     nodeScope: parseJson(row.node_scope_json, []),
     clientFormats: parseJson(row.client_formats_json, []),
@@ -147,12 +150,29 @@ function normalizeTelemetry(input = {}) {
 
 function hostFromRow(row) {
   const lastSeenAt = row.last_seen_at || null;
+  const buildTags = parseJson(row.build_tags_json, []);
   const latestUpgradePayload = parseJson(row.latest_upgrade_payload_json, {}) || {};
   const latestUpgradeEnvelope = parseJson(row.latest_upgrade_result_json, {}) || {};
   const latestUpgradeResult = latestUpgradeEnvelope.result || {};
   const remoteOffline = (row.kind || "local") === "remote"
     && lastSeenAt
     && Date.now() - new Date(lastSeenAt).getTime() > 45_000;
+  const usageSupported = buildTags.includes("with_v2ray_api");
+  const usageLastSampleAt = row.usage_last_sample_at || null;
+  const usageLastErrorAt = row.usage_last_error_at || null;
+  const usageErrorIsCurrent = usageLastErrorAt
+    && (!usageLastSampleAt || new Date(usageLastErrorAt) > new Date(usageLastSampleAt));
+  const usageStale = usageLastSampleAt
+    && Date.now() - new Date(usageLastSampleAt).getTime() > 2 * 60_000;
+  const usageStatus = !usageSupported
+    ? "unsupported"
+    : usageErrorIsCurrent
+      ? "error"
+      : !usageLastSampleAt
+        ? "awaiting-sample"
+        : usageStale
+          ? "stale"
+          : "healthy";
   return {
     id: row.id,
     name: row.name,
@@ -165,7 +185,16 @@ function hostFromRow(row) {
     architecture: row.architecture || null,
     agentVersion: row.agent_version || null,
     runtimeVersion: row.runtime_version || null,
-    buildTags: parseJson(row.build_tags_json, []),
+    buildTags,
+    assetEncryptionReady: Boolean(row.encryption_public_key),
+    usageMetering: {
+      supported: usageSupported,
+      source: usageSupported ? "v2ray-api" : null,
+      status: usageStatus,
+      lastSampleAt: usageLastSampleAt,
+      lastError: usageErrorIsCurrent ? row.usage_last_error || null : null,
+      lastErrorAt: usageLastErrorAt
+    },
     lastSeenAt,
     enrolledAt: row.enrolled_at || null,
     telemetry: {
@@ -282,6 +311,7 @@ export class RayLinkStore {
         portal_status TEXT NOT NULL CHECK (portal_status IN ('active', 'invited')),
         state TEXT NOT NULL CHECK (state IN ('active', 'warning', 'disabled')),
         used_gb REAL NOT NULL DEFAULT 0 CHECK (used_gb >= 0),
+        used_bytes INTEGER NOT NULL DEFAULT 0 CHECK (used_bytes >= 0),
         plan_id TEXT NOT NULL REFERENCES plans(id),
         quota_gb REAL NOT NULL CHECK (quota_gb > 0),
         device_limit INTEGER NOT NULL CHECK (device_limit > 0),
@@ -310,6 +340,10 @@ export class RayLinkStore {
         agent_version TEXT,
         runtime_version TEXT,
         build_tags_json TEXT NOT NULL DEFAULT '[]',
+        encryption_public_key TEXT,
+        usage_last_sample_at TEXT,
+        usage_last_error TEXT,
+        usage_last_error_at TEXT,
         last_seen_at TEXT,
         enrolled_at TEXT,
         cpu_percent REAL,
@@ -373,6 +407,35 @@ export class RayLinkStore {
       ON host_metric_samples(host_id, recorded_at);
       CREATE INDEX IF NOT EXISTS host_metric_samples_recorded
       ON host_metric_samples(recorded_at);
+      CREATE TABLE IF NOT EXISTS usage_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        sample_id TEXT NOT NULL,
+        runtime_instance_id TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        UNIQUE(host_id, sample_id)
+      );
+      CREATE TABLE IF NOT EXISTS usage_counter_checkpoints (
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        user_name TEXT NOT NULL,
+        runtime_instance_id TEXT NOT NULL,
+        uplink_bytes INTEGER NOT NULL,
+        downlink_bytes INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(host_id, user_name)
+      );
+      CREATE TABLE IF NOT EXISTS user_usage_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sample_id INTEGER NOT NULL REFERENCES usage_samples(id) ON DELETE CASCADE,
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        uplink_bytes INTEGER NOT NULL,
+        downlink_bytes INTEGER NOT NULL,
+        recorded_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS user_usage_ledger_user_recorded
+      ON user_usage_ledger(user_id, recorded_at);
     `);
     const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
@@ -391,6 +454,13 @@ export class RayLinkStore {
       }
     }
     const userColumns = this.db.prepare("PRAGMA table_info(users)").all();
+    if (!userColumns.some((column) => column.name === "used_bytes")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN used_bytes INTEGER NOT NULL DEFAULT 0");
+      this.db.exec(`
+        UPDATE users
+        SET used_bytes = CAST(ROUND(used_gb * ${GIBIBYTE}) AS INTEGER)
+      `);
+    }
     if (!userColumns.some((column) => column.name === "quota_gb")) {
       this.db.exec("ALTER TABLE users ADD COLUMN quota_gb REAL");
     }
@@ -429,6 +499,10 @@ export class RayLinkStore {
       ["agent_version", "TEXT"],
       ["runtime_version", "TEXT"],
       ["build_tags_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["encryption_public_key", "TEXT"],
+      ["usage_last_sample_at", "TEXT"],
+      ["usage_last_error", "TEXT"],
+      ["usage_last_error_at", "TEXT"],
       ["last_seen_at", "TEXT"],
       ["enrolled_at", "TEXT"],
       ["cpu_percent", "REAL"],
@@ -494,11 +568,11 @@ export class RayLinkStore {
 
       const insertUser = this.db.prepare(`
       INSERT OR IGNORE INTO users (
-        id, name, initials, email, password_hash, portal_status, state, used_gb,
+        id, name, initials, email, password_hash, portal_status, state, used_gb, used_bytes,
         plan_id, quota_gb, device_limit, node_scope_json, client_formats_json,
         expires_at, runtime_uuid, runtime_password, subscription_public_id,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
       for (const [name, initials, email, portalStatus, state, usedGb, planId, expiresAt] of seedUsers) {
         const entitlement = seedPlans.find((plan) => plan.id === planId);
@@ -511,6 +585,7 @@ export class RayLinkStore {
           portalStatus,
           state,
           usedGb,
+          Math.round(usedGb * GIBIBYTE),
           planId,
           entitlement.quotaGb,
           entitlement.legacyDeviceLimit,
@@ -678,7 +753,7 @@ export class RayLinkStore {
 
   listUsers() {
     return this.db.prepare(`
-      SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
+      SELECT id, name, initials, email, portal_status, state, used_gb, used_bytes, quota_gb,
              node_scope_json, client_formats_json, expires_at,
              subscription_public_id, subscription_secret_hash
       FROM users
@@ -737,6 +812,163 @@ export class RayLinkStore {
     `).all().map(hostFromRow);
   }
 
+  recordUsageSnapshot(hostId, input = {}) {
+    const host = this.getHost(hostId);
+    if (!host) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    const sampleId = String(input.sampleId || "");
+    const runtimeInstanceId = String(input.runtimeInstanceId || "");
+    if (!/^[a-zA-Z0-9_.:-]{8,160}$/.test(sampleId)) {
+      throw domainError("INVALID_USAGE_SAMPLE", "流量样本编号无效");
+    }
+    if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(runtimeInstanceId)) {
+      throw domainError("INVALID_RUNTIME_INSTANCE", "Runtime 实例编号无效");
+    }
+    if (!Array.isArray(input.users) || input.users.length > 10_000) {
+      throw domainError("INVALID_USAGE_SAMPLE", "流量样本用户列表无效");
+    }
+    const observedAt = new Date(input.observedAt || Date.now());
+    if (!Number.isFinite(observedAt.getTime())) {
+      throw domainError("INVALID_USAGE_SAMPLE", "流量样本时间无效");
+    }
+    const normalized = input.users.map((usage) => {
+      const userName = String(usage.name || "").trim();
+      const uplinkBytes = Number(usage.uplinkBytes);
+      const downlinkBytes = Number(usage.downlinkBytes);
+      if (
+        !userName
+        || userName.length > 320
+        || !Number.isSafeInteger(uplinkBytes)
+        || !Number.isSafeInteger(downlinkBytes)
+        || uplinkBytes < 0
+        || downlinkBytes < 0
+      ) {
+        throw domainError("INVALID_USAGE_COUNTER", "用户流量计数器无效");
+      }
+      return { userName, uplinkBytes, downlinkBytes };
+    });
+    const receivedAt = nowIso();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const inserted = this.db.prepare(`
+        INSERT OR IGNORE INTO usage_samples (
+          host_id, sample_id, runtime_instance_id, observed_at, received_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(hostId, sampleId, runtimeInstanceId, observedAt.toISOString(), receivedAt);
+      this.db.prepare(`
+        UPDATE hosts
+        SET usage_last_sample_at = ?, usage_last_error = NULL,
+            usage_last_error_at = NULL, updated_at = ?
+        WHERE id = ?
+      `).run(receivedAt, receivedAt, hostId);
+      if (Number(inserted.changes) === 0) {
+        this.db.exec("COMMIT");
+        return { applied: false, duplicate: true, appliedBytes: 0, quotaExceededUserIds: [] };
+      }
+      const usageSampleId = Number(inserted.lastInsertRowid);
+      let appliedBytes = 0;
+      const quotaExceededUserIds = [];
+      for (const usage of normalized) {
+        const user = this.db.prepare(`
+          SELECT id, used_bytes, quota_gb
+          FROM users
+          WHERE email = ?
+        `).get(usage.userName);
+        if (!user) continue;
+        const checkpoint = this.db.prepare(`
+          SELECT runtime_instance_id, uplink_bytes, downlink_bytes
+          FROM usage_counter_checkpoints
+          WHERE host_id = ? AND user_name = ?
+        `).get(hostId, usage.userName);
+        const sameRuntime = checkpoint?.runtime_instance_id === runtimeInstanceId;
+        const previousUplink = Number(checkpoint?.uplink_bytes || 0);
+        const previousDownlink = Number(checkpoint?.downlink_bytes || 0);
+        const uplinkDelta = sameRuntime
+          ? Math.max(0, usage.uplinkBytes - previousUplink)
+          : usage.uplinkBytes;
+        const downlinkDelta = sameRuntime
+          ? Math.max(0, usage.downlinkBytes - previousDownlink)
+          : usage.downlinkBytes;
+        const checkpointUplink = sameRuntime
+          ? Math.max(previousUplink, usage.uplinkBytes)
+          : usage.uplinkBytes;
+        const checkpointDownlink = sameRuntime
+          ? Math.max(previousDownlink, usage.downlinkBytes)
+          : usage.downlinkBytes;
+        this.db.prepare(`
+          INSERT INTO usage_counter_checkpoints (
+            host_id, user_name, runtime_instance_id, uplink_bytes, downlink_bytes, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(host_id, user_name) DO UPDATE SET
+            runtime_instance_id = excluded.runtime_instance_id,
+            uplink_bytes = excluded.uplink_bytes,
+            downlink_bytes = excluded.downlink_bytes,
+            updated_at = excluded.updated_at
+        `).run(
+          hostId,
+          usage.userName,
+          runtimeInstanceId,
+          checkpointUplink,
+          checkpointDownlink,
+          receivedAt
+        );
+        const delta = uplinkDelta + downlinkDelta;
+        if (delta === 0) continue;
+        this.db.prepare(`
+          INSERT INTO user_usage_ledger (
+            sample_id, host_id, user_id, uplink_bytes, downlink_bytes, recorded_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          usageSampleId,
+          hostId,
+          user.id,
+          uplinkDelta,
+          downlinkDelta,
+          observedAt.toISOString()
+        );
+        const beforeBytes = Number(user.used_bytes || 0);
+        const afterBytes = beforeBytes + delta;
+        if (!Number.isSafeInteger(afterBytes)) {
+          throw domainError("USAGE_COUNTER_OVERFLOW", "用户累计流量超过安全计量范围");
+        }
+        this.db.prepare(`
+          UPDATE users
+          SET used_bytes = ?, used_gb = ?, updated_at = ?
+          WHERE id = ?
+        `).run(afterBytes, afterBytes / GIBIBYTE, receivedAt, user.id);
+        const quotaBytes = Number(user.quota_gb) * GIBIBYTE;
+        if (beforeBytes < quotaBytes && afterBytes >= quotaBytes) {
+          quotaExceededUserIds.push(user.id);
+        }
+        appliedBytes += delta;
+      }
+      this.db.exec("COMMIT");
+      return {
+        applied: true,
+        duplicate: false,
+        appliedBytes,
+        quotaExceededUserIds
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  recordUsageMeteringError(hostId, message) {
+    const host = this.getHost(hostId);
+    if (!host) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    const timestamp = nowIso();
+    const safeMessage = String(message || "未知计量错误")
+      .replace(/[\r\n\t]+/g, " ")
+      .slice(0, 500);
+    this.db.prepare(`
+      UPDATE hosts
+      SET usage_last_error = ?, usage_last_error_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(safeMessage, timestamp, timestamp, hostId);
+    return this.getHost(hostId).usageMetering;
+  }
+
   listClientHosts() {
     return this.db.prepare(`
       SELECT hosts.*
@@ -755,6 +987,14 @@ export class RayLinkStore {
   getHost(id) {
     const row = this.db.prepare("SELECT * FROM hosts WHERE id = ?").get(id);
     return row ? hostFromRow(row) : null;
+  }
+
+  nodeEncryptionPublicKey(hostId) {
+    return this.db.prepare(`
+      SELECT encryption_public_key
+      FROM hosts
+      WHERE id = ? AND kind = 'remote'
+    `).get(hostId)?.encryption_public_key || null;
   }
 
   createRemoteHost(input) {
@@ -806,6 +1046,28 @@ export class RayLinkStore {
     return this.getHost(id);
   }
 
+  updateLocalRuntimeCapabilities(runtime = {}) {
+    const buildTags = Array.isArray(runtime.tags)
+      ? runtime.tags.map(String).filter((tag) => /^[a-zA-Z0-9_-]{1,64}$/.test(tag)).slice(0, 64)
+      : [];
+    this.db.prepare(`
+      UPDATE hosts
+      SET runtime_version = COALESCE(?, runtime_version),
+          platform = COALESCE(?, platform),
+          architecture = COALESCE(?, architecture),
+          build_tags_json = ?,
+          updated_at = ?
+      WHERE id = 'local'
+    `).run(
+      runtime.version ? String(runtime.version).slice(0, 64) : null,
+      runtime.platform ? String(runtime.platform).slice(0, 64) : null,
+      runtime.architecture ? String(runtime.architecture).slice(0, 64) : null,
+      JSON.stringify(buildTags),
+      nowIso()
+    );
+    return this.getHost("local");
+  }
+
   enrollNode(token, metadata = {}) {
     const row = this.db.prepare(`
       SELECT id FROM hosts
@@ -818,11 +1080,12 @@ export class RayLinkStore {
     const buildTags = Array.isArray(metadata.buildTags)
       ? metadata.buildTags.map(String).filter((tag) => /^[a-zA-Z0-9_-]{1,64}$/.test(tag)).slice(0, 64)
       : [];
+    const encryptionPublicKey = String(metadata.encryptionPublicKey || "").slice(0, 4_096) || null;
     this.db.prepare(`
       UPDATE hosts
       SET enrollment_secret_hash = NULL, node_secret_hash = ?, status = 'online',
           hostname = ?, platform = ?, architecture = ?, agent_version = ?,
-          runtime_version = ?, build_tags_json = ?, last_seen_at = ?,
+          runtime_version = ?, build_tags_json = ?, encryption_public_key = ?, last_seen_at = ?,
           enrolled_at = ?, updated_at = ?
       WHERE id = ?
     `).run(
@@ -833,6 +1096,7 @@ export class RayLinkStore {
       String(metadata.agentVersion || "").slice(0, 64) || null,
       String(metadata.runtimeVersion || "").slice(0, 64) || null,
       JSON.stringify(buildTags),
+      encryptionPublicKey,
       timestamp,
       timestamp,
       timestamp,
@@ -866,15 +1130,26 @@ export class RayLinkStore {
           ? "degraded"
           : "online";
     const timestamp = nowIso();
+    const buildTags = Array.isArray(input.buildTags)
+      ? input.buildTags.map(String).filter((tag) => /^[a-zA-Z0-9_-]{1,64}$/.test(tag)).slice(0, 64)
+      : null;
+    const encryptionPublicKey = input.encryptionPublicKey
+      ? String(input.encryptionPublicKey).slice(0, 4_096)
+      : null;
     this.db.prepare(`
       UPDATE hosts
       SET status = ?, runtime_version = COALESCE(?, runtime_version),
-          agent_version = COALESCE(?, agent_version), last_seen_at = ?, updated_at = ?
+          agent_version = COALESCE(?, agent_version),
+          build_tags_json = COALESCE(?, build_tags_json),
+          encryption_public_key = COALESCE(?, encryption_public_key),
+          last_seen_at = ?, updated_at = ?
       WHERE id = ?
     `).run(
       runtimeState,
       input.runtimeVersion ? String(input.runtimeVersion).slice(0, 64) : null,
       input.agentVersion ? String(input.agentVersion).slice(0, 64) : null,
+      buildTags ? JSON.stringify(buildTags) : null,
+      encryptionPublicKey,
       timestamp,
       timestamp,
       hostId
@@ -1212,11 +1487,11 @@ export class RayLinkStore {
     try {
       this.db.prepare(`
         INSERT INTO users (
-          id, name, initials, email, password_hash, portal_status, state, used_gb,
+          id, name, initials, email, password_hash, portal_status, state, used_gb, used_bytes,
           plan_id, quota_gb, device_limit, node_scope_json, client_formats_json,
           expires_at, runtime_uuid, runtime_password, subscription_public_id,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         name,
@@ -1226,6 +1501,7 @@ export class RayLinkStore {
         portalStatus,
         state,
         usedGb,
+        Math.round(usedGb * GIBIBYTE),
         LEGACY_ENTITLEMENT_PLAN_ID,
         entitlement.quotaGb,
         1,
@@ -1249,7 +1525,7 @@ export class RayLinkStore {
 
   getUser(id) {
     const row = this.db.prepare(`
-      SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
+      SELECT id, name, initials, email, portal_status, state, used_gb, used_bytes, quota_gb,
              node_scope_json, client_formats_json, expires_at,
              subscription_public_id, subscription_secret_hash
       FROM users WHERE id = ?
@@ -1297,7 +1573,7 @@ export class RayLinkStore {
         UPDATE users
         SET name = ?, initials = ?, email = ?, quota_gb = ?,
             node_scope_json = ?, client_formats_json = ?, expires_at = ?,
-            state = ?, portal_status = ?, used_gb = ?, updated_at = ?
+            state = ?, portal_status = ?, used_gb = ?, used_bytes = ?, updated_at = ?
         WHERE id = ?
       `).run(
         next.name,
@@ -1310,6 +1586,7 @@ export class RayLinkStore {
         next.state,
         next.portalStatus,
         next.usedGb,
+        Math.round(next.usedGb * GIBIBYTE),
         nowIso(),
         id
       );
@@ -1327,8 +1604,14 @@ export class RayLinkStore {
   }
 
   runtimeSnapshot(hostId = "local") {
-    const host = this.db.prepare("SELECT id, name, address, region, status FROM hosts WHERE id = ?").get(hostId);
+    const host = this.db.prepare(`
+      SELECT id, name, address, region, status, build_tags_json
+      FROM hosts
+      WHERE id = ?
+    `).get(hostId);
     if (!host) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    host.buildTags = parseJson(host.build_tags_json, []);
+    delete host.build_tags_json;
     const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'shadowsocks_master_password'").get();
     const users = this.db.prepare(`
       SELECT users.email, users.state, users.portal_status, users.used_gb, users.expires_at,

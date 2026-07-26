@@ -18,7 +18,7 @@ export function buildSingBoxConfig(snapshot, options = {}) {
   const users = snapshot.users.filter((user) => isEligibleUser(user, snapshot.host.region, now));
   const profiles = snapshot.protocols || defaultProtocolConfigs(listenPort);
 
-  return {
+  const config = {
     log: {
       level: "info",
       timestamp: true
@@ -36,4 +36,16 @@ export function buildSingBoxConfig(snapshot, options = {}) {
       final: "direct"
     }
   };
+  if (snapshot.host.buildTags?.includes("with_v2ray_api")) {
+    config.experimental = {
+      v2ray_api: {
+        listen: "127.0.0.1:10085",
+        stats: {
+          enabled: true,
+          users: users.map((user) => user.email)
+        }
+      }
+    };
+  }
+  return config;
 }

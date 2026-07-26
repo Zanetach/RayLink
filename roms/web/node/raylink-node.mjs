@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 
 import { execFile as execFileCallback } from "node:child_process";
+import {
+  createDecipheriv,
+  createPrivateKey,
+  createPublicKey,
+  diffieHellman,
+  generateKeyPairSync,
+  hkdfSync,
+  randomUUID,
+  X509Certificate
+} from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   access,
@@ -8,17 +18,259 @@ import {
   copyFile,
   mkdir,
   readFile,
+  readdir,
   rename,
   rm,
   writeFile
 } from "node:fs/promises";
 import { arch, cpus, freemem, hostname, platform, totalmem } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { connect as connectHttp2 } from "node:http2";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const AGENT_VERSION = "0.4.0";
+const AGENT_VERSION = "0.5.0";
+const SECRET_ENVELOPE_ALGORITHM = "x25519-hkdf-sha256-aes-256-gcm";
+const SECRET_ENVELOPE_CONTEXT = Buffer.from("raylink-node-secret-v1", "utf8");
+
+function generateEncryptionKeypair() {
+  const { publicKey, privateKey } = generateKeyPairSync("x25519");
+  return {
+    encryptionPublicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
+    encryptionPrivateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString()
+  };
+}
+
+function openSealedBundle(privateKeyPem, envelope) {
+  if (envelope?.algorithm !== SECRET_ENVELOPE_ALGORITHM) {
+    throw new Error("TLS 资产密封算法不受支持");
+  }
+  const privateKey = createPrivateKey(privateKeyPem);
+  if (privateKey.asymmetricKeyType !== "x25519") {
+    throw new Error("RayLink Node 资产私钥无效");
+  }
+  const publicKey = createPublicKey({
+    key: Buffer.from(String(envelope.ephemeralPublicKey || ""), "base64"),
+    type: "spki",
+    format: "der"
+  });
+  const shared = diffieHellman({ privateKey, publicKey });
+  const key = Buffer.from(hkdfSync(
+    "sha256",
+    shared,
+    Buffer.from(String(envelope.salt || ""), "base64"),
+    SECRET_ENVELOPE_CONTEXT,
+    32
+  ));
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(String(envelope.iv || ""), "base64")
+  );
+  decipher.setAuthTag(Buffer.from(String(envelope.authTag || ""), "base64"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(String(envelope.ciphertext || ""), "base64")),
+    decipher.final()
+  ]);
+  return JSON.parse(plaintext.toString("utf8"));
+}
+
+function protobufVarint(value) {
+  let remaining = BigInt(value);
+  const bytes = [];
+  do {
+    let byte = Number(remaining & 0x7fn);
+    remaining >>= 7n;
+    if (remaining) byte |= 0x80;
+    bytes.push(byte);
+  } while (remaining);
+  return Buffer.from(bytes);
+}
+
+function readProtobufVarint(buffer, offset) {
+  let value = 0n;
+  let shift = 0n;
+  let cursor = offset;
+  while (cursor < buffer.length) {
+    const byte = buffer[cursor];
+    value |= BigInt(byte & 0x7f) << shift;
+    cursor += 1;
+    if ((byte & 0x80) === 0) return { value, offset: cursor };
+    shift += 7n;
+  }
+  throw new Error("V2Ray Stats protobuf 数据不完整");
+}
+
+function skipProtobufField(buffer, offset, wireType) {
+  if (wireType === 0) return readProtobufVarint(buffer, offset).offset;
+  if (wireType === 1) return offset + 8;
+  if (wireType === 5) return offset + 4;
+  if (wireType === 2) {
+    const length = readProtobufVarint(buffer, offset);
+    return length.offset + Number(length.value);
+  }
+  throw new Error(`V2Ray Stats protobuf wire type ${wireType} 不受支持`);
+}
+
+function decodeV2RayStat(buffer) {
+  let offset = 0;
+  let name = "";
+  let value = 0;
+  while (offset < buffer.length) {
+    const key = readProtobufVarint(buffer, offset);
+    offset = key.offset;
+    const field = Number(key.value >> 3n);
+    const wireType = Number(key.value & 0x7n);
+    if (field === 1 && wireType === 2) {
+      const length = readProtobufVarint(buffer, offset);
+      const end = length.offset + Number(length.value);
+      name = buffer.subarray(length.offset, end).toString("utf8");
+      offset = end;
+    } else if (field === 2 && wireType === 0) {
+      const decoded = readProtobufVarint(buffer, offset);
+      if (decoded.value > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("V2Ray Stats 计数超过安全整数范围");
+      }
+      value = Number(decoded.value);
+      offset = decoded.offset;
+    } else {
+      offset = skipProtobufField(buffer, offset, wireType);
+    }
+  }
+  return { name, value };
+}
+
+function decodeV2RayQueryResponse(buffer) {
+  const stats = [];
+  let offset = 0;
+  while (offset < buffer.length) {
+    const key = readProtobufVarint(buffer, offset);
+    offset = key.offset;
+    const field = Number(key.value >> 3n);
+    const wireType = Number(key.value & 0x7n);
+    if (field === 1 && wireType === 2) {
+      const length = readProtobufVarint(buffer, offset);
+      const end = length.offset + Number(length.value);
+      stats.push(decodeV2RayStat(buffer.subarray(length.offset, end)));
+      offset = end;
+    } else {
+      offset = skipProtobufField(buffer, offset, wireType);
+    }
+  }
+  return stats;
+}
+
+async function queryV2RayStats(endpoint = "http://127.0.0.1:10085") {
+  const session = connectHttp2(new URL(endpoint).origin);
+  let timeoutHandle;
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let grpcStatus = "0";
+    timeoutHandle = setTimeout(() => {
+      session.destroy();
+      reject(new Error("V2Ray Stats 查询超时"));
+    }, 5_000);
+    const request = session.request({
+      ":method": "POST",
+      ":path": "/v2ray.core.app.stats.command.StatsService/QueryStats",
+      "content-type": "application/grpc",
+      te: "trailers"
+    });
+    request.on("response", (headers) => {
+      if (Number(headers[":status"]) !== 200) {
+        reject(new Error(`V2Ray Stats HTTP ${headers[":status"]}`));
+      }
+      if (headers["grpc-status"] !== undefined) {
+        grpcStatus = String(headers["grpc-status"]);
+      }
+    });
+    request.on("trailers", (headers) => {
+      grpcStatus = String(headers["grpc-status"] || "0");
+    });
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("error", reject);
+    request.on("end", () => {
+      clearTimeout(timeoutHandle);
+      session.close();
+      if (grpcStatus !== "0") {
+        reject(new Error(`V2Ray Stats gRPC ${grpcStatus}`));
+        return;
+      }
+      try {
+        const body = Buffer.concat(chunks);
+        const stats = [];
+        let offset = 0;
+        while (offset + 5 <= body.length) {
+          if (body[offset] !== 0) throw new Error("V2Ray Stats 压缩响应不受支持");
+          const length = body.readUInt32BE(offset + 1);
+          const start = offset + 5;
+          const end = start + length;
+          if (end > body.length) throw new Error("V2Ray Stats gRPC 帧不完整");
+          stats.push(...decodeV2RayQueryResponse(body.subarray(start, end)));
+          offset = end;
+        }
+        resolve(stats);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    const pattern = Buffer.from("user>>>", "utf8");
+    const payload = Buffer.concat([Buffer.from([0x1a]), protobufVarint(pattern.length), pattern]);
+    const frame = Buffer.alloc(5);
+    frame.writeUInt32BE(payload.length, 1);
+    request.end(Buffer.concat([frame, payload]));
+  }).finally(() => {
+    clearTimeout(timeoutHandle);
+    session.close();
+  });
+}
+
+function normalizeV2RayStats(stats) {
+  const users = new Map();
+  for (const stat of stats || []) {
+    const match = String(stat.name || "").match(/^user>>>(.+)>>>traffic>>>(uplink|downlink)$/);
+    if (!match || !Number.isSafeInteger(stat.value) || stat.value < 0) continue;
+    const usage = users.get(match[1]) || {
+      name: match[1],
+      uplinkBytes: 0,
+      downlinkBytes: 0
+    };
+    usage[match[2] === "uplink" ? "uplinkBytes" : "downlinkBytes"] = stat.value;
+    users.set(match[1], usage);
+  }
+  return [...users.values()];
+}
+
+export class NodeUsageCollector {
+  constructor(options = {}) {
+    this.query = options.query || (() => queryV2RayStats(options.endpoint));
+    this.instanceProvider = options.instanceProvider || (async () => {
+      const { stdout } = await runCommand("systemctl", [
+        "show",
+        options.systemdUnit || "raylink-sing-box.service",
+        "--property=InvocationID",
+        "--value"
+      ]);
+      return String(stdout || "").trim();
+    });
+    this.clock = options.clock || (() => new Date());
+    this.sampleId = options.sampleId || randomUUID;
+  }
+
+  async collect() {
+    const runtimeInstanceId = String(await this.instanceProvider());
+    if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(runtimeInstanceId)) {
+      throw new Error("Runtime 实例编号无效");
+    }
+    return {
+      sampleId: this.sampleId(),
+      runtimeInstanceId,
+      observedAt: this.clock().toISOString(),
+      users: normalizeV2RayStats(await this.query())
+    };
+  }
+}
 
 async function pathExists(path) {
   try {
@@ -26,6 +278,51 @@ async function pathExists(path) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function removeNewTlsAssets(paths) {
+  for (const path of [...paths].reverse()) {
+    await rm(path, { force: true });
+  }
+}
+
+function referencedTlsReleaseDirectories(config, dataDir) {
+  const releasesDirectory = resolve(dataDir, "tls", "releases");
+  return new Set((config?.inbounds || []).flatMap((inbound) => [
+    inbound.tls?.certificate_path,
+    inbound.tls?.key_path
+  ]).filter(Boolean).flatMap((path) => {
+    const directory = dirname(resolve(String(path)));
+    return directory.startsWith(`${releasesDirectory}/`) ? [directory] : [];
+  }));
+}
+
+async function pruneTlsReleases(dataDir, configPaths) {
+  const releasesDirectory = resolve(dataDir, "tls", "releases");
+  const keep = new Set();
+  for (const configPath of configPaths) {
+    const config = await readFile(configPath, "utf8")
+      .then((value) => JSON.parse(value))
+      .catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+    if (config) {
+      for (const directory of referencedTlsReleaseDirectories(config, dataDir)) {
+        keep.add(directory);
+      }
+    }
+  }
+  const entries = await readdir(releasesDirectory, { withFileTypes: true }).catch((error) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const releasePath = resolve(releasesDirectory, entry.name);
+    if (!releasePath.startsWith(`${releasesDirectory}/`) || keep.has(releasePath)) continue;
+    await rm(releasePath, { recursive: true, force: true });
   }
 }
 
@@ -137,6 +434,9 @@ export class NodeRuntimeAdapter {
     this.binaryPath = options.binaryPath || "sing-box";
     this.systemdUnit = options.systemdUnit || "raylink-sing-box.service";
     this.runtimeMode = options.runtimeMode || "systemd";
+    this.meteredRuntimeBuilder = options.meteredRuntimeBuilder
+      || "/opt/raylink-node/build-metered-runtime.sh";
+    this.preferMeteredRuntime = options.preferMeteredRuntime === true;
     this.commandRunner = options.commandRunner || runCommand;
     this.healthCheckDelayMs = Math.max(0, Number(options.healthCheckDelayMs ?? 2_000) || 0);
   }
@@ -145,15 +445,109 @@ export class NodeRuntimeAdapter {
     return join(this.dataDir, "config.json");
   }
 
-  async publish(task) {
+  async installTlsBundle(task, privateKeyPem) {
+    if (!task?.sealedTlsBundle) return { count: 0, rollback: async () => {} };
+    if (!privateKeyPem) throw new Error("RayLink Node 缺少 TLS 资产解密私钥");
+    const bundle = openSealedBundle(privateKeyPem, task.sealedTlsBundle);
+    if (!Array.isArray(bundle.assets) || bundle.assets.length < 1 || bundle.assets.length > 32) {
+      throw new Error("TLS 资产包内容无效");
+    }
+    const config = JSON.parse(task.configText);
+    const configuredPaths = new Set((config.inbounds || []).flatMap((inbound) => [
+      inbound.tls?.certificate_path,
+      inbound.tls?.key_path
+    ].filter(Boolean)));
+    const tlsDirectory = resolve(this.dataDir, "tls");
+    await mkdir(tlsDirectory, { recursive: true, mode: 0o700 });
+    const createdPaths = [];
+    try {
+      for (const asset of bundle.assets) {
+        const name = String(asset.name || "");
+        if (!/^[a-z0-9][a-z0-9_.-]{0,79}$/.test(name)) {
+          throw new Error("TLS 资产名称无效");
+        }
+        const certificatePath = resolve(String(asset.targetCertificatePath || ""));
+        const keyPath = resolve(String(asset.targetKeyPath || ""));
+        if (!certificatePath.startsWith(`${tlsDirectory}/`) || !keyPath.startsWith(`${tlsDirectory}/`)) {
+          throw new Error("TLS 资产目标路径越界");
+        }
+        if (
+          !certificatePath.endsWith(`/${name}.certificate.pem`)
+          || !keyPath.endsWith(`/${name}.private-key.pem`)
+          || dirname(certificatePath) !== dirname(keyPath)
+          || !dirname(certificatePath).startsWith(`${tlsDirectory}/releases/`)
+        ) {
+          throw new Error("TLS 资产不可变发布路径无效");
+        }
+        if (!configuredPaths.has(certificatePath) || !configuredPaths.has(keyPath)) {
+          throw new Error("TLS 资产与发布配置不匹配");
+        }
+        const certificatePem = String(asset.certificatePem || "");
+        const privateKeyPemValue = String(asset.privateKeyPem || "");
+        const certificate = new X509Certificate(certificatePem);
+        const certificatePublic = certificate.publicKey.export({ type: "spki", format: "der" });
+        const privatePublic = createPublicKey(createPrivateKey(privateKeyPemValue))
+          .export({ type: "spki", format: "der" });
+        if (!certificatePublic.equals(privatePublic)) {
+          throw new Error(`${name} 的 TLS 证书与私钥不匹配`);
+        }
+        const now = new Date();
+        if (new Date(certificate.validFrom) > now || new Date(certificate.validTo) <= now) {
+          throw new Error(`${name} 的 TLS 证书在节点执行时不在有效期内`);
+        }
+        await mkdir(dirname(certificatePath), { recursive: true, mode: 0o700 });
+        const existingCertificate = await readFile(certificatePath).catch((error) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+        const existingPrivateKey = await readFile(keyPath).catch((error) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+        if (existingCertificate && !existingCertificate.equals(Buffer.from(certificatePem))) {
+          throw new Error(`${name} 的不可变证书路径已存在不同内容`);
+        }
+        if (existingPrivateKey && !existingPrivateKey.equals(Buffer.from(privateKeyPemValue))) {
+          throw new Error(`${name} 的不可变私钥路径已存在不同内容`);
+        }
+        const temporaryCertificate = `${certificatePath}.${process.pid}.tmp`;
+        const temporaryKey = `${keyPath}.${process.pid}.tmp`;
+        if (!existingCertificate) {
+          await writeFile(temporaryCertificate, certificatePem, { mode: 0o644 });
+          await rename(temporaryCertificate, certificatePath);
+          createdPaths.push(certificatePath);
+        }
+        if (!existingPrivateKey) {
+          await writeFile(temporaryKey, privateKeyPemValue, { mode: 0o600 });
+          await rename(temporaryKey, keyPath);
+          createdPaths.push(keyPath);
+        }
+        await chmod(certificatePath, 0o644);
+        await chmod(keyPath, 0o600);
+      }
+    } catch (error) {
+      await removeNewTlsAssets(createdPaths);
+      throw error;
+    }
+    return {
+      count: bundle.assets.length,
+      rollback: () => removeNewTlsAssets(createdPaths)
+    };
+  }
+
+  async publish(task, privateKeyPem = null) {
     if (!task?.configText) throw new Error("发布任务缺少 sing-box 配置");
+    JSON.parse(task.configText);
     await mkdir(this.dataDir, { recursive: true, mode: 0o750 });
+    const tlsInstallation = await this.installTlsBundle(task, privateKeyPem);
     const temporaryPath = join(this.dataDir, `.config-${process.pid}-${Date.now()}.json`);
     const backupPath = join(this.dataDir, "config.previous.json");
-    const hadConfig = await pathExists(this.configPath);
-    await writeFile(temporaryPath, `${task.configText.trim()}\n`, { mode: 0o640 });
+    let hadConfig = false;
+    let published = false;
 
     try {
+      hadConfig = await pathExists(this.configPath);
+      await writeFile(temporaryPath, `${task.configText.trim()}\n`, { mode: 0o640 });
       await this.commandRunner(this.binaryPath, ["check", "-c", temporaryPath]);
       if (hadConfig) await copyFile(this.configPath, backupPath);
       await rename(temporaryPath, this.configPath);
@@ -170,15 +564,31 @@ export class NodeRuntimeAdapter {
           throw error;
         }
       }
-      const version = await this.commandRunner(this.binaryPath, ["version"]);
+      let runtimeVersion = "unknown";
+      try {
+        const version = await this.commandRunner(this.binaryPath, ["version"]);
+        runtimeVersion = version.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown";
+      } catch {
+        // Configuration and service activation already succeeded. A later heartbeat
+        // will report the Runtime version without turning a valid publication into
+        // a destructive rollback.
+      }
+      published = true;
+      await pruneTlsReleases(this.dataDir, [this.configPath, backupPath]).catch((error) => {
+        console.error(
+          `[RayLink Node] ${new Date().toISOString()} 历史 TLS 资产清理失败：${error.message}`
+        );
+      });
       return {
-        runtimeVersion: version.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown",
+        runtimeVersion,
         configPath: this.configPath,
         version: task.version,
-        checksum: task.checksum
+        checksum: task.checksum,
+        tlsAssetsInstalled: tlsInstallation.count
       };
     } finally {
       await rm(temporaryPath, { force: true });
+      if (!published) await tlsInstallation.rollback();
     }
   }
 
@@ -212,12 +622,16 @@ export class NodeRuntimeAdapter {
     }
   }
 
-  async installOfficialVersion(version) {
+  async installMeteredVersion(version, outputPath) {
+    if (!await pathExists(this.meteredRuntimeBuilder)) {
+      throw new Error("缺少 RayLink 计量版 Runtime 构建器，请先升级 RayLink Node");
+    }
     await this.commandRunner("sh", [
-      "-c",
-      `curl -fsSL https://sing-box.app/install.sh | sh -s -- --version ${version}`
+      this.meteredRuntimeBuilder,
+      version,
+      outputPath
     ], {
-      timeout: 10 * 60 * 1000,
+      timeout: 20 * 60 * 1000,
       maxBuffer: 8 * 1024 * 1024
     });
   }
@@ -277,15 +691,18 @@ export class NodeRuntimeAdapter {
 
   async upgrade(task) {
     const targetVersion = String(task?.targetVersion || "");
-    if (!/^1\.13\.\d+$/.test(targetVersion)) {
-      throw new Error("RayLink 当前只支持升级到 sing-box 1.13.x 稳定版本");
+    if (targetVersion !== "1.13.14") {
+      throw new Error("RayLink 当前只批准升级到 sing-box 1.13.14 计量版");
     }
     await mkdir(this.dataDir, { recursive: true, mode: 0o750 });
     const resolvedBinaryPath = await this.resolveBinaryPath();
     const backupPath = join(this.dataDir, "sing-box.previous.binary");
     const previous = await this.commandRunner(this.binaryPath, ["version"]);
     const previousVersion = previous.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown";
-    if (previousVersion === targetVersion) {
+    const meteredRuntime = /(?:^|,)\s*with_v2ray_api(?:,|$)/m.test(
+      previous.stdout.match(/Tags:\s*(.+)/i)?.[1] || ""
+    );
+    if (previousVersion === targetVersion && (!this.preferMeteredRuntime || meteredRuntime)) {
       return { runtimeVersion: targetVersion, previousVersion, alreadyCurrent: true, rolledBack: false };
     }
     if (!await pathExists(this.configPath)) {
@@ -301,11 +718,15 @@ export class NodeRuntimeAdapter {
     await chmod(backupPath, 0o700);
 
     try {
-      await this.installOfficialVersion(targetVersion);
+      const requireMeteredRuntime = true;
+      await this.installMeteredVersion(targetVersion, resolvedBinaryPath);
       const installed = await this.commandRunner(this.binaryPath, ["version"]);
       const runtimeVersion = installed.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown";
       if (runtimeVersion !== targetVersion) {
         throw new Error(`升级后版本不匹配：期望 ${targetVersion}，实际 ${runtimeVersion}`);
+      }
+      if (requireMeteredRuntime && !String(installed.stdout).includes("with_v2ray_api")) {
+        throw new Error("升级后的 Runtime 丢失 with_v2ray_api，拒绝切换");
       }
       const hasConfig = await pathExists(this.configPath);
       if (hasConfig) {
@@ -315,15 +736,7 @@ export class NodeRuntimeAdapter {
       }
       return { runtimeVersion, previousVersion, rolledBack: false };
     } catch (error) {
-      let packageMetadataRestored = true;
       try {
-        if (/^\d+\.\d+\.\d+$/.test(previousVersion)) {
-          try {
-            await this.installOfficialVersion(previousVersion);
-          } catch {
-            packageMetadataRestored = false;
-          }
-        }
         await copyFile(backupPath, resolvedBinaryPath);
         await chmod(resolvedBinaryPath, 0o755);
         await this.restoreConflictingSystemdService(conflictingServiceState);
@@ -333,15 +746,6 @@ export class NodeRuntimeAdapter {
       } catch (rollbackError) {
         const failure = new Error(`sing-box 升级失败且回滚失败：${rollbackError.message}`);
         failure.rolledBack = false;
-        failure.previousVersion = previousVersion;
-        throw failure;
-      }
-      if (!packageMetadataRestored) {
-        const failure = new Error(
-          `sing-box 升级失败，已恢复 ${previousVersion} 二进制和服务，但包管理器元数据未能降级`
-        );
-        failure.rolledBack = true;
-        failure.packageMetadataRestored = false;
         failure.previousVersion = previousVersion;
         throw failure;
       }
@@ -379,12 +783,26 @@ export async function collectNodeMetadata(binaryPath = "sing-box", telemetryColl
 export class RayLinkNode {
   constructor(options = {}) {
     this.serverUrl = String(options.serverUrl || "").replace(/\/+$/, "");
+    if (this.serverUrl) {
+      const server = new URL(this.serverUrl);
+      const loopback = ["127.0.0.1", "::1", "localhost"].includes(server.hostname);
+      if (server.protocol !== "https:" && !loopback) {
+        throw new Error("RayLink Node 生产连接必须使用 HTTPS");
+      }
+    }
     this.enrollmentToken = options.enrollmentToken || "";
     this.statePath = options.statePath || "/etc/raylink-node/node.json";
     this.fetchFn = options.fetchFn || globalThis.fetch;
-    this.runtimeAdapter = options.runtimeAdapter || new NodeRuntimeAdapter(options);
+    this.runtimeAdapter = options.runtimeAdapter || new NodeRuntimeAdapter({
+      ...options,
+      preferMeteredRuntime: options.preferMeteredRuntime !== false
+    });
     this.telemetryCollector = options.telemetryCollector || new NodeTelemetryCollector({
       systemdUnit: this.runtimeAdapter.systemdUnit
+    });
+    this.usageCollector = options.usageCollector || new NodeUsageCollector({
+      systemdUnit: this.runtimeAdapter.systemdUnit,
+      endpoint: options.v2rayStatsEndpoint || "http://127.0.0.1:10085"
     });
     this.metadataProvider = options.metadataProvider
       || (() => collectNodeMetadata(this.runtimeAdapter.binaryPath, this.telemetryCollector));
@@ -436,17 +854,33 @@ export class RayLinkNode {
     this.state = state;
   }
 
+  async ensureEncryptionState(state) {
+    if (state.encryptionPublicKey && state.encryptionPrivateKey) return state;
+    const next = { ...state, ...generateEncryptionKeypair() };
+    await this.persistState(next);
+    return next;
+  }
+
   async ensureEnrolled() {
     const existing = await this.loadState();
-    if (existing) return existing;
+    if (existing) return this.ensureEncryptionState(existing);
     if (!this.serverUrl) throw new Error("缺少 RAYLINK_SERVER");
     if (!this.enrollmentToken) throw new Error("缺少 RAYLINK_ENROLL_TOKEN");
+    const keypair = generateEncryptionKeypair();
     const metadata = await this.metadataProvider();
     const credential = await this.request("/api/node/enroll", {
       method: "POST",
-      body: JSON.stringify({ token: this.enrollmentToken, ...metadata })
+      body: JSON.stringify({
+        token: this.enrollmentToken,
+        ...metadata,
+        encryptionPublicKey: keypair.encryptionPublicKey
+      })
     });
-    const state = { hostId: credential.hostId, nodeSecret: credential.nodeSecret };
+    const state = {
+      hostId: credential.hostId,
+      nodeSecret: credential.nodeSecret,
+      ...keypair
+    };
     await this.persistState(state);
     return state;
   }
@@ -471,16 +905,38 @@ export class RayLinkNode {
   }
 
   async pollOnce() {
+    const state = await this.ensureEnrolled();
     const metadata = await this.metadataProvider();
     await this.authenticatedRequest("/api/node/heartbeat", {
       method: "POST",
-      body: JSON.stringify(metadata)
+      body: JSON.stringify({
+        ...metadata,
+        encryptionPublicKey: state.encryptionPublicKey
+      })
     });
+    if (metadata.buildTags?.includes("with_v2ray_api")) {
+      try {
+        await this.authenticatedRequest("/api/node/usage", {
+          method: "POST",
+          body: JSON.stringify(await this.usageCollector.collect())
+        });
+      } catch (error) {
+        console.error(`[RayLink Node] ${new Date().toISOString()} 用户流量上报失败：${error.message}`);
+        await this.authenticatedRequest("/api/node/usage/status", {
+          method: "POST",
+          body: JSON.stringify({ status: "error", error: error.message })
+        }).catch((statusError) => {
+          console.error(
+            `[RayLink Node] ${new Date().toISOString()} 计量故障状态上报失败：${statusError.message}`
+          );
+        });
+      }
+    }
     const task = await this.authenticatedRequest("/api/node/tasks/next");
     if (!task) return false;
     try {
       const result = task.kind === "publish-config"
-        ? await this.runtimeAdapter.publish(task.payload)
+        ? await this.runtimeAdapter.publish(task.payload, state.encryptionPrivateKey)
         : task.kind === "upgrade-runtime"
           ? await this.runtimeAdapter.upgrade(task.payload)
           : (() => { throw new Error(`不支持的节点任务：${task.kind}`); })();
@@ -521,7 +977,8 @@ async function main() {
     dataDir: process.env.RAYLINK_NODE_DATA,
     binaryPath: process.env.SING_BOX_BIN,
     systemdUnit: process.env.SING_BOX_SYSTEMD_UNIT,
-    runtimeMode: process.env.RAYLINK_RUNTIME_MODE
+    runtimeMode: process.env.RAYLINK_RUNTIME_MODE,
+    preferMeteredRuntime: process.env.RAYLINK_ENABLE_USER_METERING !== "false"
   });
   await node.run();
 }

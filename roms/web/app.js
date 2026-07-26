@@ -1,7 +1,7 @@
 const users = [];
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
-const requiredNodeAgentVersion = "0.4.0";
+const requiredNodeAgentVersion = "0.5.0";
 
 const clientCatalog = {
   "mihomo": { name: "Mihomo", platforms: "macOS / Windows / Android", action: "一键导入" },
@@ -120,6 +120,32 @@ function labelToScope(label) {
   return label.split(" + ").map((name) => Object.entries(scopeLabels).find(([, value]) => value === name)?.[0] || name);
 }
 
+function usageMeteringLabel(metering = {}) {
+  return ({
+    healthy: "采集中",
+    error: "采集故障",
+    stale: "数据中断",
+    "awaiting-sample": "等待首个样本",
+    unsupported: "能力缺失"
+  })[metering.status] || "状态未知";
+}
+
+function usageMeteringDescription(metering = {}) {
+  if (metering.status === "healthy") {
+    return `真实上下行累计字节已入账${metering.lastSampleAt ? ` · 最近 ${escapeHtml(new Date(metering.lastSampleAt).toLocaleString("zh-CN"))}` : ""}。`;
+  }
+  if (metering.status === "error") {
+    return `V2Ray Stats 采集或上报失败：${escapeHtml(metering.lastError || "未知错误")}`;
+  }
+  if (metering.status === "stale") {
+    return `超过 2 分钟未收到真实计量样本${metering.lastSampleAt ? ` · 最近 ${escapeHtml(new Date(metering.lastSampleAt).toLocaleString("zh-CN"))}` : ""}。`;
+  }
+  if (metering.status === "awaiting-sample") {
+    return "Runtime 已具备计量能力，正在等待首个真实样本。";
+  }
+  return "当前 Runtime 缺少 with_v2ray_api 构建标签，不会生成估算流量。";
+}
+
 function versionIsOlder(currentVersion, targetVersion) {
   const current = String(currentVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
   const target = String(targetVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
@@ -225,10 +251,16 @@ function renderDashboard() {
   const activeUsers = users.filter((user) => ["active", "warning"].includes(user.state)).length;
   const update = controlPlane.runtimeUpdate;
   const upgradableHosts = update?.latestVersion
-    ? hosts.filter((candidate) => versionIsOlder(
-      candidate.id === "local" ? controlPlane.installation?.version : candidate.runtimeVersion,
-      update.latestVersion
-    ))
+    ? hosts.filter((candidate) => {
+      const currentVersion = candidate.id === "local"
+        ? controlPlane.installation?.version
+        : candidate.runtimeVersion;
+      const meteringReady = candidate.id === "local"
+        ? controlPlane.installation?.tags?.includes("with_v2ray_api")
+        : candidate.usageMetering?.supported;
+      return versionIsOlder(currentVersion, update.latestVersion)
+        || (currentVersion === update.latestVersion && !meteringReady);
+    })
     : [];
   const setText = (selector, value) => {
     const element = document.querySelector(selector);
@@ -722,6 +754,8 @@ function renderSystem() {
   if (updateState) {
     updateState.textContent = update?.status === "error"
       ? `检查失败：${update.error || "无法连接官方发布源"}`
+      : update?.approvalNotice
+        ? `${update.approvalNotice}。${update.updateAvailable ? `可安装审批版 ${update.latestVersion}。` : "不会派发未批准版本。"}`
       : update?.blockedReason
         ? `发现 ${update.latestVersion}，但${update.blockedReason}。`
         : update?.updateAvailable
@@ -898,7 +932,7 @@ function userDrawerMarkup(user = {}) {
       ${isNew ? '<label class="field"><span>初始密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位" required><small class="field-error"></small></label>' : ""}
       ${isNew ? "" : '<label class="field"><span>重置密码（可选）</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="留空则保持不变"><small class="field-error"></small></label>'}
       <label class="field"><span>到期时间</span><input name="expires" type="date" value="${escapeHtml(user.expires || "2026-12-31")}" required><small class="field-error"></small></label>
-      <label class="field"><span>已用流量</span><input name="usedGb" type="number" min="0" step="0.1" value="${Number(user.used || 0).toFixed(1)}" required><small class="field-error"></small><small class="field-hint">可由管理员或外部采集器通过用户更新 API 写回</small></label>
+      <label class="field"><span>已用流量</span><input name="usedGb" type="number" min="0" step="0.1" value="${Number(user.used || 0).toFixed(1)}" required><small class="field-error"></small><small class="field-hint">由支持 with_v2ray_api 的 Runtime 自动计量；管理员可在账务校正时调整</small></label>
       <p class="drawer-section-label">用户权益</p>
       <label class="field"><span>流量额度（GB）</span><input name="quota" type="number" min="1" step="1" value="${Number(user.quota || 120)}" required><small class="field-error"></small></label>
       <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select><small class="field-hint">该用户只能获取所选区域的客户端配置</small></label>
@@ -932,12 +966,21 @@ function hostDrawerMarkup(hostId) {
     && runtimeUpdate?.compatible !== false
     && runtimeUpdate?.latestVersion
     && host.runtimeUpgrade?.pending !== true
-    && versionIsOlder(host.runtimeVersion, runtimeUpdate.latestVersion);
+    && (
+      versionIsOlder(host.runtimeVersion, runtimeUpdate.latestVersion)
+      || (
+        host.runtimeVersion === runtimeUpdate.latestVersion
+        && host.usageMetering?.supported !== true
+      )
+    );
   const nodeUpgradeCommand = [
     'raylink_node_tmp="$(mktemp)"',
+    'raylink_builder_tmp="$(mktemp)"',
     `curl -fsSL ${shellQuote(`${location.origin}/node/raylink-node.mjs`)} -o "$raylink_node_tmp"`,
+    `curl -fsSL ${shellQuote(`${location.origin}/node/build-metered-runtime.sh`)} -o "$raylink_builder_tmp"`,
     'sudo install -m 0755 "$raylink_node_tmp" /opt/raylink-node/raylink-node.mjs',
-    'rm -f "$raylink_node_tmp"',
+    'sudo install -m 0755 "$raylink_builder_tmp" /opt/raylink-node/build-metered-runtime.sh',
+    'rm -f "$raylink_node_tmp" "$raylink_builder_tmp"',
     "sudo systemctl restart raylink-node.service"
   ].join(" && ");
   const runtimeCopy = isRemote
@@ -958,6 +1001,8 @@ function hostDrawerMarkup(hostId) {
       <p class="drawer-section-label">sing-box 入口</p>
       <div class="switch-row"><div><strong>Shadowsocks 2022</strong><small>端口由服务端环境变量统一设置；保存后用户配置立即使用新地址</small></div><span class="status-badge good"><i></i>已启用</span></div>
       <div class="switch-row"><div><strong>${isRemote ? "RayLink Node" : "Runtime 模式"}</strong><small>${escapeHtml(runtimeCopy)}</small></div><span class="status-badge neutral"><i></i>${escapeHtml(isRemote ? host.status : controlPlane.runtime?.state || "unknown")}</span></div>
+      <div class="switch-row"><div><strong>用户流量计量</strong><small>${usageMeteringDescription(host.usageMetering)}</small></div><span class="status-badge ${host.usageMetering?.status === "healthy" ? "good" : host.usageMetering?.status === "error" ? "danger" : "warning"}"><i></i>${usageMeteringLabel(host.usageMetering)}</span></div>
+      ${isRemote ? `<div class="switch-row"><div><strong>TLS 资产安全通道</strong><small>${host.assetEncryptionReady ? "节点 X25519 公钥已登记；证书私钥将以节点专属密封包下发。" : "请升级并重启 RayLink Node，使其生成并上报资产加密公钥。"}</small></div><span class="status-badge ${host.assetEncryptionReady ? "good" : "warning"}"><i></i>${host.assetEncryptionReady ? "已就绪" : "待升级"}</span></div>` : ""}
       ${isRemote ? `<div class="switch-row"><div><strong>配置同步</strong><small>${escapeHtml(deploymentSyncCopy)}</small></div><span class="status-badge ${host.deploymentSync?.critical ? "danger" : host.deploymentSync?.pendingTaskCount ? "warning" : "good"}"><i></i>${escapeHtml(host.deploymentSync?.status === "revocation-pending" ? "撤权待同步" : host.deploymentSync?.status === "pending" ? "待同步" : "已同步")}</span></div>` : ""}
       ${isRemote && !host.enrolledAt
         ? `<button type="button" class="button secondary" data-reissue-host="${escapeHtml(host.id)}">${icon("refresh")}重新生成接入命令</button><p class="field-hint">新的接入令牌会立即替换之前的令牌。</p>`
@@ -966,7 +1011,7 @@ function hostDrawerMarkup(hostId) {
         ? `<p class="drawer-section-label">Node 升级</p><p class="field-hint">当前 ${escapeHtml(host.agentVersion || "旧版")} 不支持正式版任务租约和服务遥测。控制面会暂停向该节点派发配置，升级后自动恢复。</p><pre class="advanced-preview"><code id="node-upgrade-command">${escapeHtml(nodeUpgradeCommand)}</code></pre><button type="button" class="button secondary" data-copy-target="node-upgrade-command">${icon("copy")}复制升级命令</button>`
         : ""}
       ${runtimeCanUpgrade
-        ? `<p class="drawer-section-label">Runtime 升级</p><p class="field-hint">可从 ${escapeHtml(host.runtimeVersion || "未知版本")} 升级到稳定版 ${escapeHtml(runtimeUpdate.latestVersion)}。节点会备份当前二进制、校验现有配置并在失败时自动回滚。</p><button type="button" class="button primary" data-upgrade-host="${escapeHtml(host.id)}">${icon("arrow")}升级 sing-box</button>`
+        ? `<p class="drawer-section-label">Runtime 升级</p><p class="field-hint">${host.runtimeVersion === runtimeUpdate.latestVersion ? `当前版本缺少真实计量能力，将按审批构建重新安装 ${escapeHtml(runtimeUpdate.latestVersion)}。` : `可从 ${escapeHtml(host.runtimeVersion || "未知版本")} 升级到审批版 ${escapeHtml(runtimeUpdate.latestVersion)}。`}节点会备份当前二进制、校验现有配置并在失败时自动回滚。</p><button type="button" class="button primary" data-upgrade-host="${escapeHtml(host.id)}">${icon("arrow")}升级 sing-box</button>`
         : ""}
       ${isRemote && host.runtimeUpgrade?.pending
         ? `<p class="drawer-section-label">Runtime 升级</p><div class="switch-row"><div><strong>升级任务执行中</strong><small>节点正在备份、安装、校验并重启服务。成功后心跳会更新版本；失败会自动恢复旧二进制。</small></div><span class="status-badge warning"><i></i>处理中</span></div>`

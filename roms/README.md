@@ -19,12 +19,18 @@ RayLink 是一个面向多用户、多 VPS 场景的 sing-box 控制面。它把
 - 一次性节点接入令牌、节点认证、心跳和运行版本上报
 - 节点 CPU、内存、网络速率和 sing-box 服务状态上报
 - RayLink Node 一键安装、systemd 自启动和远程配置任务
-- 旧版 Node 继续上报心跳但不会领取新任务；升级到 0.4.0 后自动恢复配置与 Runtime 升级任务
+- 旧版 Node 继续上报心跳但不会领取新任务；升级到 0.5.0 后自动恢复配置与 Runtime 升级任务
 - 每 6 小时检查官方 GitHub 最新稳定版，在系统页提示本机和远程主机升级
 - Linux 在线升级会备份二进制、用新版本校验当前配置、重启并执行连续健康检查；任一步失败自动恢复旧版本和原服务状态
 - 升级前明确提示目标 Runtime 会短暂重启；远程失败、回滚版本和错误原因保留在主机详情
 - 只自动升级 RayLink 已验证的 `1.13.x` 稳定版；发现不兼容的新主版本时只提示，不会强制升级
 - 每台远程主机按区域独立编译用户配置
+- RayLink Node 生成本机专属 X25519 密钥；TLS 证书与私钥使用 HKDF + AES-256-GCM 密封后下发
+- TLS 私钥不进入明文任务、API 响应或日志；节点把每版资产写入证书指纹命名的不可变目录，完整校验后再原子切换配置
+- 计量版 Runtime 自动构建 `with_v2ray_api`，统计 API 只监听 `127.0.0.1:10085`
+- RayLink Node 按用户读取真实上下行累计字节，使用样本 ID 与 systemd InvocationID 幂等上报
+- 控制面按字节持久化增量账本，处理重复样本和 Runtime 重启归零；跨主机累计达到额度后立即发布撤权配置
+- 主机详情区分“等待样本、健康、数据中断、采集故障、能力缺失”，不会仅凭 build tag 宣称计量正常
 - SQLite 持久化
 - 读取 `sing-box version` 的版本、平台、架构和 build tags
 - macOS Homebrew / Linux 官方脚本一键安装
@@ -49,11 +55,11 @@ RayLink 是一个面向多用户、多 VPS 场景的 sing-box 控制面。它把
 
 ## 当前边界
 
-当前版本已经完成控制面到多台 Runtime 的基础生产链路。以下能力尚未实现：
+当前版本已经完成控制面到多台 Runtime、TLS 敏感资产和真实用户计量的生产主链路。以下能力尚未实现：
 
-- 实时流量采集和账单；当数据库中的已用量达到用户额度时，配置发布和下载会排除该用户，但用量仍需外部采集器更新
 - 订阅二维码
-- TLS 证书与私钥安全分发到远程主机
+- TLS 证书自动签发、续期和到期告警；当前从控制面配置的本地证书路径读取并安全分发
+- 财务账单、周期重置、退款和人工调账审计；当前提供的是精确流量配额账本
 - 节点分批灰度和维护窗口（单节点在线升级会有一次服务重启；多节点客户端可自动故障切换）
 - 完整的 outbound、endpoint、DNS 和路由规则图形化编辑器
 - 同一种协议的多个独立 inbound 实例
@@ -139,7 +145,7 @@ sing-box check -c data/sing-box/config.json
 
 1. 打开“系统 → 主机 → 添加主机”。
 2. 填写公网地址与区域，生成一次性安装命令。
-3. 在 Linux VPS 上执行该命令。安装器会校验并安装 Node.js 22、安装 sing-box 1.13.12，并启动 `raylink-node.service`。
+3. 在 Linux VPS 上执行该命令。安装器会校验并安装 Node.js 22、构建带 `with_v2ray_api` 的 sing-box 1.13.x 计量版，并启动 `raylink-node.service`。
 4. 等待主机状态变为“在线”，然后在配置工作台执行一次发布。
 
 接入前若命令丢失，可在该主机详情中重新生成；旧令牌会立即失效。节点注册成功后不能通过此入口替换节点身份。
@@ -147,11 +153,13 @@ sing-box check -c data/sing-box/config.json
 该节点不会进入正式用户配置。
 
 远程 VPS 必须能通过 HTTPS 访问 `RAYLINK_PUBLIC_ORIGIN`。节点凭据保存在
-`/etc/raylink-node/node.json`（`0600`），受管 sing-box 配置位于
-`/var/lib/raylink-node/sing-box/config.json`。
+`/etc/raylink-node/node.json`（`0600`，包含仅留在节点上的 X25519 私钥），受管 sing-box 配置位于
+`/var/lib/raylink-node/sing-box/config.json`，TLS 私钥位于其 `tls/` 子目录并使用 `0600`。
 
-“一键安装”会在 macOS 上执行固定的 `brew install sing-box`，在 Linux 上通过
-sing-box 官方 `https://sing-box.app/install.sh` 安装固定的 1.13.12。生产服务账户必须拥有对应的包管理权限；
+“一键安装”会在 macOS 上执行固定的 `brew install sing-box`；Linux 不执行远程安装脚本，
+只从审批清单中的固定官方版本源码构建含 `with_v2ray_api` 的 RayLink 计量版。Go 工具链从 `go.dev`
+下载并校验官方 SHA-256，sing-box Go Module 校验值固定在审批清单并经 Go checksum database 复核，
+构建结果在切换前校验版本与标签。生产服务账户必须拥有对应的安装权限；
 安装命令由后端白名单固定，不接受浏览器提交任意 shell。
 当前协议 schema 与 sing-box 1.13.x 绑定；检测到其他版本时会禁用协议保存，避免静默生成
 不兼容配置。
@@ -172,7 +180,8 @@ sing-box 官方 `https://sing-box.app/install.sh` 安装固定的 1.13.12。生�
 | `RAYLINK_PROXY_HOST` | Public Origin 主机名 | 初始对外代理域名 |
 | `RAYLINK_PROXY_PORT` | `8388` | Shadowsocks 2022 端口 |
 | `RAYLINK_RUNTIME_MODE` | `dry-run` | `dry-run` 或 `systemd` |
-| `SING_BOX_BIN` | `sing-box` | sing-box 可执行文件 |
+| `RAYLINK_USER_METERING` | `true` | Linux 安装/升级时保留 `with_v2ray_api` 计量能力 |
+| `SING_BOX_BIN` | `/usr/local/bin/raylink-sing-box`（示例） | sing-box 可执行文件 |
 | `SING_BOX_SYSTEMD_UNIT` | `sing-box.service` | 被重启的 systemd 单元 |
 
 ## 数据与安全
@@ -181,6 +190,9 @@ sing-box 官方 `https://sing-box.app/install.sh` 安装固定的 1.13.12。生�
 - 会话只保存哈希，浏览器 Cookie 为 `HttpOnly`、`SameSite=Strict`。
 - 管理 API 不返回密码哈希或运行凭据。
 - 远程节点接入令牌仅可使用一次；注册后只保存节点密钥的哈希。
+- 节点资产私钥只保存在节点 `0600` 状态文件；控制面只保存 X25519 公钥。
+- 远程 TLS 私钥仅存在于节点公钥密封的 AES-256-GCM 任务包中；资产写入不可变版本目录，只有配置文件执行原子切换；成功后仅保留当前和上一配置引用的版本。
+- 用户流量来自 sing-box 用户级计数器，不使用主机网卡流量估算；原始增量写入不可变用量账本。
 - RayLink Node 发布前执行 `sing-box check`，原子替换失败时恢复上一份配置。
 - 用户只会收到自己的运行凭据。
 - 订阅密钥是 256 位随机值，服务端只保存 SHA-256 哈希；订阅响应禁止缓存并设置 `Referrer-Policy: no-referrer`。

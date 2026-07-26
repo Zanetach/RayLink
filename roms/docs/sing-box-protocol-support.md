@@ -160,7 +160,7 @@ Naive outbound 的官方构建在 Linux purego amd64/arm64 依赖 `libcronet.so`
 3. 官方通用脚本：
 
    ```bash
-   curl -fsSL https://sing-box.app/install.sh | sh
+   # RayLink Linux 正式版不执行远程安装脚本，而是构建审批清单中的固定源码版本。
    ```
 
    可增加 `--version <version>` 固定版本。脚本识别 pacman、dpkg、dnf/rpm、apk、opkg，从官方 GitHub Releases 下载对应 deb/rpm/pkg/apk/ipk 再交给系统包管理器安装。支持 systemd 的 Linux 包通常包含 `sing-box` 服务。[官方安装文档](https://github.com/SagerNet/sing-box/blob/v1.13.12/docs/installation/package-manager.md) · [官方安装脚本源码](https://github.com/SagerNet/sing-box/blob/v1.13.12/docs/installation/tools/install.sh)

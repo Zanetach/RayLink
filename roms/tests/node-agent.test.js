@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   NodeRuntimeAdapter,
   NodeTelemetryCollector,
+  NodeUsageCollector,
   RayLinkNode
 } from "../web/node/raylink-node.mjs";
 
@@ -41,17 +42,43 @@ test("RayLink Node enrolls once and persists its node credential", async () => {
 
   const state = await node.ensureEnrolled();
 
-  assert.deepEqual(state, { hostId: "host-fra", nodeSecret: "node-secret" });
+  assert.equal(state.hostId, "host-fra");
+  assert.equal(state.nodeSecret, "node-secret");
+  assert.match(state.encryptionPublicKey, /BEGIN PUBLIC KEY/);
+  assert.match(state.encryptionPrivateKey, /BEGIN PRIVATE KEY/);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, "https://panel.example.com/api/node/enroll");
   assert.equal(JSON.parse(requests[0].init.body).hostname, "fra-vps-02");
-  assert.deepEqual(
-    JSON.parse(await readFile(statePath, "utf8")),
-    { hostId: "host-fra", nodeSecret: "node-secret" }
-  );
+  const persisted = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(persisted.hostId, "host-fra");
+  assert.equal(persisted.nodeSecret, "node-secret");
+  assert.match(persisted.encryptionPrivateKey, /BEGIN PRIVATE KEY/);
 
   await node.ensureEnrolled();
   assert.equal(requests.length, 1);
+});
+
+test("RayLink Node collects cumulative per-user usage without resetting Runtime counters", async () => {
+  const collector = new NodeUsageCollector({
+    query: async () => [
+      { name: "user>>>zane@example.com>>>traffic>>>uplink", value: 4_096 },
+      { name: "user>>>zane@example.com>>>traffic>>>downlink", value: 12_288 }
+    ],
+    instanceProvider: async () => "runtime-invocation-01",
+    clock: () => new Date("2026-07-26T12:00:00.000Z"),
+    sampleId: () => "usage-sample-01"
+  });
+
+  assert.deepEqual(await collector.collect(), {
+    sampleId: "usage-sample-01",
+    runtimeInstanceId: "runtime-invocation-01",
+    observedAt: "2026-07-26T12:00:00.000Z",
+    users: [{
+      name: "zane@example.com",
+      uplinkBytes: 4_096,
+      downlinkBytes: 12_288
+    }]
+  });
 });
 
 test("RayLink Node heartbeats, applies the next config and reports success", async () => {
@@ -167,7 +194,7 @@ test("RayLink Node applies a runtime upgrade task and reports the new version", 
       id: "task-upgrade-1",
       kind: "upgrade-runtime",
       attempt: 1,
-      payload: { targetVersion: "1.13.13" }
+      payload: { targetVersion: "1.13.14" }
     }),
     jsonResponse({ ok: true })
   ];
@@ -190,12 +217,12 @@ test("RayLink Node applies a runtime upgrade task and reports the new version", 
 
   await node.pollOnce();
 
-  assert.deepEqual(upgrades, [{ targetVersion: "1.13.13" }]);
+  assert.deepEqual(upgrades, [{ targetVersion: "1.13.14" }]);
   const completion = calls.find((call) => call.url.endsWith("/api/node/tasks/task-upgrade-1/complete"));
   assert.deepEqual(JSON.parse(completion.init.body), {
     attempt: 1,
     status: "succeeded",
-    result: { runtimeVersion: "1.13.13", rolledBack: false }
+    result: { runtimeVersion: "1.13.14", rolledBack: false }
   });
 });
 
@@ -209,7 +236,7 @@ test("RayLink Node reports an automatic Runtime rollback to the control plane", 
       id: "task-upgrade-failed",
       kind: "upgrade-runtime",
       attempt: 1,
-      payload: { targetVersion: "1.13.13" }
+      payload: { targetVersion: "1.13.14" }
     }),
     jsonResponse({ ok: true })
   ];
@@ -278,7 +305,7 @@ test("node runtime upgrade rolls the binary back when the new build rejects the 
     }
   });
 
-  await assert.rejects(adapter.upgrade({ targetVersion: "1.13.13" }), /已回滚/);
+  await assert.rejects(adapter.upgrade({ targetVersion: "1.13.14" }), /已回滚/);
   assert.equal(await readFile(binaryPath, "utf8"), "previous-binary");
   assert.equal(restarts, 1);
 });
@@ -302,10 +329,60 @@ test("node runtime refuses an upgrade before touching a Host without an active c
   });
 
   await assert.rejects(
-    adapter.upgrade({ targetVersion: "1.13.13" }),
+    adapter.upgrade({ targetVersion: "1.13.14" }),
     /没有活动配置/
   );
   assert.equal(installCalls, 0);
+});
+
+test("managed node upgrades an untagged Runtime to the approved metered build", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-upgrade-metered-"));
+  const binaryPath = join(directory, "sing-box");
+  const builderPath = join(directory, "build-metered-runtime.sh");
+  await writeFile(binaryPath, "previous-binary");
+  await writeFile(builderPath, "#!/bin/sh\n");
+  await writeFile(join(directory, "config.json"), "{}");
+  let version = "1.13.14";
+  let metered = false;
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath,
+    meteredRuntimeBuilder: builderPath,
+    preferMeteredRuntime: true,
+    runtimeMode: "dry-run",
+    commandRunner: async (command, args) => {
+      if (command === "sh" && args[0] === builderPath) {
+        version = args[1];
+        metered = true;
+        return { stdout: "", stderr: "" };
+      }
+      if (command === binaryPath && args[0] === "version") {
+        return {
+          stdout: `sing-box version ${version}\n${metered ? "Tags: with_v2ray_api\n" : ""}`,
+          stderr: ""
+        };
+      }
+      if (command === binaryPath && args[0] === "check") return { stdout: "", stderr: "" };
+      if (command === "systemctl" && args[0] === "list-unit-files") {
+        return { stdout: "", stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    }
+  });
+
+  const result = await adapter.upgrade({ targetVersion: "1.13.14" });
+  assert.equal(result.runtimeVersion, "1.13.14");
+  assert.equal(metered, true);
+});
+
+test("RayLink Node rejects non-loopback HTTP control planes by default", () => {
+  assert.throws(
+    () => new RayLinkNode({ serverUrl: "http://panel.example.com" }),
+    /必须使用 HTTPS/
+  );
+  assert.doesNotThrow(
+    () => new RayLinkNode({ serverUrl: "http://127.0.0.1:4173" })
+  );
 });
 
 test("node telemetry reports interval CPU, memory, network and service health", async () => {

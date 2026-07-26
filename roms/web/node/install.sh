@@ -5,7 +5,8 @@ RAYLINK_SERVER="${RAYLINK_SERVER:-}"
 RAYLINK_ENROLL_TOKEN="${RAYLINK_ENROLL_TOKEN:-}"
 RAYLINK_NODE_ROOT="${RAYLINK_NODE_ROOT:-/opt/raylink-node}"
 RAYLINK_NODE_VERSION="${RAYLINK_NODE_VERSION:-22}"
-SING_BOX_VERSION="${SING_BOX_VERSION:-1.13.12}"
+SING_BOX_VERSION="${SING_BOX_VERSION:-1.13.14}"
+RAYLINK_ENABLE_USER_METERING="${RAYLINK_ENABLE_USER_METERING:-true}"
 
 fail() {
   printf 'RayLink Node 安装失败：%s\n' "$1" >&2
@@ -16,7 +17,12 @@ fail() {
 [ "$(uname -s)" = "Linux" ] || fail "当前一键安装仅支持 Linux VPS"
 [ -n "$RAYLINK_SERVER" ] || fail "缺少 RAYLINK_SERVER"
 [ -n "$RAYLINK_ENROLL_TOKEN" ] || fail "缺少 RAYLINK_ENROLL_TOKEN"
-printf '%s' "$RAYLINK_SERVER" | grep -Eq '^https?://[A-Za-z0-9._:-]+$' || fail "RAYLINK_SERVER 必须是控制面的 HTTP(S) 根地址"
+if ! printf '%s' "$RAYLINK_SERVER" | grep -Eq '^https://[A-Za-z0-9._:-]+$'; then
+  if [ "${RAYLINK_ALLOW_INSECURE_HTTP:-false}" != "true" ] \
+    || ! printf '%s' "$RAYLINK_SERVER" | grep -Eq '^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?$'; then
+    fail "RAYLINK_SERVER 生产环境必须是 HTTPS 根地址"
+  fi
+fi
 printf '%s' "$RAYLINK_ENROLL_TOKEN" | grep -Eq '^[A-Za-z0-9_-]{20,256}$' || fail "接入令牌格式无效"
 command -v curl >/dev/null 2>&1 || fail "需要 curl"
 command -v tar >/dev/null 2>&1 || fail "需要 tar"
@@ -57,21 +63,15 @@ fi
 
 curl -fsSL "$RAYLINK_SERVER/node/raylink-node.mjs" -o "$RAYLINK_NODE_ROOT/raylink-node.mjs"
 chmod 0755 "$RAYLINK_NODE_ROOT/raylink-node.mjs"
+curl -fsSL "$RAYLINK_SERVER/node/build-metered-runtime.sh" -o "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"
+chmod 0755 "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"
 
-installed_sing_box_version=""
-if command -v sing-box >/dev/null 2>&1; then
-  installed_sing_box_version="$(sing-box version 2>/dev/null | awk 'NR == 1 { print $3 }')"
+if [ "$RAYLINK_ENABLE_USER_METERING" != "true" ]; then
+  fail "正式版 RayLink Node 必须启用真实用户计量"
 fi
-case "$installed_sing_box_version" in
-  1.13.*) ;;
-  *) curl -fsSL https://sing-box.app/install.sh | sh -s -- --version "$SING_BOX_VERSION" ;;
-esac
-sing_box_bin="$(command -v sing-box)"
-actual_sing_box_version="$("$sing_box_bin" version 2>/dev/null | awk 'NR == 1 { print $3 }')"
-case "$actual_sing_box_version" in
-  1.13.*) ;;
-  *) fail "sing-box 版本不兼容：要求 1.13.x，实际 ${actual_sing_box_version:-未知}" ;;
-esac
+"$RAYLINK_NODE_ROOT/build-metered-runtime.sh" "$SING_BOX_VERSION" \
+  /usr/local/bin/raylink-sing-box
+sing_box_bin=/usr/local/bin/raylink-sing-box
 
 # The official package can enable its own runtime unit. RayLink owns the
 # configuration lifecycle, so keep exactly one sing-box service active.
@@ -88,6 +88,7 @@ fi
   printf 'RAYLINK_NODE_STATE=/etc/raylink-node/node.json\n'
   printf 'RAYLINK_NODE_DATA=/var/lib/raylink-node/sing-box\n'
   printf 'RAYLINK_RUNTIME_MODE=systemd\n'
+  printf 'RAYLINK_ENABLE_USER_METERING=%s\n' "$RAYLINK_ENABLE_USER_METERING"
   printf 'SING_BOX_BIN=%s\n' "$sing_box_bin"
   printf 'SING_BOX_SYSTEMD_UNIT=raylink-sing-box.service\n'
 } > /etc/raylink-node/node.env
@@ -132,7 +133,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/etc/raylink-node /var/lib/raylink-node
+ReadWritePaths=/etc/raylink-node /var/lib/raylink-node /opt/raylink-node /usr/local/bin
 
 [Install]
 WantedBy=multi-user.target

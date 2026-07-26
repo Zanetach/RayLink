@@ -37,10 +37,11 @@ function removesRuntimeCredentials(previousConfig, nextConfig) {
 }
 
 export class RuntimeManager {
-  constructor({ store, adapter, listenPort = 8388 }) {
+  constructor({ store, adapter, listenPort = 8388, tlsAssetPackager = null }) {
     this.store = store;
     this.adapter = adapter;
     this.listenPort = listenPort;
+    this.tlsAssetPackager = tlsAssetPackager;
     this.publishing = false;
   }
 
@@ -57,46 +58,69 @@ export class RuntimeManager {
 
   async publish(publisherAdminId = null, options = {}) {
     const compiled = compile(this.store, this.listenPort);
+    const remoteHosts = this.store.listHosts().filter((host) => host.kind === "remote" && host.enrolledAt);
+    const remoteDeployments = [];
+    for (const host of remoteHosts) {
+      let remote = compile(this.store, this.listenPort, host.id);
+      let sealedTlsBundle = null;
+      let tlsAssets = [];
+      if (this.tlsAssetPackager) {
+        const prepared = await this.tlsAssetPackager.prepare(
+          remote.config,
+          this.store.nodeEncryptionPublicKey(host.id)
+        );
+        const configText = `${JSON.stringify(prepared.config, null, 2)}\n`;
+        remote = {
+          ...remote,
+          config: prepared.config,
+          configText,
+          checksum: createHash("sha256").update(configText).digest("hex")
+        };
+        sealedTlsBundle = prepared.sealedTlsBundle;
+        tlsAssets = prepared.tlsAssets;
+      }
+      remoteDeployments.push({ host, remote, sealedTlsBundle, tlsAssets });
+    }
     const deployment = await this.publishCompiled({
       ...compiled,
       version: deploymentVersion(),
       publisherAdminId
     });
-    const remoteHosts = this.store.listHosts().filter((host) => host.kind === "remote" && host.enrolledAt);
-    for (const host of remoteHosts) {
-      const remote = compile(this.store, this.listenPort, host.id);
-      const revokesCredentials = options.detectRevocation === true
-        && removesRuntimeCredentials(
+    for (const { host, remote, sealedTlsBundle, tlsAssets } of remoteDeployments) {
+      const revokesCredentials = options.forceCritical === true
+        || (options.detectRevocation === true && removesRuntimeCredentials(
           this.store.latestAppliedNodeConfig(host.id),
           remote.config
-        );
+        ));
       this.store.queueNodeTask(host.id, "publish-config", {
         version: deployment.version,
         checksum: remote.checksum,
         configText: remote.configText,
+        ...(sealedTlsBundle ? { sealedTlsBundle, tlsAssets } : {}),
         reason: options.reason || "deployment"
       }, {
         priority: revokesCredentials ? "critical" : "normal",
         maxAttempts: revokesCredentials ? 0 : 5
       });
     }
-    return { ...deployment, remoteQueued: remoteHosts.length };
+    return { ...deployment, remoteQueued: remoteDeployments.length };
   }
 
-  async reconcile(publisherAdminId = null) {
+  async reconcile(publisherAdminId = null, options = {}) {
     if (this.publishing) return { changed: false, reason: "deployment-in-progress" };
     const activeDeployment = this.store.listDeployments(100)
       .find((deployment) => deployment.status === "active");
     if (!activeDeployment) return { changed: false, reason: "initial-publication-required" };
     const compiled = compile(this.store, this.listenPort);
-    if (compiled.checksum === activeDeployment.checksum) {
+    if (compiled.checksum === activeDeployment.checksum && options.forceCritical !== true) {
       return { changed: false, reason: "configuration-current" };
     }
     return {
       changed: true,
       deployment: await this.publish(publisherAdminId, {
-        reason: "entitlement-reconciliation",
-        detectRevocation: true
+        reason: options.reason || "entitlement-reconciliation",
+        detectRevocation: true,
+        forceCritical: options.forceCritical === true
       })
     };
   }

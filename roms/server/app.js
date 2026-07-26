@@ -5,8 +5,12 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { RayLinkStore } from "./database.js";
+import { validateNodeEncryptionPublicKey } from "./node-secrets.js";
 import { buildUserClientConfig } from "./singbox/client-config.js";
-import { SingBoxInstaller } from "./singbox/installer.js";
+import {
+  APPROVED_METERED_RUNTIME_VERSION,
+  SingBoxInstaller
+} from "./singbox/installer.js";
 import { LocalSingBoxAdapter } from "./singbox/local-adapter.js";
 import { ManagedRuleSetCache } from "./singbox/rule-set-cache.js";
 import {
@@ -16,10 +20,15 @@ import {
 } from "./singbox/protocol-catalog.js";
 import { RuntimeManager } from "./singbox/runtime-manager.js";
 import { LocalTelemetryCollector } from "./telemetry.js";
+import { RemoteTlsAssetPackager } from "./tls-assets.js";
+import {
+  systemdRuntimeInstanceId,
+  V2RayStatsCollector
+} from "./usage/v2ray-stats.js";
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
-const REQUIRED_NODE_AGENT_VERSION = "0.4.0";
+const REQUIRED_NODE_AGENT_VERSION = "0.5.0";
 const defaultWebDir = fileURLToPath(new URL("../web", import.meta.url));
 
 const contentTypes = {
@@ -175,10 +184,14 @@ export async function createRayLinkApp(options) {
     mode: options.runtimeMode || "dry-run",
     systemdUnit: options.systemdUnit || "sing-box.service"
   });
+  const tlsAssetPackager = options.tlsAssetPackager || new RemoteTlsAssetPackager({
+    remoteDataDir: options.remoteNodeDataDir
+  });
   const runtimeManager = new RuntimeManager({
     store,
     adapter: runtimeAdapter,
-    listenPort
+    listenPort,
+    tlsAssetPackager
   });
   const ruleSetCache = options.ruleSetCache || new ManagedRuleSetCache({
     dataDir: options.dataDir,
@@ -201,6 +214,8 @@ export async function createRayLinkApp(options) {
   let entitlementReconcileTimer = null;
   let ruleSetRefreshTimer = null;
   let runtimeUpdateTimer = null;
+  let usageMeteringTimer = null;
+  let usageMeteringPromise = null;
   let localRuntimeOperation = null;
   const runLocalRuntimeOperation = async (operation, callback) => {
     if (localRuntimeOperation) {
@@ -237,8 +252,48 @@ export async function createRayLinkApp(options) {
     activeConfigPath: runtimeAdapter.activePath,
     runtimeMode: options.runtimeMode || "dry-run",
     systemdUnit: options.systemdUnit || "sing-box.service",
+    preferMeteredRuntime: options.preferMeteredRuntime,
+    meteredRuntimeBuilder: options.meteredRuntimeBuilder,
     fetchImpl: options.runtimeReleaseFetch
   });
+  const refreshLocalRuntimeCapabilities = async () => {
+    const installation = await installer.status();
+    store.updateLocalRuntimeCapabilities(installation);
+    return installation;
+  };
+  const usageCollector = options.usageCollector || new V2RayStatsCollector({
+    endpoint: options.v2rayStatsEndpoint || "http://127.0.0.1:10085",
+    runtimeInstanceProvider: () => systemdRuntimeInstanceId(
+      options.systemdUnit || "sing-box.service"
+    )
+  });
+  const usageMeteringIntervalMs = Math.max(
+    1_000,
+    Number(options.usageMeteringIntervalMs || 30_000)
+  );
+  const sampleLocalUsage = () => {
+    if (usageMeteringPromise) return usageMeteringPromise;
+    if (!store.getHost("local")?.usageMetering.supported) return Promise.resolve(null);
+    usageMeteringPromise = (async () => {
+      try {
+        const result = store.recordUsageSnapshot("local", await usageCollector.collect());
+        if (result.quotaExceededUserIds.length) {
+          await reconcileUserEntitlements(null, {
+            forceCritical: true,
+            reason: "usage-quota-enforcement"
+          });
+        }
+        return result;
+      } catch (error) {
+        store.recordUsageMeteringError("local", error.message);
+        console.warn(`[RayLink] Local user usage sample failed: ${error.message}`);
+        return null;
+      }
+    })().finally(() => {
+      usageMeteringPromise = null;
+    });
+    return usageMeteringPromise;
+  };
   const runtimeUpdateCheckIntervalMs = Math.max(
     0,
     Number(options.runtimeUpdateCheckIntervalMs ?? 6 * 60 * 60 * 1000)
@@ -292,11 +347,11 @@ export async function createRayLinkApp(options) {
         : null
     });
   };
-  const reconcileUserEntitlements = async (publisherAdminId) => {
+  const reconcileUserEntitlements = async (publisherAdminId, reconcileOptions = {}) => {
     try {
       const result = await runLocalRuntimeOperation(
         "配置同步",
-        () => runtimeManager.reconcile(publisherAdminId)
+        () => runtimeManager.reconcile(publisherAdminId, reconcileOptions)
       );
       return {
         status: result.changed ? "published" : "current",
@@ -497,6 +552,9 @@ export async function createRayLinkApp(options) {
 
       if (request.method === "POST" && url.pathname === "/api/node/enroll") {
         const body = await readJson(request);
+        if (body.encryptionPublicKey) {
+          body.encryptionPublicKey = validateNodeEncryptionPublicKey(body.encryptionPublicKey);
+        }
         sendJson(response, 201, {
           ...store.enrollNode(body.token, body),
           nextPollSeconds: 10
@@ -516,6 +574,11 @@ export async function createRayLinkApp(options) {
         }
         if (request.method === "POST" && url.pathname === "/api/node/heartbeat") {
           const heartbeat = await readJson(request);
+          if (heartbeat.encryptionPublicKey) {
+            heartbeat.encryptionPublicKey = validateNodeEncryptionPublicKey(
+              heartbeat.encryptionPublicKey
+            );
+          }
           const timestamp = Date.now();
           const lastWriteAt = nodeHeartbeatWrites.get(node.id) || 0;
           if (timestamp - lastWriteAt < nodeHeartbeatMinIntervalMs) {
@@ -528,6 +591,37 @@ export async function createRayLinkApp(options) {
           store.heartbeatNode(node.id, heartbeat);
           nodeHeartbeatWrites.set(node.id, timestamp);
           sendJson(response, 200, { nextPollSeconds: 10 });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/node/usage") {
+          if (!store.getHost(node.id)?.usageMetering.supported) {
+            throw httpError(
+              "USAGE_METERING_UNAVAILABLE",
+              "该 Runtime 未上报 with_v2ray_api，拒绝接收用户计量数据",
+              409
+            );
+          }
+          const usageResult = store.recordUsageSnapshot(
+            node.id,
+            await readJson(request, 1024 * 1024)
+          );
+          const runtimeSync = usageResult.quotaExceededUserIds.length
+            ? await reconcileUserEntitlements(null, {
+              forceCritical: true,
+              reason: "usage-quota-enforcement"
+            })
+            : { status: "current" };
+          sendJson(response, 200, { ...usageResult, runtimeSync });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/node/usage/status") {
+          const status = await readJson(request);
+          if (status.status !== "error") {
+            throw httpError("INVALID_USAGE_STATUS", "计量状态只接受 error", 422);
+          }
+          sendJson(response, 200, {
+            usageMetering: store.recordUsageMeteringError(node.id, status.error)
+          });
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/node/tasks/next") {
@@ -580,7 +674,7 @@ export async function createRayLinkApp(options) {
         }
 
         if (request.method === "GET" && url.pathname === "/api/bootstrap") {
-          const installation = await installer.status();
+          const installation = await refreshLocalRuntimeCapabilities();
           const runtime = await runtimeManager.status();
           sendJson(response, 200, {
             ...store.bootstrap(admin),
@@ -715,6 +809,7 @@ export async function createRayLinkApp(options) {
         }
 
         if (request.method === "POST" && url.pathname === "/api/deployments") {
+          await refreshLocalRuntimeCapabilities();
           sendJson(
             response,
             201,
@@ -801,17 +896,20 @@ export async function createRayLinkApp(options) {
               409
             );
           }
-          if (!versionIsOlder(host.runtimeVersion, update.latestVersion)) {
+          const targetVersion = update.approvedVersion || APPROVED_METERED_RUNTIME_VERSION;
+          const needsMeteredRebuild = host.runtimeVersion === targetVersion
+            && !host.usageMetering.supported;
+          if (!versionIsOlder(host.runtimeVersion, targetVersion) && !needsMeteredRebuild) {
             throw httpError("RUNTIME_ALREADY_CURRENT", "该主机已是最新版本", 409);
           }
           const taskId = store.queueNodeTask(host.id, "upgrade-runtime", {
-            targetVersion: update.latestVersion,
+            targetVersion,
             requestedAt: new Date().toISOString()
           }, { maxAttempts: 1 });
           sendJson(response, 202, {
             taskId,
             status: "queued",
-            targetVersion: update.latestVersion
+            targetVersion
           });
           return;
         }
@@ -868,8 +966,12 @@ export async function createRayLinkApp(options) {
         });
       });
       await sampleLocalTelemetry();
+      await refreshLocalRuntimeCapabilities();
+      await sampleLocalUsage();
       telemetryTimer = setInterval(sampleLocalTelemetry, telemetryIntervalMs);
       telemetryTimer.unref?.();
+      usageMeteringTimer = setInterval(sampleLocalUsage, usageMeteringIntervalMs);
+      usageMeteringTimer.unref?.();
       entitlementReconcileTimer = setInterval(() => {
         runLocalRuntimeOperation("配置同步", () => runtimeManager.reconcile()).catch((error) => {
           console.warn(`[RayLink] Entitlement reconciliation failed: ${error.message}`);
@@ -885,6 +987,10 @@ export async function createRayLinkApp(options) {
       }
     },
     async close() {
+      if (usageMeteringTimer) {
+        clearInterval(usageMeteringTimer);
+        usageMeteringTimer = null;
+      }
       if (runtimeUpdateTimer) {
         clearInterval(runtimeUpdateTimer);
         runtimeUpdateTimer = null;
@@ -902,6 +1008,7 @@ export async function createRayLinkApp(options) {
         telemetryTimer = null;
       }
       if (telemetrySamplePromise) await telemetrySamplePromise;
+      if (usageMeteringPromise) await usageMeteringPromise;
       if (server.listening) {
         await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       }
