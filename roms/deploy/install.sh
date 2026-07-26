@@ -90,6 +90,19 @@ if [ "${#missing_release_tools[@]}" -gt 0 ]; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates tar coreutils
 fi
 
+gnu_tar=false
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then
+  gnu_tar=true
+fi
+
+read_archive() {
+  if [ "$gnu_tar" = true ]; then
+    tar --warning=no-unknown-keyword "$@"
+  else
+    tar "$@"
+  fi
+}
+
 case "$(uname -m)" in
   x86_64|amd64) architecture=amd64 ;;
   aarch64|arm64) architecture=arm64 ;;
@@ -131,7 +144,7 @@ printf '%s  %s\n' "$expected_sha256" "$archive_name" \
   || fail "发布包 SHA-256 校验失败"
 printf 'SHA-256 校验通过。\n'
 
-archive_listing="$(tar -tzf "$archive_path")" \
+archive_listing="$(read_archive -tzf "$archive_path")" \
   || fail "发布包无法读取"
 [ -n "$archive_listing" ] || fail "发布包为空"
 if printf '%s\n' "$archive_listing" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
@@ -147,11 +160,11 @@ while IFS= read -r archive_entry; do
 done <<EOF
 $archive_listing
 EOF
-if tar -tvzf "$archive_path" | grep -Eq '^[lh]'; then
+if read_archive -tvzf "$archive_path" | grep -Eq '^[lh]'; then
   fail "发布包不能包含符号链接或硬链接"
 fi
 
-tar \
+read_archive \
   --exclude="._${expected_root}" \
   --exclude='*/._*' \
   -xzf "$archive_path" \
