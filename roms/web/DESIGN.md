@@ -57,7 +57,7 @@ The spacing scale is 4, 8, 12, 16, 24, 32, and 48px. Desktop uses a fixed naviga
 
 ## 6. Depth and elevation
 
-Depth comes from luminance steps, not dark drop shadows. The canvas is level 0, navigation and broad sections are level 1, controls are level 2, and the edit drawer is level 3. Borders are reserved for layout separation, tables, and controls.
+Depth comes from luminance steps, not dark drop shadows. The canvas is level 0, navigation and broad sections are level 1, controls are level 2, and the edit drawer is level 3. Borders are reserved for layout separation, tables, and controls. The approved RayLink logo is a brand asset rather than an application surface; its restrained gradient and mark shadow are the sole exception.
 
 ## 7. Do's and don'ts
 
@@ -66,7 +66,7 @@ Depth comes from luminance steps, not dark drop shadows. The canvas is level 0, 
 - Do keep identifiers, bandwidth, and latency in tabular numerals.
 - Do show exact validation failures beside the affected field.
 - Do keep rollback visible wherever a deployment can be published.
-- Don't use decorative gradients, glass blur, or neon cyberpunk treatments.
+- Don't use decorative gradients, glass blur, or neon cyberpunk treatments in application surfaces. The approved RayLink logo is the only gradient exception.
 - Don't turn every content group into an identical rounded card.
 - Don't hide operational detail behind tooltips alone.
 - Don't animate layout dimensions or use `transition: all`.

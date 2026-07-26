@@ -857,23 +857,37 @@ export class RayLinkNode {
     this.metadataProvider = options.metadataProvider
       || (() => collectNodeMetadata(this.runtimeAdapter.binaryPath, this.telemetryCollector));
     this.pollIntervalMs = Number(options.pollIntervalMs || 10_000);
+    this.requestTimeoutMs = Math.max(10, Number(options.requestTimeoutMs || 30_000));
     this.state = null;
   }
 
   async request(path, init = {}) {
-    const response = await this.fetchFn(`${this.serverUrl}${path}`, {
-      ...init,
-      headers: {
-        accept: "application/json",
-        ...(init.body ? { "content-type": "application/json" } : {}),
-        ...(init.headers || {})
+    const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
+    const signal = init.signal
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal;
+    let response;
+    try {
+      response = await this.fetchFn(`${this.serverUrl}${path}`, {
+        ...init,
+        signal,
+        headers: {
+          accept: "application/json",
+          ...(init.body ? { "content-type": "application/json" } : {}),
+          ...(init.headers || {})
+        }
+      });
+    } catch (error) {
+      if (timeoutSignal.aborted && !init.signal?.aborted) {
+        throw new Error(`控制面请求超时（${this.requestTimeoutMs}ms）`);
       }
-    });
+      throw error;
+    }
     if (!response.ok) {
       let message = `控制面请求失败（HTTP ${response.status}）`;
       try {
         const body = await response.json();
-        message = body.error || body.message || message;
+        message = body.error?.message || body.message || message;
       } catch {
         // Keep the status-based message when the response is not JSON.
       }

@@ -340,7 +340,20 @@ export async function createRayLinkApp(options) {
   let runtimeUpdateTimer = null;
   let usageMeteringTimer = null;
   let usageMeteringPromise = null;
+  let operationalMaintenanceTimer = null;
   let localRuntimeOperation = null;
+  const operationalMaintenanceIntervalMs = Math.max(
+    60_000,
+    Number(options.operationalMaintenanceIntervalMs || 60 * 60 * 1000)
+  );
+  const runOperationalMaintenance = () => {
+    try {
+      return store.performOperationalMaintenance();
+    } catch (error) {
+      console.warn(`[RayLink] Operational maintenance failed: ${error.message}`);
+      return null;
+    }
+  };
   const runLocalRuntimeOperation = async (operation, callback) => {
     if (localRuntimeOperation) {
       throw httpError(
@@ -1297,6 +1310,12 @@ export async function createRayLinkApp(options) {
       await sampleLocalTelemetry();
       await refreshLocalRuntimeCapabilities();
       await sampleLocalUsage();
+      runOperationalMaintenance();
+      operationalMaintenanceTimer = setInterval(
+        runOperationalMaintenance,
+        operationalMaintenanceIntervalMs
+      );
+      operationalMaintenanceTimer.unref?.();
       telemetryTimer = setInterval(sampleLocalTelemetry, telemetryIntervalMs);
       telemetryTimer.unref?.();
       usageMeteringTimer = setInterval(sampleLocalUsage, usageMeteringIntervalMs);
@@ -1316,6 +1335,10 @@ export async function createRayLinkApp(options) {
       }
     },
     async close() {
+      if (operationalMaintenanceTimer) {
+        clearInterval(operationalMaintenanceTimer);
+        operationalMaintenanceTimer = null;
+      }
       if (usageMeteringTimer) {
         clearInterval(usageMeteringTimer);
         usageMeteringTimer = null;

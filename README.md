@@ -1,7 +1,7 @@
 <div align="center">
   <img src="roms/web/assets/brand/raylink-mark.svg" width="104" alt="RayLink logo">
   <h1>RayLink</h1>
-  <p><strong>把多用户、多节点 sing-box 服务变成一套可安装、可配置、可发布、可计量的控制面。</strong></p>
+  <p><strong>把多用户、多 Host sing-box 服务变成一套可安装、可配置、可发布、可计量的控制面。</strong></p>
   <p>
     <a href="https://github.com/Zanetach/RayLink/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/Zanetach/RayLink?display_name=tag&style=flat-square"></a>
     <img alt="Node.js 22.5+" src="https://img.shields.io/badge/Node.js-%E2%89%A522.5-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white">
@@ -12,7 +12,7 @@
 
 ![RayLink 控制面总览](roms/docs/assets/readme/dashboard.png)
 
-RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制台创建用户、设置流量与到期时间、接入 VPS、配置节点协议并发布；用户登录独立用户中心，获取包含多个节点和协议的专属 sing-box 订阅。国内目标直连，其他流量进入自动测速与故障切换策略。
+RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制台创建用户、设置流量与到期时间、接入 VPS、配置 Host 入口协议并发布；用户登录独立用户中心，获取包含多个 Host 和协议的专属 sing-box 客户端配置。国内目标直连，其他流量进入自动测速与故障切换策略。
 
 > [!IMPORTANT]
 > RayLink 是网络基础设施管理软件。请只在你有权管理的服务器和网络中部署，并遵守所在地法律、云服务商条款及目标服务的使用政策。
@@ -21,38 +21,38 @@ RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制�
 
 | 能力 | RayLink 的处理方式 |
 |---|---|
-| 一台控制面管理多台 VPS | 本机 Runtime 与远程 RayLink Node 使用同一套主机、协议和发布模型 |
-| 用户与订阅 | 创建用户时直接设置流量、到期时间和节点范围；不需要额外“套餐管理” |
-| 一个订阅包含多个节点 | 按用户权益编译全部可用节点和协议，并生成 URLTest、Selector 与故障切换 |
-| 节点协议配置 | 协议绑定到具体节点，按需启用；保存后经过能力、端口、TLS 与语法校验 |
+| 一台控制面管理多台 VPS | 本机 Runtime 与远程 RayLink Node 使用同一套 Host、协议和 Deployment 模型 |
+| User Entitlement 与客户端配置 | 创建用户时直接设置流量、到期时间和 Host 范围；无需额外的可复用权益模板 |
+| 一个客户端配置包含多个 Host | 按 User Entitlement 编译全部可用 Host 和协议，并生成 URLTest、Selector 与故障切换 |
+| Host 入口协议 | 协议绑定到具体 Host，按需启用；保存后经过能力、端口、TLS 与语法校验 |
 | 智能路由 | sing-box 客户端通过 TUN、DNS 分流、CN 规则直连和境外自动代理执行 |
 | 安全发布 | `sing-box check`、原子替换、版本快照、失败恢复和历史回滚 |
-| 真实流量计量 | 使用 sing-box 用户级统计，不以主机网卡总流量估算用户配额 |
-| 节点可观测性 | 汇总 CPU、内存、上下行速率、服务状态、心跳和 Runtime 版本 |
+| 真实流量计量 | 使用 sing-box 用户级统计，不以 Host 网卡总流量估算用户配额 |
+| Host 可观测性 | 汇总 CPU、内存、上下行速率、服务状态、心跳和 Runtime 版本 |
 | 在线升级 | 发现已验证的 sing-box 新版本后提示升级，失败自动恢复旧二进制和服务状态 |
 
 ## 界面预览
 
-### 用户即权益
+### 用户即 User Entitlement
 
-创建用户时直接设置配额、到期日和节点范围；停用、到期或超额后，RayLink 会重新编译并同步撤权配置。
+创建用户时直接设置配额、到期日和 Host 范围；停用、到期或超额后，RayLink 会重新编译并发布撤权 Deployment。
 
 ![RayLink 用户管理](roms/docs/assets/readme/users.png)
 
-### 协议绑定节点
+### 协议绑定 Host
 
-每台主机独立维护入口协议和运行状态。新 VPS 通过一次性接入令牌安装 RayLink Node，在线后即可参与订阅编译和配置发布。
+每台 Host 独立维护入口协议和 Runtime 状态。新 VPS 通过一次性接入令牌安装 RayLink Node，在线后即可参与客户端配置编译和 Deployment。
 
-![RayLink 主机与系统管理](roms/docs/assets/readme/system.png)
+![RayLink Host 与系统管理](roms/docs/assets/readme/system.png)
 
 ## 架构
 
 ```mermaid
 flowchart LR
   Admin["管理员浏览器"] -->|"HTTPS / Cookie Session"| Control["RayLink Control Plane<br/>Node.js + SQLite"]
-  Portal["用户中心"] -->|"登录 / 获取专属订阅"| Control
+  Portal["用户中心"] -->|"登录 / 获取专属配置 URL"| Control
 
-  Control --> Policy["用户权益、协议配置<br/>路由与证书策略"]
+  Control --> Policy["User Entitlement、协议配置<br/>路由与证书策略"]
   Policy --> Compiler["配置编译与校验<br/>sing-box check"]
   Compiler --> Local["本机 Runtime"]
   Compiler -->|"加密任务"| NodeA["RayLink Node · VPS A"]
@@ -72,15 +72,15 @@ flowchart LR
 
 核心数据流：
 
-1. 管理员修改用户、主机或协议。
-2. 控制面按每台主机生成候选配置，并执行版本、构建标签、端口、TLS 和 `sing-box check` 校验。
-3. 本机使用原子文件替换；远程节点领取加密任务并在本地校验、发布和重启。
-4. 用户订阅按当前权益聚合多个节点与协议，自动加入智能路由、测速和故障切换。
-5. 节点回传心跳、资源遥测、服务状态和用户级流量增量。
+1. 管理员修改 User Entitlement、Host 或协议。
+2. 控制面按每台 Host 生成候选配置，并执行版本、构建标签、端口、TLS 和 `sing-box check` 校验。
+3. 本机使用原子文件替换；远程 RayLink Node 领取加密任务并在 Host 本地校验、发布和重启。
+4. 用户客户端配置按当前 User Entitlement 聚合多个 Host 与协议，自动加入智能路由、测速和故障切换。
+5. RayLink Node 回传心跳、Host 资源遥测、Runtime 状态和用户级流量增量。
 
 ## 一键安装
 
-当前正式安装包面向 **Debian/Ubuntu + systemd + AMD64（x86_64）**。准备一台全新 VPS，并开放：
+当前发布安装包面向 **Debian/Ubuntu + systemd + AMD64（x86_64）**。在生产验收清单全部通过前，应视为候选版本。准备一台全新 VPS，并开放：
 
 - 控制台 HTTPS 端口 `443`
 - 你在界面启用的代理协议端口
@@ -104,23 +104,23 @@ sudo env RAYLINK_PUBLIC_IP=203.0.113.10 bash raylink-0.2.0/deploy/install-contro
 - 为 IP 首次访问生成本机证书
 - 输出仅显示一次、30 分钟有效的初始化地址
 
-打开安装器输出的 `https://服务器IP/setup#token=...`，依次完成访问地址、正式管理员、本机节点和运行检查。首次使用 IP 证书时，浏览器会提示本机签发；继续前请核对安装器打印的 SHA-256 证书指纹。
+打开安装器输出的 `https://服务器IP/setup#token=...`，依次完成访问地址、正式管理员、本机 Host 和 Runtime 检查。首次使用 IP 证书时，浏览器会提示本机签发；继续前请核对安装器打印的 SHA-256 证书指纹。
 
 生产环境建议配置域名和受信任 TLS 证书。没有域名时也可以使用 IP HTTPS。完整部署、反向代理、手动安装和令牌轮换说明见 [部署手册](roms/deploy/README.md)。
 
 ## 添加第二台 VPS
 
-第一台机器同时运行控制面和本机 Runtime。新增节点不需要再次安装完整控制台：
+第一台 Host 同时运行控制面和本机 Runtime。新增 Host 不需要再次安装完整控制台：
 
-1. 打开「系统 → 主机 → 添加主机」。
-2. 填写主机名称、公网地址和区域，生成一次性安装命令。
+1. 打开「系统 → 主机 → 添加 Host」。
+2. 填写 Host 名称、公网地址和区域，生成一次性安装命令。
 3. 在新 VPS 上执行该命令；它会安装 RayLink Node 和审批版本的 sing-box Runtime。
-4. 等待节点显示在线，在主机详情中启用所需协议。
+4. 等待 RayLink Node 显示在线，在 Host 详情中启用所需协议。
 5. 前往「运维」检查候选配置并发布。
 
-接入令牌只能使用一次。节点身份、加密私钥和受管配置分别保存在受限目录中；控制面不会以明文任务或日志下发 TLS 私钥。
+接入令牌只能使用一次。RayLink Node 身份、加密私钥和受管配置分别保存在受限目录中；控制面不会以明文任务或日志下发 TLS 私钥。
 
-## 从用户到订阅
+## 从 User Entitlement 到客户端配置
 
 ```mermaid
 sequenceDiagram
@@ -129,20 +129,20 @@ sequenceDiagram
   participant U as 用户
   participant C as sing-box 客户端
 
-  A->>R: 创建用户并设置配额、到期日、节点范围
-  A->>R: 发布节点配置
+  A->>R: 创建用户并设置配额、到期日、Host 范围
+  A->>R: 发布 Deployment
   U->>R: 登录用户中心
-  R-->>U: 返回专属订阅地址
-  U->>C: 导入订阅
+  R-->>U: 返回专属配置 URL
+  U->>C: 导入配置 URL
   C->>R: 拉取当前用户配置
-  R-->>C: 多节点、多协议、智能路由配置
+  R-->>C: 多 Host、多协议、智能路由配置
 ```
 
-订阅密钥按密码处理：服务端只保存 SHA-256 哈希，重置后旧地址立即失效；响应使用私有缓存策略和 ETag。用户停用、到期、超额或节点范围变化后，下一次更新会取得新的有效配置。
+配置 URL 的密钥按密码处理：服务端只保存 SHA-256 哈希，重置后旧地址立即失效；响应使用私有缓存策略和 ETag。用户停用、到期、超额或 Host 范围变化后，下一次更新会取得新的有效配置。
 
 ## 协议与路由
 
-RayLink 的协议目录来自安装 Runtime 的 `version + platform + build tags`，不会把“sing-box 源码中存在”误标成“当前节点可用”。
+RayLink 的协议目录来自安装 Runtime 的 `version + platform + build tags`，不会把“sing-box 源码中存在”误标成“当前 Host 可用”。
 
 | 类型 | 当前界面能力 |
 |---|---|
@@ -181,10 +181,13 @@ SING_BOX_BIN='/usr/local/bin/raylink-sing-box' \
 npm start
 ```
 
-运行完整检查：
+运行自动化生产前检查。`check:production` 需要 PATH 中有 sing-box 1.13.14 与 OpenSSL；
+它覆盖代码回归、协议语法和短时内存烟测，但不替代干净 VPS、真实客户端、故障注入与
+72 小时运行验收：
 
 ```bash
 npm run check
+npm run check:production
 ```
 
 ## 关键配置
@@ -201,16 +204,16 @@ npm run check
 | `SING_BOX_BIN` | `sing-box` | 受管 sing-box 可执行文件 |
 | `SING_BOX_SYSTEMD_UNIT` | `sing-box.service` | 发布后重启的 systemd 服务 |
 
-生产环境必须让 RayLink 只监听回环地址，并放在 HTTPS 反向代理后方；不要向公网直接开放 `4173`。`/sub/` URL 包含订阅密钥，反向代理访问日志必须屏蔽该路径。
+生产环境必须让 RayLink 只监听回环地址，并放在 HTTPS 反向代理后方；不要向公网直接开放 `4173`。`/sub/` URL 包含配置 URL 密钥，反向代理访问日志必须屏蔽该路径。
 
 ## 当前边界
 
-v0.2.0 已覆盖单控制面、多节点、用户订阅、安全发布和真实流量计量的核心链路。以下功能仍在后续范围：
+v0.2.0 已覆盖单控制面、多 Host、用户客户端配置、安全发布和真实流量计量的核心链路。以下功能仍在后续范围：
 
 - TLS 证书自动签发、续期和到期告警
-- 二维码订阅与 Mihomo 格式转换
+- 配置 URL 二维码与 Mihomo 格式转换
 - 财务账单、周期重置、退款和人工调账
-- 多节点灰度升级与维护窗口
+- 多 Host 灰度升级与维护窗口
 - 同一种协议的多个独立 inbound 实例
 - 完整 outbound、endpoint、DNS 和路由规则图形化编辑器
 - 邮件邀请、忘记密码、2FA 与细粒度 RBAC
@@ -221,6 +224,7 @@ v0.2.0 已覆盖单控制面、多节点、用户订阅、安全发布和真实�
 - [生产部署手册](roms/deploy/README.md)
 - [sing-box 协议支持矩阵](roms/docs/sing-box-protocol-support.md)
 - [生产落地计划](roms/docs/release/raylink-production-implementation-plan.md)
+- [v0.2.0 生产候选验收记录](roms/docs/release/v0.2.0-production-acceptance.md)
 - [领域模型](roms/CONTEXT.md)
 - [架构决策记录](roms/docs/adr/)
 - [v0.2.0 发布说明](roms/docs/release/v0.2.0.md)

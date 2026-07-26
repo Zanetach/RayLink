@@ -19,6 +19,42 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+test("RayLink Node surfaces the control-plane error message", async () => {
+  const node = new RayLinkNode({
+    serverUrl: "https://panel.example.com",
+    fetchFn: async () => jsonResponse({
+      error: {
+        code: "NODE_UPGRADE_REQUIRED",
+        message: "请先升级 RayLink Node"
+      }
+    }, 426)
+  });
+
+  await assert.rejects(
+    () => node.request("/api/node/tasks/next"),
+    /请先升级 RayLink Node/
+  );
+});
+
+test("RayLink Node times out an unresponsive control plane", async () => {
+  const node = new RayLinkNode({
+    serverUrl: "https://panel.example.com",
+    requestTimeoutMs: 20,
+    fetchFn: async (_url, init) => new Promise((_resolve, reject) => {
+      const holdOpen = setTimeout(() => reject(new Error("request remained open")), 200);
+      init.signal.addEventListener("abort", () => {
+        clearTimeout(holdOpen);
+        reject(init.signal.reason);
+      }, { once: true });
+    })
+  });
+
+  await assert.rejects(
+    () => node.request("/api/node/heartbeat"),
+    /控制面请求超时/
+  );
+});
+
 test("RayLink Node enrolls once and persists its node credential", async () => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-node-enroll-"));
   const statePath = join(directory, "node.json");

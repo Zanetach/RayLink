@@ -182,6 +182,177 @@ test("production initialization can start without known demo users", async (t) =
   assert.equal("plans" in body, false);
 });
 
+test("empty-database API workflow reaches a multi-Host client configuration", async (t) => {
+  const runtimeAdapter = {
+    activePath: "/tmp/raylink-workflow-config.json",
+    async status() {
+      return {
+        state: "running",
+        mode: "test",
+        configPath: this.activePath,
+        runtimeVersion: "1.13.14"
+      };
+    },
+    async publish() {
+      return this.status();
+    }
+  };
+  const testApp = await startTestApp({
+    seedDemoData: false,
+    proxyHost: "local.example.com",
+    runtimeAdapter
+  });
+  t.after(() => testApp.close());
+  const adminCookie = await login(testApp.baseUrl);
+
+  await enableHostShadowsocks(testApp.baseUrl, adminCookie, "local", 8388);
+  const createdHostResponse = await api(testApp.baseUrl, adminCookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Singapore 01",
+      address: "sg.example.com",
+      region: "singapore"
+    })
+  });
+  assert.equal(createdHostResponse.status, 201);
+  const createdHost = await createdHostResponse.json();
+
+  const enrollResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: createdHost.enrollmentToken,
+      hostname: "sg-vps-01",
+      platform: "linux",
+      architecture: "amd64",
+      agentVersion: "0.5.0",
+      runtimeVersion: "1.13.14",
+      buildTags: ["with_quic", "with_utls", "with_v2ray_api"]
+    })
+  });
+  assert.equal(enrollResponse.status, 201);
+  const nodeCredential = await enrollResponse.json();
+  await enableHostShadowsocks(
+    testApp.baseUrl,
+    adminCookie,
+    nodeCredential.hostId,
+    8388
+  );
+
+  const userResponse = await api(testApp.baseUrl, adminCookie, "/api/users", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Production User",
+      email: "production-user@example.com",
+      password: "RayLink@2026",
+      quotaGb: 100,
+      nodeScope: ["all"],
+      clientFormats: ["sing-box"],
+      state: "active",
+      portalStatus: "active",
+      expiresAt: "2030-12-31"
+    })
+  });
+  assert.equal(userResponse.status, 201);
+  const user = await userResponse.json();
+  assert.equal(user.runtimeSync.status, "current");
+
+  const publishResponse = await api(
+    testApp.baseUrl,
+    adminCookie,
+    "/api/deployments",
+    { method: "POST" }
+  );
+  assert.equal(publishResponse.status, 201);
+  assert.equal((await publishResponse.json()).remoteQueued, 1);
+
+  const nodeHeaders = {
+    authorization: `Bearer ${nodeCredential.nodeSecret}`,
+    "x-raylink-host-id": nodeCredential.hostId
+  };
+  const taskResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  });
+  assert.equal(taskResponse.status, 200);
+  const task = await taskResponse.json();
+  assert.equal(task.kind, "publish-config");
+  const remoteConfig = JSON.parse(task.payload.configText);
+  assert.equal(remoteConfig.inbounds[0].users[0].name, "production-user@example.com");
+
+  const completionResponse = await fetch(
+    `${testApp.baseUrl}/api/node/tasks/${encodeURIComponent(task.id)}/complete`,
+    {
+      method: "POST",
+      headers: { ...nodeHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        attempt: task.attempt,
+        status: "succeeded",
+        runtimeVersion: "1.13.14",
+        validation: "sing-box"
+      })
+    }
+  );
+  assert.equal(completionResponse.status, 200);
+  const heartbeatResponse = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      runtimeVersion: "1.13.14",
+      buildTags: ["with_quic", "with_utls", "with_v2ray_api"],
+      runtimeState: "running",
+      telemetry: {
+        cpuPercent: 12,
+        memoryUsedBytes: 256 * 1024 * 1024,
+        memoryTotalBytes: 1024 * 1024 * 1024,
+        networkRxBytes: 1_024,
+        networkTxBytes: 2_048,
+        networkRxBps: 128,
+        networkTxBps: 256,
+        serviceStatus: "running"
+      }
+    })
+  });
+  assert.equal(heartbeatResponse.status, 200);
+
+  const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "production-user@example.com",
+      password: "RayLink@2026"
+    })
+  });
+  assert.equal(portalLogin.status, 200);
+  const portalCookie = portalLogin.headers.getSetCookie()[0].split(";")[0];
+  const clientConfigResponse = await fetch(
+    `${testApp.baseUrl}/api/portal/config/sing-box`,
+    { headers: { cookie: portalCookie } }
+  );
+  assert.equal(clientConfigResponse.status, 200);
+  const clientConfig = await clientConfigResponse.json();
+  assert.deepEqual(
+    clientConfig.outbounds
+      .filter((outbound) => outbound.type === "shadowsocks")
+      .map((outbound) => outbound.server),
+    ["local.example.com", "sg.example.com"]
+  );
+  assert.ok(clientConfig.outbounds.some((outbound) => outbound.type === "selector"));
+  assert.ok(clientConfig.outbounds.some((outbound) => outbound.type === "urltest"));
+
+  const rotateResponse = await api(
+    testApp.baseUrl,
+    adminCookie,
+    `/api/users/${encodeURIComponent(user.id)}/subscription/rotate`,
+    { method: "POST" }
+  );
+  assert.equal(rotateResponse.status, 201);
+  const { subscriptionUrl } = await rotateResponse.json();
+  const subscriptionPath = new URL(subscriptionUrl).pathname;
+  const subscriptionResponse = await fetch(`${testApp.baseUrl}${subscriptionPath}`);
+  assert.equal(subscriptionResponse.status, 200);
+  assert.deepEqual(await subscriptionResponse.json(), clientConfig);
+});
+
 test("authenticated bootstrap reports current local host telemetry", async (t) => {
   let telemetrySamples = 0;
   const testApp = await startTestApp({

@@ -54,6 +54,8 @@ const seedPlans = [
 
 const LEGACY_ENTITLEMENT_PLAN_ID = "user-entitlement";
 const GIBIBYTE = 1024 ** 3;
+const MAX_USAGE_SAMPLE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_USAGE_SAMPLE_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const seedUsers = [
   ["林知夏", "LZ", "lin.zhixia@meridian-log.cn", "active", "active", 74.3, "standard", "2026-10-18"],
@@ -266,13 +268,15 @@ export class RayLinkStore {
     nodeTaskRetryBaseMs = 60_000,
     setupRequired = false,
     setupTokenHash = "",
-    setupTokenExpiresAt = ""
+    setupTokenExpiresAt = "",
+    clock = () => new Date()
   }) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.lastTelemetryPruneAt = 0;
     this.nodeTaskRetryBaseMs = Math.max(0, Number(nodeTaskRetryBaseMs) || 0);
+    this.clock = clock;
     this.migrate();
     this.seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData });
     this.initializeSetup({ setupRequired, setupTokenHash, setupTokenExpiresAt });
@@ -452,6 +456,17 @@ export class RayLinkStore {
       );
       CREATE INDEX IF NOT EXISTS user_usage_ledger_user_recorded
       ON user_usage_ledger(user_id, recorded_at);
+      CREATE TABLE IF NOT EXISTS daily_user_usage (
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        usage_date TEXT NOT NULL,
+        uplink_bytes INTEGER NOT NULL CHECK (uplink_bytes >= 0),
+        downlink_bytes INTEGER NOT NULL CHECK (downlink_bytes >= 0),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(host_id, user_id, usage_date)
+      );
+      CREATE INDEX IF NOT EXISTS daily_user_usage_user_date
+      ON daily_user_usage(user_id, usage_date);
     `);
     const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
@@ -854,6 +869,106 @@ export class RayLinkStore {
     return result.changes > 0;
   }
 
+  performOperationalMaintenance({
+    now = nowIso(),
+    deploymentHistoryLimit = 50,
+    nodeTaskHistoryLimit = 50,
+    usageDetailRetentionDays = 30,
+    dailyUsageRetentionDays = 400
+  } = {}) {
+    const boundedDeploymentLimit = Math.min(
+      1_000,
+      Math.max(20, Number(deploymentHistoryLimit) || 50)
+    );
+    const boundedNodeTaskLimit = Math.min(
+      1_000,
+      Math.max(20, Number(nodeTaskHistoryLimit) || 50)
+    );
+    const boundedUsageRetentionDays = Math.min(
+      365,
+      Math.max(7, Number(usageDetailRetentionDays) || 30)
+    );
+    const boundedDailyUsageRetentionDays = Math.min(
+      3_650,
+      Math.max(30, Number(dailyUsageRetentionDays) || 400)
+    );
+    const maintenanceTime = new Date(now);
+    if (!Number.isFinite(maintenanceTime.getTime())) {
+      throw domainError("INVALID_MAINTENANCE_TIME", "维护时间无效");
+    }
+    const usageDetailCutoff = new Date(
+      maintenanceTime.getTime() - boundedUsageRetentionDays * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const dailyUsageCutoff = new Date(
+      maintenanceTime.getTime() - boundedDailyUsageRetentionDays * 24 * 60 * 60 * 1000
+    ).toISOString().slice(0, 10);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const administratorSessions = this.db.prepare(
+        "DELETE FROM sessions WHERE expires_at <= ?"
+      ).run(now);
+      const userSessions = this.db.prepare(
+        "DELETE FROM user_sessions WHERE expires_at <= ?"
+      ).run(now);
+      const deployments = this.db.prepare(`
+        DELETE FROM deployments
+        WHERE status <> 'active'
+          AND id IN (
+            SELECT id
+            FROM (
+              SELECT id,
+                     ROW_NUMBER() OVER (ORDER BY created_at DESC, id DESC) AS history_rank
+              FROM deployments
+              WHERE status <> 'active'
+            )
+            WHERE history_rank > ?
+          )
+      `).run(boundedDeploymentLimit);
+      const nodeTasks = this.db.prepare(`
+        DELETE FROM node_tasks
+        WHERE id IN (
+          SELECT id
+          FROM (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY host_id, kind
+                     ORDER BY finished_at DESC, created_at DESC, id DESC
+                   ) AS history_rank
+            FROM node_tasks
+            WHERE status IN ('succeeded', 'failed')
+          )
+          WHERE history_rank > ?
+        )
+      `).run(boundedNodeTaskLimit);
+      const usageSamples = this.db.prepare(`
+        DELETE FROM usage_samples
+        WHERE received_at < ?
+      `).run(usageDetailCutoff);
+      const dailyUsage = this.db.prepare(`
+        DELETE FROM daily_user_usage
+        WHERE usage_date < ?
+      `).run(dailyUsageCutoff);
+      this.db.exec("COMMIT");
+      return {
+        sessions: {
+          administrator: Number(administratorSessions.changes),
+          user: Number(userSessions.changes)
+        },
+        history: {
+          deployments: Number(deployments.changes),
+          nodeTasks: Number(nodeTasks.changes),
+          usageSamples: Number(usageSamples.changes),
+          usageDetailRetentionDays: boundedUsageRetentionDays,
+          dailyUsage: Number(dailyUsage.changes),
+          dailyUsageRetentionDays: boundedDailyUsageRetentionDays
+        }
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   async authenticateUser(email, password) {
     const user = this.db.prepare("SELECT * FROM users WHERE email = ?").get(String(email || "").trim().toLowerCase());
     const valid = await verifyPassword(password, user?.password_hash || DUMMY_PASSWORD_HASH);
@@ -1037,9 +1152,20 @@ export class RayLinkStore {
     if (!Array.isArray(input.users) || input.users.length > 10_000) {
       throw domainError("INVALID_USAGE_SAMPLE", "流量样本用户列表无效");
     }
-    const observedAt = new Date(input.observedAt || Date.now());
+    const receivedAtDate = new Date(this.clock());
+    if (!Number.isFinite(receivedAtDate.getTime())) {
+      throw domainError("INVALID_USAGE_CLOCK", "控制面计量时间无效", 500);
+    }
+    const observedAt = new Date(input.observedAt || receivedAtDate);
     if (!Number.isFinite(observedAt.getTime())) {
       throw domainError("INVALID_USAGE_SAMPLE", "流量样本时间无效");
+    }
+    const sampleAgeMs = receivedAtDate.getTime() - observedAt.getTime();
+    if (sampleAgeMs > MAX_USAGE_SAMPLE_AGE_MS) {
+      throw domainError("STALE_USAGE_SAMPLE", "流量样本超过 7 天接收窗口，已拒绝");
+    }
+    if (sampleAgeMs < -MAX_USAGE_SAMPLE_FUTURE_SKEW_MS) {
+      throw domainError("FUTURE_USAGE_SAMPLE", "流量样本时间超前超过 5 分钟，已拒绝");
     }
     const normalized = input.users.map((usage) => {
       const userName = String(usage.name || "").trim();
@@ -1057,7 +1183,7 @@ export class RayLinkStore {
       }
       return { userName, uplinkBytes, downlinkBytes };
     });
-    const receivedAt = nowIso();
+    const receivedAt = receivedAtDate.toISOString();
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const inserted = this.db.prepare(`
@@ -1135,6 +1261,22 @@ export class RayLinkStore {
           uplinkDelta,
           downlinkDelta,
           observedAt.toISOString()
+        );
+        this.db.prepare(`
+          INSERT INTO daily_user_usage (
+            host_id, user_id, usage_date, uplink_bytes, downlink_bytes, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(host_id, user_id, usage_date) DO UPDATE SET
+            uplink_bytes = daily_user_usage.uplink_bytes + excluded.uplink_bytes,
+            downlink_bytes = daily_user_usage.downlink_bytes + excluded.downlink_bytes,
+            updated_at = excluded.updated_at
+        `).run(
+          hostId,
+          user.id,
+          observedAt.toISOString().slice(0, 10),
+          uplinkDelta,
+          downlinkDelta,
+          receivedAt
         );
         const beforeBytes = Number(user.used_bytes || 0);
         const afterBytes = beforeBytes + delta;

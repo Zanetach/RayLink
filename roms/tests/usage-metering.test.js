@@ -122,7 +122,8 @@ test("usage snapshots are idempotent, persist byte deltas and survive Runtime re
     dbPath: join(directory, "raylink.db"),
     adminUsername: "admin",
     adminPassword: "Admin@2026",
-    seedDemoData: false
+    seedDemoData: false,
+    clock: () => new Date("2026-07-26T10:03:00.000Z")
   });
   t.after(() => store.close());
   const user = store.createUser({
