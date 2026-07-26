@@ -9,7 +9,7 @@ A person allowed to sign in to the user center and own exactly one User Entitlem
 _Avoid_: Client, subscriber, token
 
 **User Entitlement**:
-Traffic allowance, device limit, node scope, and supported client formats owned by exactly one User. It cannot be assigned to or reused by another User.
+Traffic allowance, expiry, node scope, and supported client formats owned by exactly one User. It cannot be assigned to or reused by another User.
 _Avoid_: Plan, subscription, package
 
 **Runtime Credential**:
@@ -20,12 +20,16 @@ _Avoid_: Shared key, subscription token
 A machine capable of running a sing-box Runtime.
 _Avoid_: Node when referring to the machine itself
 
+**RayLink Node**:
+The lightweight service installed on a remote Host. It enrolls once, reports Host and Runtime status, receives Host-scoped Deployment tasks, and applies them atomically.
+_Avoid_: Agent
+
 **Runtime**:
 The sing-box process and active configuration on a Host.
 _Avoid_: Core, daemon
 
 **Deployment**:
-An immutable attempt to compile, validate, and publish a control-plane snapshot to a Runtime.
+An immutable attempt to compile, validate, and publish a control-plane snapshot to one or more Runtimes.
 _Avoid_: Save, sync
 
 **User Center**:

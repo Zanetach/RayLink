@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildMultiHostProtocolClientConfig,
   buildProtocolClientConfig,
   buildProtocolInbounds,
   defaultProtocolConfigs,
@@ -102,6 +103,32 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.type === "selector").outbounds,
     ["raylink-shadowsocks", "raylink-vless"]
+  );
+});
+
+test("multi-host client configuration exposes every entitled node through one selector", () => {
+  const profiles = defaultProtocolConfigs(8388);
+  const config = buildMultiHostProtocolClientConfig({
+    profiles,
+    credential: {
+      email: eligibleUsers[0].email,
+      runtimeUuid: eligibleUsers[0].runtimeUuid,
+      runtimePassword: eligibleUsers[0].runtimePassword,
+      serverPassword: "c2VydmVyLWtleS0xNg=="
+    },
+    hosts: [
+      { id: "local", name: "Tokyo", address: "tokyo.example.com" },
+      { id: "fra-02", name: "Frankfurt", address: "fra.example.com" }
+    ]
+  });
+
+  const servers = config.outbounds
+    .filter((outbound) => outbound.type === "shadowsocks")
+    .map((outbound) => outbound.server);
+  assert.deepEqual(servers, ["tokyo.example.com", "fra.example.com"]);
+  assert.deepEqual(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-auto").outbounds,
+    ["raylink-local-shadowsocks", "raylink-fra-02-shadowsocks"]
   );
 });
 

@@ -119,6 +119,45 @@ function userFromRow(row) {
   };
 }
 
+function hostFromRow(row) {
+  const lastSeenAt = row.last_seen_at || null;
+  const remoteOffline = (row.kind || "local") === "remote"
+    && lastSeenAt
+    && Date.now() - new Date(lastSeenAt).getTime() > 45_000;
+  return {
+    id: row.id,
+    name: row.name,
+    address: row.address,
+    region: row.region,
+    status: remoteOffline ? "offline" : row.status,
+    kind: row.kind || "local",
+    hostname: row.hostname || null,
+    platform: row.platform || null,
+    architecture: row.architecture || null,
+    agentVersion: row.agent_version || null,
+    runtimeVersion: row.runtime_version || null,
+    buildTags: parseJson(row.build_tags_json, []),
+    lastSeenAt,
+    enrolledAt: row.enrolled_at || null
+  };
+}
+
+function normalizedHostInput(input, current = {}) {
+  const host = {
+    name: input.name === undefined ? current.name : String(input.name).trim(),
+    address: input.address === undefined ? current.address : String(input.address).trim(),
+    region: input.region === undefined ? current.region : String(input.region).trim()
+  };
+  if (!host.name) throw domainError("INVALID_HOST_NAME", "主机名称不能为空");
+  if (!/^(?:[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:]+\])$/i.test(host.address)) {
+    throw domainError("INVALID_HOST_ADDRESS", "请输入有效的主机域名或 IP 地址");
+  }
+  if (!/^[a-z0-9-]{2,32}$/i.test(host.region)) {
+    throw domainError("INVALID_HOST_REGION", "区域标识格式不正确");
+  }
+  return host;
+}
+
 export class RayLinkStore {
   constructor({
     dbPath,
@@ -193,6 +232,17 @@ export class RayLinkStore {
         address TEXT NOT NULL,
         region TEXT NOT NULL,
         status TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'local',
+        enrollment_secret_hash TEXT,
+        node_secret_hash TEXT,
+        hostname TEXT,
+        platform TEXT,
+        architecture TEXT,
+        agent_version TEXT,
+        runtime_version TEXT,
+        build_tags_json TEXT NOT NULL DEFAULT '[]',
+        last_seen_at TEXT,
+        enrolled_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -211,6 +261,19 @@ export class RayLinkStore {
         created_at TEXT NOT NULL,
         published_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS node_tasks (
+        id TEXT PRIMARY KEY,
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'claimed', 'succeeded', 'failed')),
+        result_json TEXT,
+        created_at TEXT NOT NULL,
+        claimed_at TEXT,
+        finished_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS node_tasks_host_status_created
+      ON node_tasks(host_id, status, created_at);
     `);
     const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
@@ -228,6 +291,25 @@ export class RayLinkStore {
     }
     if (!userColumns.some((column) => column.name === "client_formats_json")) {
       this.db.exec("ALTER TABLE users ADD COLUMN client_formats_json TEXT");
+    }
+    const hostColumns = this.db.prepare("PRAGMA table_info(hosts)").all();
+    const hostMigrations = [
+      ["kind", "TEXT NOT NULL DEFAULT 'local'"],
+      ["enrollment_secret_hash", "TEXT"],
+      ["node_secret_hash", "TEXT"],
+      ["hostname", "TEXT"],
+      ["platform", "TEXT"],
+      ["architecture", "TEXT"],
+      ["agent_version", "TEXT"],
+      ["runtime_version", "TEXT"],
+      ["build_tags_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["last_seen_at", "TEXT"],
+      ["enrolled_at", "TEXT"]
+    ];
+    for (const [column, definition] of hostMigrations) {
+      if (!hostColumns.some((candidate) => candidate.name === column)) {
+        this.db.exec(`ALTER TABLE hosts ADD COLUMN ${column} ${definition}`);
+      }
     }
     this.db.exec(`
       UPDATE users
@@ -439,32 +521,213 @@ export class RayLinkStore {
   }
 
   listHosts() {
-    return this.db.prepare("SELECT id, name, address, region, status FROM hosts ORDER BY created_at").all();
+    return this.db.prepare("SELECT * FROM hosts ORDER BY created_at").all().map(hostFromRow);
+  }
+
+  listClientHosts() {
+    return this.db.prepare(`
+      SELECT hosts.*
+      FROM hosts
+      WHERE hosts.id = 'local'
+         OR EXISTS (
+           SELECT 1 FROM node_tasks
+           WHERE node_tasks.host_id = hosts.id AND node_tasks.status = 'succeeded'
+         )
+      ORDER BY hosts.created_at
+    `).all().map(hostFromRow);
   }
 
   getHost(id) {
-    return this.db.prepare("SELECT id, name, address, region, status FROM hosts WHERE id = ?").get(id) || null;
+    const row = this.db.prepare("SELECT * FROM hosts WHERE id = ?").get(id);
+    return row ? hostFromRow(row) : null;
+  }
+
+  createRemoteHost(input) {
+    const host = normalizedHostInput(input);
+    const id = randomUUID();
+    const enrollmentToken = createSessionSecret();
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO hosts (
+        id, name, address, region, status, kind, enrollment_secret_hash,
+        build_tags_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'pending', 'remote', ?, '[]', ?, ?)
+    `).run(
+      id,
+      host.name,
+      host.address,
+      host.region,
+      hashSessionSecret(enrollmentToken),
+      timestamp,
+      timestamp
+    );
+    return { host: this.getHost(id), enrollmentToken };
+  }
+
+  rotateNodeEnrollmentToken(hostId) {
+    const host = this.getHost(hostId);
+    if (!host || host.kind !== "remote") {
+      throw domainError("HOST_NOT_FOUND", "远程主机不存在", 404);
+    }
+    if (host.enrolledAt) {
+      throw domainError("NODE_ALREADY_ENROLLED", "节点已经注册，不能重新生成接入令牌", 409);
+    }
+    const enrollmentToken = createSessionSecret();
+    this.db.prepare(`
+      UPDATE hosts
+      SET enrollment_secret_hash = ?, status = 'pending', updated_at = ?
+      WHERE id = ?
+    `).run(hashSessionSecret(enrollmentToken), nowIso(), hostId);
+    return { host: this.getHost(hostId), enrollmentToken };
   }
 
   updateHost(id, input) {
     const current = this.getHost(id);
     if (!current) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
-    const next = {
-      name: input.name === undefined ? current.name : String(input.name).trim(),
-      address: input.address === undefined ? current.address : String(input.address).trim(),
-      region: input.region === undefined ? current.region : String(input.region).trim()
-    };
-    if (!next.name) throw domainError("INVALID_HOST_NAME", "主机名称不能为空");
-    if (!/^(?:[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:]+\])$/i.test(next.address)) {
-      throw domainError("INVALID_HOST_ADDRESS", "请输入有效的主机域名或 IP 地址");
-    }
-    if (!/^[a-z0-9-]{2,32}$/i.test(next.region)) {
-      throw domainError("INVALID_HOST_REGION", "区域标识格式不正确");
-    }
+    const next = normalizedHostInput(input, current);
     this.db.prepare(`
       UPDATE hosts SET name = ?, address = ?, region = ?, updated_at = ? WHERE id = ?
     `).run(next.name, next.address, next.region, nowIso(), id);
     return this.getHost(id);
+  }
+
+  enrollNode(token, metadata = {}) {
+    const row = this.db.prepare(`
+      SELECT id FROM hosts
+      WHERE kind = 'remote' AND enrollment_secret_hash = ?
+    `).get(hashSessionSecret(String(token || "")));
+    if (!row) throw domainError("NODE_ENROLLMENT_INVALID", "节点注册令牌无效或已经使用", 401);
+
+    const nodeSecret = createSessionSecret();
+    const timestamp = nowIso();
+    const buildTags = Array.isArray(metadata.buildTags)
+      ? metadata.buildTags.map(String).filter((tag) => /^[a-zA-Z0-9_-]{1,64}$/.test(tag)).slice(0, 64)
+      : [];
+    this.db.prepare(`
+      UPDATE hosts
+      SET enrollment_secret_hash = NULL, node_secret_hash = ?, status = 'online',
+          hostname = ?, platform = ?, architecture = ?, agent_version = ?,
+          runtime_version = ?, build_tags_json = ?, last_seen_at = ?,
+          enrolled_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      hashSessionSecret(nodeSecret),
+      String(metadata.hostname || "").slice(0, 255) || null,
+      String(metadata.platform || "").slice(0, 64) || null,
+      String(metadata.architecture || "").slice(0, 64) || null,
+      String(metadata.agentVersion || "").slice(0, 64) || null,
+      String(metadata.runtimeVersion || "").slice(0, 64) || null,
+      JSON.stringify(buildTags),
+      timestamp,
+      timestamp,
+      timestamp,
+      row.id
+    );
+    return { hostId: row.id, nodeSecret };
+  }
+
+  authenticateNode(hostId, secret) {
+    if (!hostId || !secret) return null;
+    const row = this.db.prepare(`
+      SELECT id FROM hosts
+      WHERE id = ? AND kind = 'remote' AND node_secret_hash = ?
+    `).get(hostId, hashSessionSecret(secret));
+    return row || null;
+  }
+
+  heartbeatNode(hostId, input = {}) {
+    const current = this.getHost(hostId);
+    if (!current || current.kind !== "remote") {
+      throw domainError("NODE_NOT_FOUND", "节点不存在", 404);
+    }
+    const reportedRuntimeState = String(input.runtimeState || "");
+    const runtimeState = ["running", "staged"].includes(reportedRuntimeState)
+      ? "online"
+      : ["stopped", "failed"].includes(reportedRuntimeState)
+        ? "degraded"
+        : current.status === "degraded"
+          ? "degraded"
+          : "online";
+    const timestamp = nowIso();
+    this.db.prepare(`
+      UPDATE hosts
+      SET status = ?, runtime_version = COALESCE(?, runtime_version),
+          agent_version = COALESCE(?, agent_version), last_seen_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      runtimeState,
+      input.runtimeVersion ? String(input.runtimeVersion).slice(0, 64) : null,
+      input.agentVersion ? String(input.agentVersion).slice(0, 64) : null,
+      timestamp,
+      timestamp,
+      hostId
+    );
+    return this.getHost(hostId);
+  }
+
+  queueNodeTask(hostId, kind, payload) {
+    const host = this.getHost(hostId);
+    if (!host || host.kind !== "remote" || !host.enrolledAt) {
+      throw domainError("NODE_NOT_ENROLLED", "远程节点尚未完成注册", 409);
+    }
+    const id = randomUUID();
+    this.db.prepare(`
+      INSERT INTO node_tasks (id, host_id, kind, payload_json, status, created_at)
+      VALUES (?, ?, ?, ?, 'pending', ?)
+    `).run(id, hostId, kind, JSON.stringify(payload), nowIso());
+    return id;
+  }
+
+  nextNodeTask(hostId) {
+    const retryBefore = new Date(Date.now() - 60_000).toISOString();
+    const task = this.db.prepare(`
+      SELECT id, kind, payload_json
+      FROM node_tasks
+      WHERE host_id = ?
+        AND (status = 'pending' OR (status = 'claimed' AND claimed_at < ?))
+      ORDER BY created_at
+      LIMIT 1
+    `).get(hostId, retryBefore);
+    if (!task) return null;
+    this.db.prepare(`
+      UPDATE node_tasks SET status = 'claimed', claimed_at = ? WHERE id = ?
+    `).run(nowIso(), task.id);
+    return {
+      id: task.id,
+      kind: task.kind,
+      payload: parseJson(task.payload_json, {})
+    };
+  }
+
+  completeNodeTask(hostId, taskId, input = {}) {
+    const task = this.db.prepare(`
+      SELECT id FROM node_tasks WHERE id = ? AND host_id = ?
+    `).get(taskId, hostId);
+    if (!task) throw domainError("NODE_TASK_NOT_FOUND", "节点任务不存在", 404);
+    const status = input.status === "succeeded" ? "succeeded" : "failed";
+    const timestamp = nowIso();
+    this.db.prepare(`
+      UPDATE node_tasks
+      SET status = ?, result_json = ?, finished_at = ?
+      WHERE id = ? AND host_id = ?
+    `).run(status, JSON.stringify(input), timestamp, taskId, hostId);
+    this.db.prepare(`
+      UPDATE hosts
+      SET status = ?, runtime_version = COALESCE(?, runtime_version),
+          last_seen_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      status === "succeeded" ? "online" : "degraded",
+      input.result?.runtimeVersion
+        ? String(input.result.runtimeVersion).slice(0, 64)
+        : input.runtimeVersion
+          ? String(input.runtimeVersion).slice(0, 64)
+          : null,
+      timestamp,
+      timestamp,
+      hostId
+    );
+    return { id: taskId, status };
   }
 
   bootstrap(admin) {
@@ -624,8 +887,9 @@ export class RayLinkStore {
     return this.getUser(id);
   }
 
-  runtimeSnapshot() {
-    const host = this.db.prepare("SELECT id, name, address, region, status FROM hosts WHERE id = 'local'").get();
+  runtimeSnapshot(hostId = "local") {
+    const host = this.db.prepare("SELECT id, name, address, region, status FROM hosts WHERE id = ?").get(hostId);
+    if (!host) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
     const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'shadowsocks_master_password'").get();
     const users = this.db.prepare(`
       SELECT users.email, users.state, users.portal_status, users.used_gb, users.expires_at,

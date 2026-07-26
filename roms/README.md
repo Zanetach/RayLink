@@ -1,12 +1,12 @@
 # RayLink
 
-RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面。它把管理端、用户中心、SQLite 数据库和 sing-box Runtime 发布串成一条可运行链路：
+RayLink 是一个面向多用户、多 VPS 场景的 sing-box 控制面。它把管理端、用户中心、SQLite 数据库、本机 Runtime 和远程 RayLink Node 发布串成一条可运行链路：
 
 ```text
 管理员 → 用户权益/主机配置 → SQLite → 配置编译 → sing-box check
-      → 原子替换 → Runtime 重启
+      → 本机原子替换 / 远程任务 → Runtime 重启
 
-用户 → 用户中心登录 → 权益校验 → 独立运行凭据 → sing-box 客户端配置
+用户 → 用户中心登录 → 权益校验 → 独立运行凭据 → 多节点 sing-box 客户端配置
 ```
 
 ## 已实现
@@ -15,7 +15,10 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 - 每个用户独立拥有流量、到期、节点范围和客户端能力
 - 用户启停、到期时间、用户中心激活与密码重置
 - 登录密码和 sing-box 运行凭据完全分离
-- 单机 Runtime 公网地址配置
+- 本机 Runtime 与多台远程 VPS 管理
+- 一次性节点接入令牌、节点认证、心跳和运行版本上报
+- RayLink Node 一键安装、systemd 自启动和远程配置任务
+- 每台远程主机按区域独立编译用户配置
 - SQLite 持久化
 - 读取 `sing-box version` 的版本、平台、架构和 build tags
 - macOS Homebrew / Linux 官方脚本一键安装
@@ -23,7 +26,7 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 - Shadowsocks、VMess、VLESS、Trojan、Naive、AnyTLS、Hysteria、TUIC、Hysteria2、SOCKS、HTTP、Mixed 图形化配置
 - Reality 密钥生成、证书 TLS、HTTP/WS/QUIC/gRPC/HTTPUpgrade Transport
 - ShadowTLS、Direct、TUN、Redirect、TProxy 高级 JSON 配置
-- 多协议用户凭据编译和多出站客户端配置
+- 多协议、多主机用户凭据编译和统一选择器客户端配置
 - 过期、停用用户自动排除
 - `sing-box check` 校验、SHA-256 快照、发布人审计、`0600` 原子写入、失败恢复和历史版本一键回滚
 - dry-run 与 systemd 两种发布模式
@@ -32,10 +35,10 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 
 ## 当前边界
 
-这是完整的单机纵向闭环，不是多节点商业面板。以下能力尚未实现：
+当前版本已经完成控制面到多台 Runtime 的基础生产链路。以下能力尚未实现：
 
 - 实时流量采集和账单；当数据库中的已用量达到用户额度时，配置发布和下载会排除该用户，但用量仍需外部采集器更新
-- 多 Runtime 节点编排和灰度发布
+- 节点分批灰度、维护窗口和远程历史版本回滚
 - 完整的 outbound、endpoint、DNS 和路由规则图形化编辑器
 - 同一种协议的多个独立 inbound 实例
 - Mihomo 订阅转换
@@ -95,6 +98,19 @@ sing-box check -c data/sing-box/config.json
 6. 再切换到 `systemd`，确保 sing-box 服务读取 RayLink 生成的配置路径。
 7. 防火墙只开放 HTTPS 管理入口和实际代理端口。
 
+添加第二台 VPS：
+
+1. 打开“系统 → 主机 → 添加主机”。
+2. 填写公网地址与区域，生成一次性安装命令。
+3. 在 Linux VPS 上执行该命令。安装器会校验并安装 Node.js 22、安装 sing-box 1.13.14，并启动 `raylink-node.service`。
+4. 等待主机状态变为“在线”，然后在配置工作台执行一次发布。
+
+接入前若命令丢失，可在该主机详情中重新生成；旧令牌会立即失效。节点注册成功后不能通过此入口替换节点身份。
+
+远程 VPS 必须能通过 HTTPS 访问 `RAYLINK_PUBLIC_ORIGIN`。节点凭据保存在
+`/etc/raylink-node/node.json`（`0600`），受管 sing-box 配置位于
+`/var/lib/raylink-node/sing-box/config.json`。
+
 “一键安装”会在 macOS 上执行固定的 `brew install sing-box`，在 Linux 上通过
 sing-box 官方 `https://sing-box.app/install.sh` 安装固定的 1.13.14。生产服务账户必须拥有对应的包管理权限；
 安装命令由后端白名单固定，不接受浏览器提交任意 shell。
@@ -125,6 +141,8 @@ sing-box 官方 `https://sing-box.app/install.sh` 安装固定的 1.13.14。生�
 - 管理员密码和用户中心密码使用 scrypt 哈希。
 - 会话只保存哈希，浏览器 Cookie 为 `HttpOnly`、`SameSite=Strict`。
 - 管理 API 不返回密码哈希或运行凭据。
+- 远程节点接入令牌仅可使用一次；注册后只保存节点密钥的哈希。
+- RayLink Node 发布前执行 `sing-box check`，原子替换失败时恢复上一份配置。
 - 用户只会收到自己的运行凭据。
 - Runtime 完整配置包含所有有效用户凭据，必须限制文件读取权限并保护备份。
 

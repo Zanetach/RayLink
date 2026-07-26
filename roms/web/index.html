@@ -406,7 +406,7 @@
         <section class="view" id="view-system" data-view="system">
           <div class="page-heading">
             <div><p class="eyebrow">平台与 Runtime</p><h1>系统</h1><p>管理主机、安装状态、证书、版本和备份；高频业务配置放在服务与策略中。</p></div>
-            <button class="button primary" data-open-host="local"><svg><use href="#i-edit"/></svg>配置主机</button>
+            <button class="button primary" data-new-host><svg><use href="#i-plus"/></svg>添加主机</button>
           </div>
           <div class="workspace-tabs" role="tablist" aria-label="系统设置">
             <button class="active" data-system-tab="hosts" role="tab" aria-selected="true">主机</button>
@@ -416,7 +416,7 @@
           </div>
           <div data-system-panel="hosts">
             <section class="host-map">
-              <div class="map-header"><span>单机 Runtime 拓扑</span><span id="host-map-status"><i></i>等待连接</span></div>
+              <div class="map-header"><span>控制面与节点拓扑</span><span id="host-map-status"><i></i>等待连接</span></div>
               <div class="map-stage" aria-label="RayLink 控制面到 sing-box Runtime 的拓扑">
                 <div class="map-route route-one"></div>
                 <button class="map-node tokyo" data-open-host="local"><i></i><span><strong id="host-map-name">本机 Runtime</strong><small id="host-map-address">尚未配置</small></span></button>
@@ -426,7 +426,7 @@
             <section class="table-panel host-table">
               <div class="table-scroll">
                 <table>
-                  <thead><tr><th>主机</th><th>状态</th><th>入口协议</th><th>CPU</th><th>吞吐</th><th>运行版本</th><th><span class="sr-only">操作</span></th></tr></thead>
+                  <thead><tr><th>主机</th><th>状态</th><th>入口协议</th><th>类型</th><th>平台</th><th>最后心跳 / 版本</th><th><span class="sr-only">操作</span></th></tr></thead>
                   <tbody id="host-table-body"></tbody>
                 </table>
               </div>

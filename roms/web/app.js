@@ -325,31 +325,52 @@ function estimatedGigabytes(values) {
 
 function renderHosts() {
   if (!elements.hostBody) return;
-  const host = controlPlane.hosts[0];
-  if (!host) {
+  const hosts = controlPlane.hosts;
+  if (!hosts.length) {
     elements.hostBody.innerHTML = '<tr><td colspan="7"><div class="empty-state">尚未配置 Runtime 主机</div></td></tr>';
     return;
   }
   const runtime = controlPlane.runtime || { state: "unknown", mode: "dry-run" };
-  const healthy = ["running", "staged"].includes(runtime.state);
   const enabledProtocols = controlPlane.protocols.filter((profile) => profile.enabled);
   const protocolLabels = enabledProtocols
     .map((profile) => controlPlane.protocolCatalog.find((item) => item.type === profile.type)?.name || profile.type);
-  elements.hostBody.innerHTML = `
+  elements.hostBody.innerHTML = hosts.map((host) => {
+    const isLocal = host.kind !== "remote";
+    const healthy = isLocal
+      ? ["running", "staged"].includes(runtime.state)
+      : host.status === "online";
+    const status = isLocal
+      ? (healthy ? "已就绪" : "待配置")
+      : ({ pending: "等待接入", online: "在线", degraded: "发布失败" }[host.status] || "离线");
+    const statusClass = healthy ? "good" : host.status === "degraded" ? "warning" : "neutral";
+    const lastSeen = host.lastSeenAt
+      ? new Intl.DateTimeFormat("zh-CN", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit"
+        }).format(new Date(host.lastSeenAt))
+      : "尚无心跳";
+    return `
     <tr>
       <td><button class="identity-link" data-open-host="${escapeHtml(host.id)}"><span class="flag">SB</span><span><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></span></button></td>
-      <td><span class="status-badge ${healthy ? "good" : "neutral"}"><i></i>${healthy ? "已就绪" : "待配置"}</span></td>
+      <td><span class="status-badge ${statusClass}"><i></i>${status}</span></td>
       <td>${protocolLabels.length
         ? protocolLabels.slice(0, 3).map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join(" ")
         : '<span class="tag">尚未启用</span>'}</td>
-      <td class="numeric">—</td>
-      <td class="numeric">—</td>
-      <td>${runtime.runtimeVersion || runtime.mode}</td>
+      <td>${isLocal ? "控制面本机" : "RayLink Node"}</td>
+      <td>${escapeHtml(isLocal ? runtime.platform || "local" : [host.platform, host.architecture].filter(Boolean).join(" / ") || "等待上报")}</td>
+      <td><strong>${escapeHtml(isLocal ? runtime.runtimeVersion || runtime.mode : lastSeen)}</strong><small>${escapeHtml(isLocal ? runtime.state : host.runtimeVersion || host.agentVersion || "等待注册")}</small></td>
       <td><button class="icon-button small" aria-label="编辑${escapeHtml(host.name)}" data-open-host="${escapeHtml(host.id)}">${icon("more")}</button></td>
     </tr>`;
+  }).join("");
+  const host = hosts.find((item) => item.id === "local") || hosts[0];
+  const healthyCount = hosts.filter((item) => item.id === "local"
+    ? ["running", "staged"].includes(runtime.state)
+    : item.status === "online").length;
   document.querySelector("#host-map-name").textContent = host.name;
   document.querySelector("#host-map-address").textContent = `${host.address} · ${host.region}`;
-  document.querySelector("#host-map-status").innerHTML = `<i></i>${healthy ? "Runtime 已就绪" : "等待首次发布"}`;
+  document.querySelector("#host-map-status").innerHTML = `<i></i>${healthyCount}/${hosts.length} 个节点在线`;
   const managedTargetName = document.querySelector("#managed-target-name");
   if (managedTargetName) managedTargetName.textContent = host.name;
   document.querySelectorAll('.nav-item[data-view-target="system"] .nav-count').forEach((count) => {
@@ -714,6 +735,10 @@ function openNewUser() {
 
 function hostDrawerMarkup(hostId) {
   const host = controlPlane.hosts.find((item) => item.id === hostId);
+  const isRemote = host.kind === "remote";
+  const runtimeCopy = isRemote
+    ? `${host.status === "online" ? "在线" : host.status === "pending" ? "等待接入" : "需要检查"} · ${host.runtimeVersion || host.agentVersion || "尚未上报版本"}`
+    : `${controlPlane.runtime?.mode || "dry-run"} · ${controlPlane.runtime?.configPath || "尚未生成配置"}`;
   return `
     <form class="drawer-form" id="host-drawer-form" data-host-id="${escapeHtml(host.id)}">
       <div class="drawer-profile"><span class="avatar">${escapeHtml(host.name.slice(0, 1))}</span><div><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></div></div>
@@ -723,7 +748,10 @@ function hostDrawerMarkup(hostId) {
       <label class="field"><span>区域标识</span><input name="region" value="${escapeHtml(host.region)}" pattern="[A-Za-z0-9-]{2,32}" placeholder="tokyo" required></label>
       <p class="drawer-section-label">sing-box 入口</p>
       <div class="switch-row"><div><strong>Shadowsocks 2022</strong><small>端口由服务端环境变量统一设置；保存后用户配置立即使用新地址</small></div><span class="status-badge good"><i></i>已启用</span></div>
-      <div class="switch-row"><div><strong>Runtime 模式</strong><small>${controlPlane.runtime?.mode || "dry-run"} · ${controlPlane.runtime?.configPath || "尚未生成配置"}</small></div><span class="status-badge neutral"><i></i>${controlPlane.runtime?.state || "unknown"}</span></div>
+      <div class="switch-row"><div><strong>${isRemote ? "RayLink Node" : "Runtime 模式"}</strong><small>${escapeHtml(runtimeCopy)}</small></div><span class="status-badge neutral"><i></i>${escapeHtml(isRemote ? host.status : controlPlane.runtime?.state || "unknown")}</span></div>
+      ${isRemote && !host.enrolledAt
+        ? `<button type="button" class="button secondary" data-reissue-host="${escapeHtml(host.id)}">${icon("refresh")}重新生成接入命令</button><p class="field-hint">新的接入令牌会立即替换之前的令牌。</p>`
+        : ""}
     </form>`;
 }
 
@@ -736,6 +764,54 @@ function openHost(hostId) {
     content: hostDrawerMarkup(host.id),
     saveLabel: "保存主机"
   });
+}
+
+function newHostDrawerMarkup() {
+  return `
+    <form class="drawer-form" id="new-host-drawer-form">
+      <div class="drawer-profile"><span class="avatar">+</span><div><strong>添加第二台 VPS</strong><small>创建一次性接入令牌并安装 RayLink Node</small></div></div>
+      <p class="drawer-section-label">节点信息</p>
+      <label class="field"><span>名称</span><input name="hostname" placeholder="例如：法兰克福 02" required><small class="field-error"></small></label>
+      <label class="field"><span>公网 IP 或域名</span><input name="address" placeholder="node-frankfurt.example.com" required><small class="field-error"></small><small class="field-hint">将写入用户客户端配置，请填写用户可访问的公网地址。</small></label>
+      <label class="field"><span>区域标识</span><input name="region" pattern="[A-Za-z0-9-]{2,32}" placeholder="frankfurt" required><small class="field-error"></small><small class="field-hint">用户的“节点范围”会按此标识决定是否获得该节点。</small></label>
+      <p class="drawer-section-label">接入过程</p>
+      <div class="switch-row"><div><strong>1. 创建节点</strong><small>控制面生成仅可使用一次的接入令牌</small></div><span class="tag">当前步骤</span></div>
+      <div class="switch-row"><div><strong>2. VPS 执行命令</strong><small>自动安装 sing-box 与 RayLink Node</small></div><span class="tag">下一步</span></div>
+      <div class="switch-row"><div><strong>3. 自动上线</strong><small>节点心跳后即可接收发布配置</small></div><span class="tag">自动</span></div>
+    </form>`;
+}
+
+function openNewHost() {
+  openDrawer({
+    title: "添加主机",
+    eyebrow: "多节点接入",
+    content: newHostDrawerMarkup(),
+    saveLabel: "创建并生成命令"
+  });
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+}
+
+function enrollmentResultMarkup(created) {
+  const origin = location.origin;
+  const installUrl = `${origin}/node/install.sh`;
+  const command = `curl -fsSL ${shellQuote(installUrl)} | sudo env RAYLINK_SERVER=${shellQuote(origin)} RAYLINK_ENROLL_TOKEN=${shellQuote(created.enrollmentToken)} bash`;
+  const localOrigin = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+  return `
+    <div class="drawer-form">
+      <div class="drawer-profile"><span class="avatar">${escapeHtml(created.host.name.slice(0, 1))}</span><div><strong>${escapeHtml(created.host.name)} 已创建</strong><small>${escapeHtml(created.host.address)} · 等待 RayLink Node 接入</small></div></div>
+      <p class="drawer-section-label">在新 VPS 上执行</p>
+      <pre class="advanced-preview"><code id="node-enrollment-command">${escapeHtml(command)}</code></pre>
+      <button type="button" class="button secondary" data-copy-target="node-enrollment-command">${icon("copy")}复制安装命令</button>
+      <p class="field-hint">${localOrigin
+        ? "当前控制面地址是本机地址，远程 VPS 无法访问。正式使用时请从具有公网 HTTPS 域名的 RayLink 控制面生成命令。"
+        : "令牌仅可注册一次；节点成功接入后会自动失效。安装程序会校验 Node.js 安装包并配置 systemd 自启动。"
+      }</p>
+      <p class="drawer-section-label">上线判定</p>
+      <div class="switch-row"><div><strong>等待首次心跳</strong><small>执行命令后刷新页面；状态变为“在线”即完成。</small></div><span class="status-badge neutral"><i></i>等待接入</span></div>
+    </div>`;
 }
 
 function protocolDrawerMarkup(type) {
@@ -965,6 +1041,17 @@ async function saveHostForm(form) {
   await loadBootstrap();
 }
 
+async function saveNewHostForm(form) {
+  return api("/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: form.elements.hostname.value.trim(),
+      address: form.elements.address.value.trim(),
+      region: form.elements.region.value.trim()
+    })
+  });
+}
+
 async function saveProtocolForm(form) {
   let advancedOptions;
   try {
@@ -1053,6 +1140,17 @@ async function saveDrawer() {
   try {
     if (form.id === "user-drawer-form") await saveUserForm(form);
     if (form.id === "host-drawer-form") await saveHostForm(form);
+    if (form.id === "new-host-drawer-form") {
+      const created = await saveNewHostForm(form);
+      await loadBootstrap();
+      elements.drawerEyebrow.textContent = "一次性接入";
+      elements.drawerTitle.textContent = "安装 RayLink Node";
+      elements.drawerContent.innerHTML = enrollmentResultMarkup(created);
+      elements.drawerSave.textContent = "完成";
+      elements.drawerSave.disabled = false;
+      showToast("主机已创建", "请在新 VPS 上执行一次性安装命令。");
+      return;
+    }
     if (form.id === "protocol-drawer-form") await saveProtocolForm(form);
   } catch (error) {
     showToast("保存失败", error.message);
@@ -1235,6 +1333,30 @@ document.addEventListener("click", async (event) => {
   const hostButton = event.target.closest("[data-open-host]");
   if (hostButton) {
     openHost(hostButton.dataset.openHost);
+    return;
+  }
+
+  if (event.target.closest("[data-new-host]")) {
+    openNewHost();
+    return;
+  }
+
+  const reissueHostButton = event.target.closest("[data-reissue-host]");
+  if (reissueHostButton) {
+    try {
+      const created = await api(
+        `/api/hosts/${encodeURIComponent(reissueHostButton.dataset.reissueHost)}/enrollment-token`,
+        { method: "POST" }
+      );
+      await loadBootstrap();
+      elements.drawerEyebrow.textContent = "一次性接入";
+      elements.drawerTitle.textContent = "安装 RayLink Node";
+      elements.drawerContent.innerHTML = enrollmentResultMarkup(created);
+      elements.drawerSave.textContent = "完成";
+      showToast("接入命令已更新", "旧令牌已经失效，请使用新命令。");
+    } catch (error) {
+      showToast("生成失败", error.message);
+    }
     return;
   }
 

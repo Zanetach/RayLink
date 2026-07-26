@@ -290,6 +290,27 @@ export function buildProtocolInbounds({ profiles, users, masterPassword }) {
 export function buildProtocolClientConfig({ profiles, credential, server }) {
   const managed = profiles.filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
   const protocolOutbounds = managed.map((profile) => buildClientOutbound(profile, credential, server));
+  return clientConfigForOutbounds(protocolOutbounds);
+}
+
+export function buildMultiHostProtocolClientConfig({ profiles, credential, hosts }) {
+  const managed = profiles.filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
+  const protocolOutbounds = hosts.flatMap((host) => {
+    const hostTag = String(host.id || host.name || "node")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "node";
+    return managed.map((profile) => buildClientOutbound(
+      profile,
+      credential,
+      host.address,
+      `raylink-${hostTag}-${profile.type}`
+    ));
+  });
+  return clientConfigForOutbounds(protocolOutbounds);
+}
+
+function clientConfigForOutbounds(protocolOutbounds) {
   if (!protocolOutbounds.length) throw protocolError("NO_CLIENT_PROTOCOL", "当前没有可下发的用户协议", 409);
   const tags = protocolOutbounds.map((outbound) => outbound.tag);
   return {
@@ -337,8 +358,7 @@ function applyServerUsers(inbound, type, users, masterPassword) {
   }
 }
 
-function buildClientOutbound(profile, credential, server) {
-  const tag = `raylink-${profile.type}`;
+function buildClientOutbound(profile, credential, server, tag = `raylink-${profile.type}`) {
   const common = { type: profile.type, tag, server, server_port: profile.port };
   if (profile.type === "shadowsocks") {
     return {

@@ -22,7 +22,9 @@ const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".sh": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml"
 };
 
@@ -32,6 +34,11 @@ function parseCookies(header = "") {
     if (separator < 0) return [];
     return [[entry.slice(0, separator).trim(), decodeURIComponent(entry.slice(separator + 1).trim())]];
   }));
+}
+
+function bearerToken(header = "") {
+  const match = String(header).match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || "";
 }
 
 async function readJson(request, limit = 64 * 1024) {
@@ -248,16 +255,19 @@ export async function createRayLinkApp(options) {
         }
         if (request.method === "GET" && url.pathname === "/api/portal/config/sing-box") {
           const credential = store.clientCredential(sessionUser.id);
-          const runtimeHost = store.getHost("local");
           const expiresAt = new Date(`${credential.expiresAt}T23:59:59.999Z`);
-          const regionAllowed = credential.nodeScope.includes("all")
-            || credential.nodeScope.includes(credential.hostRegion);
+          const eligibleHosts = store.listClientHosts().filter((host) => {
+            const connected = host.id === "local" || ["online", "degraded"].includes(host.status);
+            const regionAllowed = credential.nodeScope.includes("all")
+              || credential.nodeScope.includes(host.region);
+            return connected && regionAllowed;
+          });
           if (
             !["active", "warning"].includes(credential.state)
             || credential.portalStatus !== "active"
             || credential.usedGb >= credential.quotaGb
             || expiresAt < new Date()
-            || !regionAllowed
+            || !eligibleHosts.length
           ) {
             sendJson(response, 403, { error: { code: "ENTITLEMENT_INACTIVE", message: "账号当前不可使用" } });
             return;
@@ -271,7 +281,7 @@ export async function createRayLinkApp(options) {
             200,
             buildUserClientConfig({
               credential,
-              server: runtimeHost?.address || proxyHost,
+              hosts: eligibleHosts,
               port: listenPort,
               protocols: store.listProtocolConfigs()
             }),
@@ -280,6 +290,53 @@ export async function createRayLinkApp(options) {
           return;
         }
         sendJson(response, 404, { error: { code: "NOT_FOUND", message: "接口不存在" } });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/node/enroll") {
+        const body = await readJson(request);
+        sendJson(response, 201, {
+          ...store.enrollNode(body.token, body),
+          nextPollSeconds: 10
+        });
+        return;
+      }
+
+      if (url.pathname.startsWith("/api/node/")) {
+        const hostId = String(request.headers["x-raylink-host-id"] || "");
+        const nodeSecret = bearerToken(request.headers.authorization);
+        const node = store.authenticateNode(hostId, nodeSecret);
+        if (!node) {
+          sendJson(response, 401, {
+            error: { code: "NODE_UNAUTHENTICATED", message: "节点身份验证失败" }
+          });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/node/heartbeat") {
+          store.heartbeatNode(node.id, await readJson(request));
+          sendJson(response, 200, { nextPollSeconds: 10 });
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/node/tasks/next") {
+          const task = store.nextNodeTask(node.id);
+          if (!task) {
+            response.writeHead(204, { "cache-control": "no-store" });
+            response.end();
+            return;
+          }
+          sendJson(response, 200, task);
+          return;
+        }
+        const taskCompletionMatch = url.pathname.match(/^\/api\/node\/tasks\/([^/]+)\/complete$/);
+        if (request.method === "POST" && taskCompletionMatch) {
+          sendJson(response, 200, store.completeNodeTask(
+            node.id,
+            decodeURIComponent(taskCompletionMatch[1]),
+            await readJson(request)
+          ));
+          return;
+        }
+        sendJson(response, 404, { error: { code: "NOT_FOUND", message: "节点接口不存在" } });
         return;
       }
 
@@ -411,6 +468,21 @@ export async function createRayLinkApp(options) {
 
         if (request.method === "POST" && url.pathname === "/api/users") {
           sendJson(response, 201, store.createUser(await readJson(request)));
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/hosts") {
+          sendJson(response, 201, store.createRemoteHost(await readJson(request)));
+          return;
+        }
+
+        const enrollmentTokenMatch = url.pathname.match(/^\/api\/hosts\/([^/]+)\/enrollment-token$/);
+        if (request.method === "POST" && enrollmentTokenMatch) {
+          sendJson(
+            response,
+            201,
+            store.rotateNodeEnrollmentToken(decodeURIComponent(enrollmentTokenMatch[1]))
+          );
           return;
         }
 

@@ -436,6 +436,276 @@ test("admin updates the single runtime host used by portal client configs", asyn
   assert.equal((await configResponse.json()).outbounds[0].server, "node.example.com");
 });
 
+test("admin creates a remote host and RayLink Node enrolls with a one-time token", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const createResponse = await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "新加坡二号机",
+      address: "sg-2.example.com",
+      region: "singapore"
+    })
+  });
+  assert.equal(createResponse.status, 201);
+  const created = await createResponse.json();
+  assert.equal(created.host.kind, "remote");
+  assert.equal(created.host.status, "pending");
+  assert.match(created.enrollmentToken, /^[A-Za-z0-9_-]{40,}$/);
+
+  const bootstrapResponse = await api(testApp.baseUrl, cookie, "/api/bootstrap");
+  const bootstrap = await bootstrapResponse.json();
+  const pendingHost = bootstrap.hosts.find((host) => host.id === created.host.id);
+  assert.equal(pendingHost.status, "pending");
+  assert.equal("enrollmentToken" in pendingHost, false);
+
+  const enrollResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "sg-vps-02",
+      platform: "linux",
+      architecture: "amd64",
+      agentVersion: "0.1.0",
+      runtimeVersion: "1.13.14",
+      buildTags: ["with_quic", "with_utls"]
+    })
+  });
+  assert.equal(enrollResponse.status, 201);
+  const enrolled = await enrollResponse.json();
+  assert.equal(enrolled.hostId, created.host.id);
+  assert.match(enrolled.nodeSecret, /^[A-Za-z0-9_-]{40,}$/);
+
+  const reuseResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: created.enrollmentToken })
+  });
+  assert.equal(reuseResponse.status, 401);
+
+  const heartbeatResponse = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${enrolled.nodeSecret}`,
+      "content-type": "application/json",
+      "x-raylink-host-id": enrolled.hostId
+    },
+    body: JSON.stringify({
+      runtimeState: "running",
+      runtimeVersion: "1.13.14",
+      agentVersion: "0.1.0"
+    })
+  });
+  assert.equal(heartbeatResponse.status, 200);
+  assert.equal((await heartbeatResponse.json()).nextPollSeconds, 10);
+
+  const refreshedResponse = await api(testApp.baseUrl, cookie, "/api/bootstrap");
+  const refreshed = await refreshedResponse.json();
+  const onlineHost = refreshed.hosts.find((host) => host.id === created.host.id);
+  assert.equal(onlineHost.status, "online");
+  assert.equal(onlineHost.runtimeVersion, "1.13.14");
+  assert.ok(onlineHost.lastSeenAt);
+});
+
+test("admin can replace a lost enrollment token before the remote host enrolls", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const createResponse = await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "伦敦备用机",
+      address: "london.example.com",
+      region: "london"
+    })
+  });
+  const created = await createResponse.json();
+  const rotateResponse = await api(
+    testApp.baseUrl,
+    cookie,
+    `/api/hosts/${created.host.id}/enrollment-token`,
+    { method: "POST" }
+  );
+  assert.equal(rotateResponse.status, 201);
+  const rotated = await rotateResponse.json();
+  assert.notEqual(rotated.enrollmentToken, created.enrollmentToken);
+
+  const oldTokenResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: created.enrollmentToken })
+  });
+  assert.equal(oldTokenResponse.status, 401);
+  const enrollResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: rotated.enrollmentToken, hostname: "london-vps" })
+  });
+  assert.equal(enrollResponse.status, 201);
+
+  const enrolledRotationResponse = await api(
+    testApp.baseUrl,
+    cookie,
+    `/api/hosts/${created.host.id}/enrollment-token`,
+    { method: "POST" }
+  );
+  assert.equal(enrolledRotationResponse.status, 409);
+});
+
+test("user subscription includes every online host allowed by the user node scope", async (t) => {
+  const testApp = await startTestApp({ proxyHost: "tokyo.example.com", listenPort: 8388 });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const createResponse = await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "法兰克福二号机",
+      address: "fra.example.com",
+      region: "frankfurt"
+    })
+  });
+  const created = await createResponse.json();
+  const enrollResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "fra-vps-02",
+      platform: "linux",
+      architecture: "x64",
+      runtimeVersion: "1.13.14"
+    })
+  });
+  assert.equal(enrollResponse.status, 201);
+  const nodeCredential = await enrollResponse.json();
+
+  const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = portalLogin.headers.getSetCookie()[0].split(";")[0];
+  const beforePublishResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  });
+  assert.equal(beforePublishResponse.status, 200);
+  assert.deepEqual(
+    (await beforePublishResponse.json()).outbounds
+      .filter((outbound) => outbound.type === "shadowsocks")
+      .map((outbound) => outbound.server),
+    ["tokyo.example.com"]
+  );
+
+  const publishResponse = await api(testApp.baseUrl, cookie, "/api/deployments", { method: "POST" });
+  assert.equal(publishResponse.status, 201);
+  const nodeHeaders = {
+    authorization: `Bearer ${nodeCredential.nodeSecret}`,
+    "x-raylink-host-id": nodeCredential.hostId
+  };
+  const taskResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, { headers: nodeHeaders });
+  const task = await taskResponse.json();
+  const completionResponse = await fetch(
+    `${testApp.baseUrl}/api/node/tasks/${encodeURIComponent(task.id)}/complete`,
+    {
+      method: "POST",
+      headers: { ...nodeHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ status: "succeeded", result: { runtimeVersion: "1.13.14" } })
+    }
+  );
+  assert.equal(completionResponse.status, 200);
+
+  const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  });
+
+  assert.equal(configResponse.status, 200);
+  const config = await configResponse.json();
+  const servers = config.outbounds
+    .filter((outbound) => outbound.type === "shadowsocks")
+    .map((outbound) => outbound.server);
+  assert.deepEqual(servers, ["tokyo.example.com", "fra.example.com"]);
+});
+
+test("publishing queues a host-specific sing-box configuration for an enrolled RayLink Node", async (t) => {
+  const runtimeAdapter = {
+    async publish() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.14" };
+    },
+    async status() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.14" };
+    }
+  };
+  const testApp = await startTestApp({ runtimeAdapter });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const createResponse = await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "法兰克福二号机",
+      address: "fra-2.example.com",
+      region: "frankfurt"
+    })
+  });
+  const created = await createResponse.json();
+  const enrollResponse = await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "fra-vps-02",
+      platform: "linux",
+      architecture: "amd64",
+      agentVersion: "0.1.0",
+      runtimeVersion: "1.13.14"
+    })
+  });
+  const enrolled = await enrollResponse.json();
+  const nodeHeaders = {
+    authorization: `Bearer ${enrolled.nodeSecret}`,
+    "x-raylink-host-id": enrolled.hostId
+  };
+
+  const publishResponse = await api(testApp.baseUrl, cookie, "/api/deployments", {
+    method: "POST"
+  });
+  assert.equal(publishResponse.status, 201);
+  assert.equal((await publishResponse.json()).remoteQueued, 1);
+
+  const taskResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  });
+  assert.equal(taskResponse.status, 200);
+  const task = await taskResponse.json();
+  assert.equal(task.kind, "publish-config");
+  assert.match(task.payload.version, /^v/);
+  const config = JSON.parse(task.payload.configText);
+  assert.equal(config.inbounds[0].users.length, 1);
+  assert.equal(config.inbounds[0].users[0].name, "priya@vantage-bioworks.in");
+
+  const completionResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/${task.id}/complete`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      status: "succeeded",
+      runtimeVersion: "1.13.14",
+      validation: "sing-box"
+    })
+  });
+  assert.equal(completionResponse.status, 200);
+
+  const emptyResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  });
+  assert.equal(emptyResponse.status, 204);
+});
+
 test("revoking portal access invalidates an existing user session", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -545,6 +815,16 @@ test("control plane serves the RayLink web application on the same origin", asyn
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type"), /javascript/);
+
+  const nodeInstallerResponse = await fetch(`${testApp.baseUrl}/node/install.sh`);
+  assert.equal(nodeInstallerResponse.status, 200);
+  assert.match(nodeInstallerResponse.headers.get("content-type"), /text\/plain/);
+  assert.match(await nodeInstallerResponse.text(), /raylink-node\.service/);
+
+  const nodeRuntimeResponse = await fetch(`${testApp.baseUrl}/node/raylink-node.mjs`);
+  assert.equal(nodeRuntimeResponse.status, 200);
+  assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);
+  assert.match(await nodeRuntimeResponse.text(), /class RayLinkNode/);
 
   const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);
   assert.equal(portalResponse.status, 200);

@@ -6,8 +6,8 @@ function deploymentVersion(prefix = "v", now = new Date()) {
   return `${prefix}${now.toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
 }
 
-function compile(store, listenPort) {
-  const config = buildSingBoxConfig(store.runtimeSnapshot(), { listenPort });
+function compile(store, listenPort, hostId = "local") {
+  const config = buildSingBoxConfig(store.runtimeSnapshot(hostId), { listenPort });
   const configText = `${JSON.stringify(config, null, 2)}\n`;
   const checksum = createHash("sha256").update(configText).digest("hex");
   const eligibleUsers = new Set(
@@ -42,11 +42,21 @@ export class RuntimeManager {
 
   async publish(publisherAdminId = null) {
     const compiled = compile(this.store, this.listenPort);
-    return this.publishCompiled({
+    const deployment = await this.publishCompiled({
       ...compiled,
       version: deploymentVersion(),
       publisherAdminId
     });
+    const remoteHosts = this.store.listHosts().filter((host) => host.kind === "remote" && host.enrolledAt);
+    for (const host of remoteHosts) {
+      const remote = compile(this.store, this.listenPort, host.id);
+      this.store.queueNodeTask(host.id, "publish-config", {
+        version: deployment.version,
+        checksum: remote.checksum,
+        configText: remote.configText
+      });
+    }
+    return { ...deployment, remoteQueued: remoteHosts.length };
   }
 
   async rollback(sourceDeploymentId, publisherAdminId = null) {
