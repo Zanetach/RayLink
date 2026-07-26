@@ -284,6 +284,11 @@ test("the control-plane installer emits a fragment setup URL and never persists 
   assert.match(installer, /systemctl enable --now raylink/);
   assert.match(installer, /\*:\*\) public_host="\[\$public_ip\]"/);
   assert.match(installer, /自动检测到私网地址/);
+  assert.ok(
+    installer.indexOf('public_ip="${RAYLINK_PUBLIC_IP:-}"')
+      < installer.indexOf('install -d -m 0755 "$install_root"'),
+    "public address validation must happen before the installation root is created"
+  );
   assert.match(installer, /systemctl enable sing-box-raylink/);
   assert.match(rotator, /systemctl restart raylink/);
   assert.match(rotator, /\/setup#token=/);

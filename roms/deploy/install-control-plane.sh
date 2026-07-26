@@ -25,6 +25,31 @@ if [ -e "$install_root/package.json" ]; then
   fail "$install_root 已存在；升级请使用控制台在线升级，不要覆盖安装"
 fi
 
+public_ip="${RAYLINK_PUBLIC_IP:-}"
+public_ip_was_detected=false
+if [ -z "$public_ip" ]; then
+  public_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  public_ip_was_detected=true
+fi
+[ -n "$public_ip" ] || fail "无法检测服务器 IP，请设置 RAYLINK_PUBLIC_IP"
+printf '%s' "$public_ip" | grep -Eq '^[0-9a-fA-F:.]+$' || fail "RAYLINK_PUBLIC_IP 格式不正确"
+if [ "$public_ip_was_detected" = true ]; then
+  normalized_ip="$(printf '%s' "$public_ip" | tr '[:upper:]' '[:lower:]')"
+  case "$normalized_ip" in
+    0.*|10.*|127.*|169.254.*|192.168.*|\
+    172.1[6-9].*|172.2[0-9].*|172.3[01].*|\
+    100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|\
+    ::1|fe8*|fe9*|fea*|feb*|fc*|fd*)
+      fail "自动检测到私网地址 $public_ip；请显式设置 RAYLINK_PUBLIC_IP=公网IP（局域网部署也需显式设置）"
+      ;;
+  esac
+fi
+case "$public_ip" in
+  *:*) public_host="[$public_ip]" ;;
+  *) public_host="$public_ip" ;;
+esac
+public_origin="https://${public_host}"
+
 if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
@@ -80,31 +105,6 @@ install -d -m 0700 "$data_root" "$config_root" "$config_root/tls"
 "$install_root/web/node/build-metered-runtime.sh" \
   1.13.14 \
   /usr/local/bin/raylink-sing-box
-
-public_ip="${RAYLINK_PUBLIC_IP:-}"
-public_ip_was_detected=false
-if [ -z "$public_ip" ]; then
-  public_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  public_ip_was_detected=true
-fi
-[ -n "$public_ip" ] || fail "无法检测服务器 IP，请设置 RAYLINK_PUBLIC_IP"
-printf '%s' "$public_ip" | grep -Eq '^[0-9a-fA-F:.]+$' || fail "RAYLINK_PUBLIC_IP 格式不正确"
-if [ "$public_ip_was_detected" = true ]; then
-  normalized_ip="$(printf '%s' "$public_ip" | tr '[:upper:]' '[:lower:]')"
-  case "$normalized_ip" in
-    0.*|10.*|127.*|169.254.*|192.168.*|\
-    172.1[6-9].*|172.2[0-9].*|172.3[01].*|\
-    100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|\
-    ::1|fe8*|fe9*|fea*|feb*|fc*|fd*)
-      fail "自动检测到私网地址 $public_ip；请显式设置 RAYLINK_PUBLIC_IP=公网IP（局域网部署也需显式设置）"
-      ;;
-  esac
-fi
-case "$public_ip" in
-  *:*) public_host="[$public_ip]" ;;
-  *) public_host="$public_ip" ;;
-esac
-public_origin="https://${public_host}"
 
 openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 825 \
   -subj "/CN=${public_ip}" \
