@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="raylink-mark-title">
+  <title id="raylink-mark-title">RayLink</title>
+  <defs>
+    <linearGradient id="raylink-surface" x1="8" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18211f"/>
+      <stop offset="1" stop-color="#10161c"/>
+    </linearGradient>
+    <linearGradient id="raylink-mint" x1="11" y1="13" x2="52" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#42e8bd"/>
+      <stop offset="1" stop-color="#25d8a5"/>
+    </linearGradient>
+    <linearGradient id="raylink-cyan" x1="14" y1="37" x2="50" y2="57" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2ed8ff"/>
+      <stop offset="1" stop-color="#25aef5"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="62" height="62" rx="15" fill="url(#raylink-surface)" stroke="#31403d"/>
+  <path d="M13 13h22c10.7 0 18 6.8 18 16.4 0 5.1-2.1 9.4-6.2 12.3l-7.9-5.8c3.1-1.4 4.8-3.6 4.8-6.5 0-4.6-3.4-7.4-9-7.4H23.5l5.3 7.4-8.4 5.1L13 13Z" fill="url(#raylink-mint)"/>
+  <path d="M16 37.5h15.6L53 55H39.3L28.1 45.7h-2.6V55H16V37.5Z" fill="url(#raylink-cyan)"/>
+  <path d="m17.5 31.8 40 13.2-34.3-19.3-5.7 6.1Z" fill="#68f1d2"/>
+  <circle cx="18" cy="31" r="5.2" fill="#141b1d" stroke="#46e9c0" stroke-width="3.5"/>
+  <circle cx="17.5" cy="49.8" r="4.7" fill="#141b1d" stroke="#2dcdf9" stroke-width="3.5"/>
+</svg>

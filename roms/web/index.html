@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="RayLink sing-box 多用户控制台前端原型">
   <title>RayLink · sing-box control plane</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23242b28'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='24' font-weight='700' fill='%23e7ece8'%3ER/%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./styles.css?v=0.1.0-20260726d">
+  <link rel="icon" href="/assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css?v=0.1.0-20260726g">
 </head>
 <body>
   <section class="auth-screen" id="admin-auth" aria-labelledby="admin-auth-title">
     <form class="auth-card" id="admin-login-form">
-      <span class="brand-mark auth-brand">R/</span>
+      <span class="brand-mark auth-brand"><img src="/assets/brand/raylink-mark.svg?v=20260726" alt="" aria-hidden="true"></span>
       <p class="eyebrow">RayLink Control Plane</p>
       <h1 id="admin-auth-title">登录管理控制台</h1>
       <p class="auth-copy">管理用户权益、生成配置并安全发布到 sing-box Runtime。</p>
@@ -51,7 +51,7 @@
   <div class="app-shell" id="app-shell" hidden>
     <aside class="rail" id="rail" aria-label="主导航">
       <div class="brand">
-        <span class="brand-mark">R/</span>
+        <span class="brand-mark"><img src="/assets/brand/raylink-mark.svg?v=20260726" alt="" aria-hidden="true"></span>
         <span class="brand-copy"><strong>RayLink</strong><small>control plane</small></span>
       </div>
 
@@ -407,7 +407,7 @@
         </section>
 
         <section class="view not-found" id="view-not-found" data-view="not-found">
-          <span class="brand-mark">R/</span><p class="eyebrow">404 · 路由未找到</p><h1>这里没有可管理的资源</h1><p>地址可能已更改，或你没有访问权限。</p><button class="button primary" data-view-target="dashboard">返回仪表盘</button>
+          <span class="brand-mark"><img src="/assets/brand/raylink-mark.svg?v=20260726" alt="" aria-hidden="true"></span><p class="eyebrow">404 · 路由未找到</p><h1>这里没有可管理的资源</h1><p>地址可能已更改，或你没有访问权限。</p><button class="button primary" data-view-target="dashboard">返回仪表盘</button>
         </section>
       </main>
     </div>
@@ -431,6 +431,6 @@
     <div class="toast" id="toast"><span><svg><use href="#i-check"/></svg></span><div><strong id="toast-title">已保存</strong><p id="toast-message">设置已经更新。</p></div></div>
   </div>
 
-  <script src="./app.js?v=0.1.0-20260726d"></script>
+  <script src="./app.js?v=0.1.0-20260726g"></script>
 </body>
 </html>

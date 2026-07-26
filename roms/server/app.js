@@ -634,7 +634,14 @@ export async function createRayLinkApp(options) {
         }
         if (
           request.method === "GET"
-          && ["/setup", "/setup/", "/setup.js", "/setup.css", "/styles.css"].includes(url.pathname)
+          && [
+            "/setup",
+            "/setup/",
+            "/setup.js",
+            "/setup.css",
+            "/styles.css",
+            "/assets/brand/raylink-mark.svg"
+          ].includes(url.pathname)
           && await sendStatic(response, webDir, url.pathname)
         ) return;
         sendJson(response, 423, {

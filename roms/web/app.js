@@ -1117,7 +1117,7 @@ function portalLoginMarkup() {
   return `
     <form class="drawer-form portal-login-form" id="portal-login-form">
       <div class="drawer-profile">
-        <span class="brand-mark">R/</span>
+        <span class="brand-mark"><img src="/assets/brand/raylink-mark.svg?v=20260726" alt="" aria-hidden="true"></span>
         <div><strong>登录 RayLink 用户中心</strong><small>使用管理员为你创建的账号</small></div>
       </div>
       <label class="field"><span>登录邮箱</span><input name="portalEmail" type="email" placeholder="user@example.com" required><small class="field-error"></small></label>

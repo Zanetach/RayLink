@@ -1770,11 +1770,31 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /安全升级/);
   assert.match(indexHtml, /data-check-runtime-update/);
   assert.doesNotMatch(indexHtml, /按启用账号数量缩放趋势样例/);
+  assert.match(indexHtml, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
+  assert.doesNotMatch(indexHtml, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
 
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type"), /javascript/);
-  assert.doesNotMatch(await scriptResponse.text(), /priya@vantage-bioworks\.in/);
+  const appScript = await scriptResponse.text();
+  assert.doesNotMatch(appScript, /priya@vantage-bioworks\.in/);
+  assert.match(appScript, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
+  assert.doesNotMatch(appScript, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
+
+  const logoResponse = await fetch(
+    `${testApp.baseUrl}/assets/brand/raylink-mark.svg`
+  );
+  assert.equal(logoResponse.status, 200);
+  assert.match(logoResponse.headers.get("content-type"), /image\/svg\+xml/);
+  const logoSvg = await logoResponse.text();
+  assert.match(logoSvg, /aria-labelledby="raylink-mark-title"/);
+  assert.match(logoSvg, /viewBox="0 0 64 64"/);
+
+  const setupResponse = await fetch(`${testApp.baseUrl}/setup`);
+  assert.equal(setupResponse.status, 200);
+  const setupHtml = await setupResponse.text();
+  assert.match(setupHtml, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
+  assert.doesNotMatch(setupHtml, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
 
   const nodeInstallerResponse = await fetch(`${testApp.baseUrl}/node/install.sh`);
   assert.equal(nodeInstallerResponse.status, 200);
@@ -1818,10 +1838,12 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(portalHtml, /查看我的网络服务/);
   assert.match(portalHtml, /id="portal-subscription-action"/);
   assert.match(portalHtml, /id="portal-subscription-url"/);
+  assert.match(portalHtml, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
+  assert.doesNotMatch(portalHtml, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
   assert.match(portalHtml, /id="portal-copy-subscription"/);
   assert.match(portalHtml, /TUN 需要系统 VPN 权限/);
   assert.match(portalHtml, /mixed 回退/);
   assert.match(portalHtml, /删除订阅/);
-  assert.match(portalHtml, /href="\/styles\.css"/);
+  assert.match(portalHtml, /href="\/styles\.css(?:\?[^"]*)?"/);
   assert.match(portalHtml, /src="\/portal\.js"/);
 });

@@ -70,7 +70,7 @@ body {
   box-shadow: 0 28px 80px rgb(0 0 0 / 0.34);
 }
 
-.auth-brand { margin-bottom: 4px; }
+.brand-mark.auth-brand { width: 52px; height: 52px; margin-bottom: 4px; }
 .auth-card h1 { margin: 0; font-size: 25px; letter-spacing: -0.025em; }
 .auth-copy { margin: -8px 0 6px; color: var(--muted); font-size: 12px; }
 .auth-submit { width: 100%; justify-content: center; margin-top: 4px; }
@@ -198,15 +198,12 @@ svg {
   width: 36px;
   height: 36px;
   flex: 0 0 auto;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  border-radius: 10px;
+  overflow: hidden;
+  filter: drop-shadow(0 7px 18px rgb(38 218 178 / 0.12));
 }
 
+.brand-mark img { display: block; width: 100%; height: 100%; }
 .brand-mark.small { width: 32px; height: 32px; }
 
 .brand-copy { display: flex; flex-direction: column; line-height: 1.2; }

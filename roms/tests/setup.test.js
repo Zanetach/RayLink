@@ -97,6 +97,12 @@ test("an uninitialized instance exposes only the setup flow", async (t) => {
   assert.equal(setup.status, 200);
   assert.match(await setup.text(), /首次初始化 RayLink/);
 
+  const logo = await fetch(
+    `${testApp.baseUrl}/assets/brand/raylink-mark.svg?v=20260726`
+  );
+  assert.equal(logo.status, 200);
+  assert.match(logo.headers.get("content-type"), /image\/svg\+xml/);
+
   const status = await fetch(`${testApp.baseUrl}/api/setup/status`);
   assert.equal(status.status, 200);
   const statusBody = await status.json();
