@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,7 +8,30 @@ import test from "node:test";
 import { createRayLinkApp } from "../server/app.js";
 import { hashSessionSecret } from "../server/security.js";
 
-async function startSetupApp() {
+async function requestJson(baseUrl, path, { method = "GET", headers = {}, body = "" } = {}) {
+  const target = new URL(path, baseUrl);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(target, {
+      method,
+      headers: {
+        ...headers,
+        ...(body ? { "content-length": Buffer.byteLength(body) } : {})
+      }
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        status: response.statusCode,
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8"))
+      }));
+    });
+    request.on("error", reject);
+    if (body) request.write(body);
+    request.end();
+  });
+}
+
+async function startSetupApp(overrides = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "raylink-setup-"));
   const setupToken = "raylink-setup-token-for-tests";
   const app = await createRayLinkApp({
@@ -26,7 +50,8 @@ async function startSetupApp() {
       prepare: async () => {},
       available: () => false,
       get: async () => null
-    }
+    },
+    ...overrides
   });
   await app.listen({ host: "127.0.0.1", port: 0 });
   const address = app.server.address();
@@ -40,6 +65,25 @@ async function startSetupApp() {
     }
   };
 }
+
+test("setup-required instances without a token expose UNINITIALIZED until a token is generated", async (t) => {
+  const testApp = await startSetupApp({
+    setupTokenHash: "",
+    setupTokenExpiresAt: ""
+  });
+  t.after(() => testApp.close());
+
+  const status = await fetch(`${testApp.baseUrl}/api/setup/status`);
+  assert.deepEqual(await status.json(), { state: "UNINITIALIZED", version: 1 });
+
+  const complete = await fetch(`${testApp.baseUrl}/api/setup/complete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  });
+  assert.equal(complete.status, 409);
+  assert.equal((await complete.json()).error.code, "SETUP_TOKEN_REQUIRED");
+});
 
 test("an uninitialized instance exposes only the setup flow", async (t) => {
   const testApp = await startSetupApp();
@@ -90,6 +134,43 @@ test("the durable INITIALIZING state keeps the control plane locked and is recov
   testApp.app.store.failSetupInitialization();
   const recovered = await fetch(`${testApp.baseUrl}/api/setup/status`);
   assert.equal((await recovered.json()).state, "SETUP_PENDING");
+});
+
+test("IPv6 literals remain IP access origins through setup preflight", async (t) => {
+  const testApp = await startSetupApp({
+    publicOrigin: "https://[2001:db8::10]",
+    trustProxy: true
+  });
+  t.after(() => testApp.close());
+
+  const response = await requestJson(testApp.baseUrl, "/api/setup/preflight", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      host: "[2001:db8::10]",
+      "x-forwarded-proto": "https"
+    },
+    body: JSON.stringify({
+      token: testApp.setupToken,
+      access: {
+        mode: "ip",
+        canonicalOrigin: "https://[2001:db8::10]",
+        allowedOrigins: ["https://[2001:db8::10]"]
+      },
+      certificate: { mode: "ip-self-signed" },
+      admin: {
+        username: "admin",
+        password: "Production@Admin2026"
+      },
+      runtime: {
+        name: "IPv6 Gateway",
+        address: "[2001:db8::10]",
+        region: "tokyo"
+      }
+    })
+  });
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  assert.equal(response.body.checks.accessOrigin, "passed");
 });
 
 test("the one-time setup token initializes access, admin, and local runtime", async (t) => {
@@ -202,6 +283,7 @@ test("the control-plane installer emits a fragment setup URL and never persists 
   assert.doesNotMatch(installer, /RAYLINK_SETUP_TOKEN=/);
   assert.match(installer, /systemctl enable --now raylink/);
   assert.match(installer, /\*:\*\) public_host="\[\$public_ip\]"/);
+  assert.match(installer, /自动检测到私网地址/);
   assert.match(installer, /systemctl enable sing-box-raylink/);
   assert.match(rotator, /systemctl restart raylink/);
   assert.match(rotator, /\/setup#token=/);

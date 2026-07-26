@@ -180,7 +180,7 @@ function normalizeSetupInput(body) {
     throw httpError("INVALID_SETUP_INPUT", "请选择域名或 IP 访问模式", 422);
   }
   const canonicalOrigin = normalizedOrigin(body.access?.canonicalOrigin, "主访问地址");
-  const canonicalHost = new URL(canonicalOrigin).hostname;
+  const canonicalHost = new URL(canonicalOrigin).hostname.replace(/^\[|\]$/g, "");
   if (accessMode === "domain" && isIP(canonicalHost)) {
     throw httpError("INVALID_SETUP_INPUT", "域名访问模式不能填写 IP 地址", 422);
   }
@@ -235,6 +235,20 @@ function normalizeSetupInput(body) {
     admin: { username, password },
     runtime
   };
+}
+
+function setupStateError(state) {
+  if (state === "INITIALIZING") {
+    return httpError("SETUP_IN_PROGRESS", "RayLink 正在初始化", 409);
+  }
+  if (state === "UNINITIALIZED") {
+    return httpError(
+      "SETUP_TOKEN_REQUIRED",
+      "尚未生成初始化令牌，请在服务器运行令牌轮换命令",
+      409
+    );
+  }
+  return httpError("SETUP_ALREADY_COMPLETE", "RayLink 已完成初始化", 409);
 }
 
 function sessionCookie(name, secret, expiresAt, secure) {
@@ -548,11 +562,7 @@ export async function createRayLinkApp(options) {
 
       if (request.method === "POST" && url.pathname === "/api/setup/preflight") {
         if (setup.state !== "SETUP_PENDING") {
-          throw httpError(
-            setup.state === "INITIALIZING" ? "SETUP_IN_PROGRESS" : "SETUP_ALREADY_COMPLETE",
-            setup.state === "INITIALIZING" ? "RayLink 正在初始化" : "RayLink 已完成初始化",
-            409
-          );
+          throw setupStateError(setup.state);
         }
         const attemptKey = authKey(request, "setup");
         if (!authAllowed(attemptKey)) {
@@ -571,11 +581,7 @@ export async function createRayLinkApp(options) {
 
       if (request.method === "POST" && url.pathname === "/api/setup/complete") {
         if (setup.state !== "SETUP_PENDING") {
-          throw httpError(
-            setup.state === "INITIALIZING" ? "SETUP_IN_PROGRESS" : "SETUP_ALREADY_COMPLETE",
-            setup.state === "INITIALIZING" ? "RayLink 正在初始化" : "RayLink 已完成初始化",
-            409
-          );
+          throw setupStateError(setup.state);
         }
         const attemptKey = authKey(request, "setup");
         if (!authAllowed(attemptKey)) {

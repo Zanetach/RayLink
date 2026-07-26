@@ -215,13 +215,20 @@ async function initialize() {
     location.replace("/");
     return;
   }
-  stateLabel.textContent = "等待完成首次初始化";
-  expiryLabel.textContent = status.expiresAt
-    ? `令牌有效期至 ${new Date(status.expiresAt).toLocaleString()}`
-    : "";
+  stateLabel.textContent = status.state === "UNINITIALIZED"
+    ? "尚未生成初始化令牌"
+    : status.state === "INITIALIZING"
+      ? "初始化正在进行"
+      : "等待完成首次初始化";
+  expiryLabel.textContent = status.state === "UNINITIALIZED"
+    ? "请在服务器运行 /opt/raylink/deploy/rotate-setup-token.sh"
+    : status.expiresAt
+      ? `令牌有效期至 ${new Date(status.expiresAt).toLocaleString()}`
+      : "";
   const hostname = location.hostname;
+  const normalizedHostname = hostname.replace(/^\[|\]$/g, "");
   const origin = location.origin;
-  form.elements.accessMode.value = hostname && !/^[\d.:]+$/.test(hostname)
+  form.elements.accessMode.value = normalizedHostname && !/^[\d.:]+$/.test(normalizedHostname)
     ? "domain"
     : "ip";
   form.elements.canonicalOrigin.value = origin;

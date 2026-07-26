@@ -16,8 +16,8 @@ export function loadConfig(env = process.env) {
   if (env.NODE_ENV === "production" && new URL(publicOrigin).protocol !== "https:") {
     throw new Error("RAYLINK_PUBLIC_ORIGIN must use HTTPS in production");
   }
-  if (setupRequired && (!env.RAYLINK_SETUP_TOKEN_HASH || !env.RAYLINK_SETUP_TOKEN_EXPIRES_AT)) {
-    throw new Error("RAYLINK_SETUP_TOKEN_HASH and RAYLINK_SETUP_TOKEN_EXPIRES_AT are required");
+  if (Boolean(env.RAYLINK_SETUP_TOKEN_HASH) !== Boolean(env.RAYLINK_SETUP_TOKEN_EXPIRES_AT)) {
+    throw new Error("RAYLINK_SETUP_TOKEN_HASH and RAYLINK_SETUP_TOKEN_EXPIRES_AT must be set together");
   }
   const runtimeMode = env.RAYLINK_RUNTIME_MODE || "dry-run";
   if (!["dry-run", "systemd"].includes(runtimeMode)) {

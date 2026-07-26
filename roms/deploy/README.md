@@ -15,6 +15,14 @@
 bash deploy/install-control-plane.sh
 ```
 
+云主机若有 NAT、多块网卡或只显示私网地址，必须显式提供实际访问地址：
+
+```bash
+RAYLINK_PUBLIC_IP=203.0.113.10 bash deploy/install-control-plane.sh
+```
+
+安装器不会把自动检测到的私网地址误当作公网入口；局域网部署使用私网 IP 时也应显式设置。
+
 从远程发布包安装时必须同时提供发布包地址和 SHA-256，安装器不会执行第三方动态脚本：
 
 ```bash

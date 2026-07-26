@@ -633,6 +633,13 @@ export class RayLinkStore {
   }
 
   initializeSetup({ setupRequired, setupTokenHash, setupTokenExpiresAt }) {
+    if (Boolean(setupTokenHash) !== Boolean(setupTokenExpiresAt)) {
+      throw domainError(
+        "SETUP_TOKEN_INCOMPLETE",
+        "初始化令牌哈希与有效期必须同时配置",
+        500
+      );
+    }
     const existing = this.db.prepare(
       "SELECT value FROM settings WHERE key = 'setup_state'"
     ).get();
@@ -645,10 +652,9 @@ export class RayLinkStore {
         existing.value = "SETUP_PENDING";
       }
       if (
-        existing.value === "SETUP_PENDING"
+        ["UNINITIALIZED", "SETUP_PENDING"].includes(existing.value)
         && setupRequired
         && setupTokenHash
-        && setupTokenExpiresAt
       ) {
         const timestamp = nowIso();
         const upsert = this.db.prepare(`
@@ -657,24 +663,22 @@ export class RayLinkStore {
         `);
         upsert.run("setup_token_hash", setupTokenHash, timestamp);
         upsert.run("setup_token_expires_at", setupTokenExpiresAt, timestamp);
+        upsert.run("setup_state", "SETUP_PENDING", timestamp);
       }
       return;
     }
 
     const timestamp = nowIso();
-    const state = setupRequired ? "SETUP_PENDING" : "READY";
-    if (setupRequired && (!setupTokenHash || !setupTokenExpiresAt)) {
-      throw domainError(
-        "SETUP_TOKEN_REQUIRED",
-        "首次初始化必须提供带有效期的一次性令牌",
-        500
-      );
-    }
+    const state = setupRequired
+      ? setupTokenHash
+        ? "SETUP_PENDING"
+        : "UNINITIALIZED"
+      : "READY";
     const insert = this.db.prepare(`
       INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
     `);
     insert.run("setup_state", state, timestamp);
-    if (setupRequired) {
+    if (setupRequired && setupTokenHash) {
       insert.run("setup_token_hash", setupTokenHash, timestamp);
       insert.run("setup_token_expires_at", setupTokenExpiresAt, timestamp);
     }

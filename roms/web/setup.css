@@ -1,9 +1,6 @@
 .setup-page {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 10% 5%, var(--accent-soft), transparent 30%),
-    radial-gradient(circle at 90% 95%, oklch(0.55 0.08 235 / 0.10), transparent 32%),
-    var(--canvas);
+  background: var(--canvas);
 }
 
 .setup-shell {
@@ -37,7 +34,6 @@
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-1);
-  box-shadow: 0 28px 90px rgb(0 0 0 / .35);
 }
 
 .setup-sidebar {

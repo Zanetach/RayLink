@@ -20,8 +20,10 @@ setup_state="$(
       process.stdout.write(String(JSON.parse(readFileSync(0, "utf8")).state || ""));
     '
 )" || fail "无法读取本机 RayLink 初始化状态"
-[ "$setup_state" = "SETUP_PENDING" ] \
-  || fail "只有等待初始化的实例可以轮换令牌，当前状态：$setup_state"
+case "$setup_state" in
+  UNINITIALIZED|SETUP_PENDING) ;;
+  *) fail "只有未初始化或等待初始化的实例可以轮换令牌，当前状态：$setup_state" ;;
+esac
 
 setup_token="$(openssl rand -hex 24)"
 setup_token_hash="$(

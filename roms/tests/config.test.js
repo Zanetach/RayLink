@@ -34,13 +34,19 @@ test("production first-run mode still requires HTTPS and a hashed expiring token
     }),
     /must use HTTPS/
   );
-  assert.throws(
-    () => loadConfig({
-      NODE_ENV: "production",
-      RAYLINK_PUBLIC_ORIGIN: "https://203.0.113.10",
-      RAYLINK_ADMIN_PASSWORD: "a-production-password",
-      RAYLINK_SETUP_REQUIRED: "true"
-    }),
-    /SETUP_TOKEN_HASH/
-  );
+  const uninitialized = loadConfig({
+    NODE_ENV: "production",
+    RAYLINK_PUBLIC_ORIGIN: "https://203.0.113.10",
+    RAYLINK_ADMIN_PASSWORD: "a-production-password",
+    RAYLINK_SETUP_REQUIRED: "true"
+  });
+  assert.equal(uninitialized.setupRequired, true);
+  assert.equal(uninitialized.setupTokenHash, "");
+  assert.throws(() => loadConfig({
+    NODE_ENV: "production",
+    RAYLINK_PUBLIC_ORIGIN: "https://203.0.113.10",
+    RAYLINK_ADMIN_PASSWORD: "a-production-password",
+    RAYLINK_SETUP_REQUIRED: "true",
+    RAYLINK_SETUP_TOKEN_HASH: "hash-without-expiry"
+  }), /must be set together/);
 });
