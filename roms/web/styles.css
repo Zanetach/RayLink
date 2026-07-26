@@ -734,7 +734,6 @@ th:nth-last-child(2), td:nth-last-child(2) { text-align: right; }
 .portal-note { margin: 16px 0 0; padding: 12px; background: var(--canvas); color: var(--muted); font-size: 10px; line-height: 1.55; }
 .entitlement-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-subtle); }
 .entitlement-preview span { padding: 12px; background: var(--canvas); }
-.entitlement-preview span:last-child { grid-column: 1 / -1; }
 .entitlement-preview small, .entitlement-preview strong { display: block; }
 .entitlement-preview small { color: var(--faint); font-size: 10px; }
 .entitlement-preview strong { margin-top: 4px; color: var(--text-soft); font-size: 10px; font-weight: 600; }
@@ -1351,7 +1350,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   td::before { display: block; margin-bottom: 5px; color: var(--faint); font-size: 8px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
   #user-table-body td:nth-child(2)::before { content: "状态"; }
   #user-table-body td:nth-child(3)::before { content: "已用 / 配额"; }
-  #user-table-body td:nth-child(4)::before { content: "设备 / 节点"; }
+  #user-table-body td:nth-child(4)::before { content: "节点 / 客户端"; }
   #user-table-body td:nth-child(5)::before { content: "到期时间"; }
   #user-table-body td:nth-child(6)::before { display: none; }
   .usage-cell { min-width: 0; }

@@ -130,7 +130,6 @@ function applyBootstrap(data) {
     state: user.state,
     used: user.usedGb,
     quota: user.quotaGb,
-    devices: user.deviceLimit,
     nodeScope: user.nodeScope,
     clients: user.clientFormats,
     expires: user.expiresAt
@@ -560,7 +559,7 @@ function renderUsers() {
           <div class="usage-copy"><span>${user.used.toFixed(1)} GB</span><span>${user.quota} GB</span></div>
           <div class="progress ${progressClass}"><i style="width:${ratio.toFixed(1)}%"></i></div>
         </td>
-        <td><span class="entitlement-cell"><strong>${user.devices} 台设备</strong><small>${escapeHtml(scopeToLabel(user.nodeScope))}</small></span></td>
+        <td><span class="entitlement-cell"><strong>${escapeHtml(scopeToLabel(user.nodeScope))}</strong><small>${user.clients.length} 种客户端格式</small></span></td>
         <td class="numeric">${formatDate(user.expires)}</td>
         <td><button class="icon-button small" aria-label="编辑 ${escapeHtml(user.name)}" data-user="${escapeHtml(user.email)}">${icon("more")}</button></td>
       </tr>`;
@@ -693,10 +692,7 @@ function userDrawerMarkup(user = {}) {
       <label class="field"><span>到期时间</span><input name="expires" type="date" value="${escapeHtml(user.expires || "2026-12-31")}" required><small class="field-error"></small></label>
       <label class="field"><span>已用流量</span><input name="usedGb" type="number" min="0" step="0.1" value="${Number(user.used || 0).toFixed(1)}" required><small class="field-error"></small><small class="field-hint">可由管理员或外部采集器通过用户更新 API 写回</small></label>
       <p class="drawer-section-label">用户权益</p>
-      <div class="quota-input">
-        <label class="field"><span>流量额度（GB）</span><input name="quota" type="number" min="1" step="1" value="${Number(user.quota || 120)}" required><small class="field-error"></small></label>
-        <label class="field"><span>设备上限（策略）</span><input name="devices" type="number" min="1" step="1" value="${Number(user.devices || 3)}" required><small class="field-error"></small><small class="field-hint">当前用于权益展示；设备指纹强制限制尚未启用</small></label>
-      </div>
+      <label class="field"><span>流量额度（GB）</span><input name="quota" type="number" min="1" step="1" value="${Number(user.quota || 120)}" required><small class="field-error"></small></label>
       <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select><small class="field-hint">该用户只能获取所选区域的客户端配置</small></label>
       <p class="drawer-section-label">客户端能力</p>
       ${capabilityRows}
@@ -853,8 +849,8 @@ function portalHomeMarkup() {
       <div class="portal-entitlement">
         <p class="drawer-section-label">当前用户权益</p>
         <h3>${escapeHtml(user.name)} 的访问权益</h3>
-        <p>流量、设备、节点和客户端能力由管理员为当前账号单独设置。</p>
-        <div class="entitlement-preview"><span><small>剩余流量</small><strong>${Math.max(0, entitlement.quotaGb - user.usedGb).toFixed(1)} GB</strong></span><span><small>设备上限</small><strong>${entitlement.deviceLimit} 台</strong></span><span><small>节点范围</small><strong>${escapeHtml(scopeToLabel(entitlement.nodeScope))}</strong></span></div>
+        <p>流量、节点和客户端能力由管理员为当前账号单独设置。</p>
+        <div class="entitlement-preview"><span><small>剩余流量</small><strong>${Math.max(0, entitlement.quotaGb - user.usedGb).toFixed(1)} GB</strong></span><span><small>节点范围</small><strong>${escapeHtml(scopeToLabel(entitlement.nodeScope))}</strong></span></div>
       </div>
       <p class="drawer-section-label">选择客户端</p>
       <div class="portal-client-list">
@@ -941,7 +937,6 @@ async function saveUserForm(form) {
     name,
     email,
     quotaGb: Number(form.elements.quota.value),
-    deviceLimit: Number(form.elements.devices.value),
     nodeScope: labelToScope(form.elements.nodeGroup.value),
     clientFormats: enabledClients,
     expiresAt: form.elements.expires.value,

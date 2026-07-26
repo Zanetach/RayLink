@@ -69,7 +69,7 @@ test("authenticated bootstrap returns users with independent entitlements", asyn
   assert.equal("plans" in body, false);
   const user = body.users.find((candidate) => candidate.email === "lin.zhixia@meridian-log.cn");
   assert.equal(user.quotaGb, 120);
-  assert.equal(user.deviceLimit, 3);
+  assert.equal("deviceLimit" in user, false);
   assert.deepEqual(user.nodeScope, ["tokyo", "singapore"]);
   assert.deepEqual(user.clientFormats, ["mihomo", "sing-box"]);
   assert.equal("planId" in user, false);
@@ -98,7 +98,6 @@ test("admin creates and updates a user-owned entitlement", async (t) => {
       name: "徐清扬",
       email: "qingyang.xu@example.cn",
       quotaGb: 86,
-      deviceLimit: 2,
       nodeScope: ["tokyo"],
       clientFormats: ["sing-box"],
       state: "disabled",
@@ -108,7 +107,7 @@ test("admin creates and updates a user-owned entitlement", async (t) => {
   assert.equal(userResponse.status, 201);
   const user = await userResponse.json();
   assert.equal(user.quotaGb, 86);
-  assert.equal(user.deviceLimit, 2);
+  assert.equal("deviceLimit" in user, false);
   assert.deepEqual(user.nodeScope, ["tokyo"]);
   assert.deepEqual(user.clientFormats, ["sing-box"]);
   assert.equal(user.state, "disabled");
@@ -120,14 +119,13 @@ test("admin creates and updates a user-owned entitlement", async (t) => {
     method: "PATCH",
     body: JSON.stringify({
       quotaGb: 92,
-      deviceLimit: 3,
       nodeScope: ["all"]
     })
   });
   assert.equal(updateResponse.status, 200);
   const updatedUser = await updateResponse.json();
   assert.equal(updatedUser.quotaGb, 92);
-  assert.equal(updatedUser.deviceLimit, 3);
+  assert.equal("deviceLimit" in updatedUser, false);
   assert.deepEqual(updatedUser.nodeScope, ["all"]);
 
   const bootstrap = await api(testApp.baseUrl, cookie, "/api/bootstrap");
@@ -153,7 +151,6 @@ test("user creation rejects invalid entitlement limits", async (t) => {
       name: "无效权益用户",
       email: "invalid-entitlement@example.cn",
       quotaGb: 0,
-      deviceLimit: 2,
       nodeScope: ["tokyo"],
       clientFormats: ["sing-box"],
       expiresAt: "2027-01-31"
@@ -344,7 +341,7 @@ test("active user logs in and downloads a credential-scoped sing-box client conf
   assert.equal(profileResponse.status, 200);
   const profile = await profileResponse.json();
   assert.equal("planId" in profile.user, false);
-  assert.equal(profile.entitlement.deviceLimit, 5);
+  assert.equal("deviceLimit" in profile.entitlement, false);
   assert.equal(profile.entitlement.quotaGb, 320);
 
   const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
@@ -391,7 +388,6 @@ test("admin can activate a new portal user with a separate login password", asyn
       portalStatus: "active",
       state: "active",
       quotaGb: 120,
-      deviceLimit: 3,
       nodeScope: ["tokyo", "singapore"],
       clientFormats: ["sing-box"],
       expiresAt: "2027-01-31"

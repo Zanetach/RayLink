@@ -30,7 +30,6 @@ function renderAccount(profile) {
   document.querySelector("#portal-user-email").textContent = user.email;
   document.querySelector("#portal-account-title").textContent = `${user.name} 的访问权益`;
   document.querySelector("#portal-remaining-quota").textContent = `${Math.max(0, entitlement.quotaGb - user.usedGb).toFixed(1)} GB`;
-  document.querySelector("#portal-device-limit").textContent = `${entitlement.deviceLimit} 台`;
   document.querySelector("#portal-node-scope").textContent = scopeLabel(entitlement.nodeScope);
   downloadButton.hidden = !entitlement.clientFormats.includes("sing-box");
   loginPanel.hidden = true;

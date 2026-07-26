@@ -24,7 +24,7 @@ const seedPlans = [
     id: "standard",
     name: "标准访问",
     quotaGb: 120,
-    deviceLimit: 3,
+    legacyDeviceLimit: 3,
     nodeScope: ["tokyo", "singapore"],
     clientFormats: ["mihomo", "sing-box"],
     description: "适合日常办公和开发",
@@ -34,7 +34,7 @@ const seedPlans = [
     id: "high-speed",
     name: "高速访问",
     quotaGb: 320,
-    deviceLimit: 5,
+    legacyDeviceLimit: 5,
     nodeScope: ["all"],
     clientFormats: ["mihomo", "sing-box", "download"],
     description: "面向高流量研发团队",
@@ -44,7 +44,7 @@ const seedPlans = [
     id: "temporary",
     name: "临时访问",
     quotaGb: 36,
-    deviceLimit: 1,
+    legacyDeviceLimit: 1,
     nodeScope: ["tokyo"],
     clientFormats: ["mihomo", "sing-box"],
     description: "外部协作和短期项目",
@@ -82,12 +82,9 @@ function domainError(code, message, statusCode = 422) {
   return error;
 }
 
-function validateUserEntitlement({ quotaGb, deviceLimit, nodeScope, clientFormats }) {
+function validateUserEntitlement({ quotaGb, nodeScope, clientFormats }) {
   if (!Number.isFinite(quotaGb) || quotaGb <= 0) {
     throw domainError("INVALID_QUOTA", "流量额度必须大于 0");
-  }
-  if (!Number.isInteger(deviceLimit) || deviceLimit <= 0) {
-    throw domainError("INVALID_DEVICE_LIMIT", "设备上限必须为正整数");
   }
   if (
     !Array.isArray(nodeScope)
@@ -116,7 +113,6 @@ function userFromRow(row) {
     state: row.state,
     usedGb: row.used_gb,
     quotaGb: row.quota_gb,
-    deviceLimit: row.device_limit,
     nodeScope: parseJson(row.node_scope_json, []),
     clientFormats: parseJson(row.client_formats_json, []),
     expiresAt: row.expires_at
@@ -269,7 +265,7 @@ export class RayLinkStore {
           plan.id,
           plan.name,
           plan.quotaGb,
-          plan.deviceLimit,
+          plan.legacyDeviceLimit,
           JSON.stringify(plan.nodeScope),
           JSON.stringify(plan.clientFormats),
           plan.description,
@@ -299,7 +295,7 @@ export class RayLinkStore {
           usedGb,
           planId,
           entitlement.quotaGb,
-          entitlement.deviceLimit,
+          entitlement.legacyDeviceLimit,
           JSON.stringify(entitlement.nodeScope),
           JSON.stringify(entitlement.clientFormats),
           expiresAt,
@@ -390,7 +386,7 @@ export class RayLinkStore {
   portalProfile(userId) {
     const row = this.db.prepare(`
       SELECT users.id, users.name, users.initials, users.email, users.portal_status,
-             users.state, users.used_gb, users.quota_gb, users.device_limit,
+             users.state, users.used_gb, users.quota_gb,
              users.node_scope_json, users.client_formats_json, users.expires_at
       FROM users
       WHERE users.id = ?
@@ -400,7 +396,6 @@ export class RayLinkStore {
       user: userFromRow(row),
       entitlement: {
         quotaGb: row.quota_gb,
-        deviceLimit: row.device_limit,
         nodeScope: parseJson(row.node_scope_json, []),
         clientFormats: parseJson(row.client_formats_json, [])
       }
@@ -437,7 +432,7 @@ export class RayLinkStore {
   listUsers() {
     return this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
-             device_limit, node_scope_json, client_formats_json, expires_at
+             node_scope_json, client_formats_json, expires_at
       FROM users
       ORDER BY created_at, name
     `).all().map(userFromRow);
@@ -485,7 +480,6 @@ export class RayLinkStore {
     const email = String(input.email || "").trim().toLowerCase();
     const entitlement = {
       quotaGb: Number(input.quotaGb),
-      deviceLimit: Number(input.deviceLimit),
       nodeScope: input.nodeScope,
       clientFormats: input.clientFormats
     };
@@ -534,7 +528,7 @@ export class RayLinkStore {
         usedGb,
         LEGACY_ENTITLEMENT_PLAN_ID,
         entitlement.quotaGb,
-        entitlement.deviceLimit,
+        1,
         JSON.stringify(entitlement.nodeScope),
         JSON.stringify(entitlement.clientFormats),
         input.expiresAt,
@@ -555,7 +549,7 @@ export class RayLinkStore {
   getUser(id) {
     const row = this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
-             device_limit, node_scope_json, client_formats_json, expires_at
+             node_scope_json, client_formats_json, expires_at
       FROM users WHERE id = ?
     `).get(id);
     return row ? userFromRow(row) : null;
@@ -568,7 +562,6 @@ export class RayLinkStore {
       name: input.name === undefined ? current.name : String(input.name).trim(),
       email: input.email === undefined ? current.email : String(input.email).trim().toLowerCase(),
       quotaGb: input.quotaGb === undefined ? current.quotaGb : Number(input.quotaGb),
-      deviceLimit: input.deviceLimit === undefined ? current.deviceLimit : Number(input.deviceLimit),
       nodeScope: input.nodeScope === undefined ? current.nodeScope : input.nodeScope,
       clientFormats: input.clientFormats === undefined ? current.clientFormats : input.clientFormats,
       expiresAt: input.expiresAt === undefined ? current.expiresAt : String(input.expiresAt),
@@ -600,7 +593,7 @@ export class RayLinkStore {
     try {
       this.db.prepare(`
         UPDATE users
-        SET name = ?, initials = ?, email = ?, quota_gb = ?, device_limit = ?,
+        SET name = ?, initials = ?, email = ?, quota_gb = ?,
             node_scope_json = ?, client_formats_json = ?, expires_at = ?,
             state = ?, portal_status = ?, used_gb = ?, updated_at = ?
         WHERE id = ?
@@ -609,7 +602,6 @@ export class RayLinkStore {
         initials,
         next.email,
         next.quotaGb,
-        next.deviceLimit,
         JSON.stringify(next.nodeScope),
         JSON.stringify(next.clientFormats),
         next.expiresAt,
