@@ -12,7 +12,7 @@ import {
   rm,
   writeFile
 } from "node:fs/promises";
-import { hostname, platform, arch } from "node:os";
+import { arch, cpus, freemem, hostname, platform, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -35,6 +35,96 @@ async function runCommand(command, args) {
   } catch (error) {
     const detail = String(error.stderr || error.stdout || error.message).trim();
     throw new Error(detail || `${command} 执行失败`);
+  }
+}
+
+function cpuTimesSnapshot() {
+  return cpus().reduce((totals, cpu) => {
+    const times = Object.values(cpu.times).reduce((sum, value) => sum + value, 0);
+    totals.idle += cpu.times.idle;
+    totals.total += times;
+    return totals;
+  }, { idle: 0, total: 0 });
+}
+
+async function networkBytesSnapshot() {
+  if (platform() !== "linux") return { networkRxBytes: null, networkTxBytes: null };
+  try {
+    const content = await readFile("/proc/net/dev", "utf8");
+    return content.split("\n").slice(2).reduce((totals, line) => {
+      const [interfaceName, counters] = line.trim().split(/\s*:\s*/);
+      if (!interfaceName || !counters || interfaceName === "lo") return totals;
+      const fields = counters.trim().split(/\s+/).map(Number);
+      totals.networkRxBytes += Number.isFinite(fields[0]) ? fields[0] : 0;
+      totals.networkTxBytes += Number.isFinite(fields[8]) ? fields[8] : 0;
+      return totals;
+    }, { networkRxBytes: 0, networkTxBytes: 0 });
+  } catch {
+    return { networkRxBytes: null, networkTxBytes: null };
+  }
+}
+
+async function systemSample() {
+  const memoryTotalBytes = totalmem();
+  return {
+    cpu: cpuTimesSnapshot(),
+    memoryUsedBytes: memoryTotalBytes - freemem(),
+    memoryTotalBytes,
+    ...await networkBytesSnapshot()
+  };
+}
+
+async function serviceState(systemdUnit) {
+  if (platform() !== "linux") return "unknown";
+  try {
+    const { stdout } = await execFile("systemctl", ["is-active", systemdUnit], { timeout: 5_000 });
+    return String(stdout).trim() === "active" ? "running" : "stopped";
+  } catch (error) {
+    return String(error.stdout || "").trim() === "inactive" ? "stopped" : "failed";
+  }
+}
+
+export class NodeTelemetryCollector {
+  constructor(options = {}) {
+    this.sampleProvider = options.sampleProvider || systemSample;
+    this.serviceProvider = options.serviceProvider
+      || (() => serviceState(options.systemdUnit || "raylink-sing-box.service"));
+    this.clock = options.clock || Date.now;
+    this.previous = null;
+  }
+
+  async collect() {
+    const sample = await this.sampleProvider();
+    const timestamp = this.clock();
+    const elapsedSeconds = this.previous
+      ? Math.max(0.001, (timestamp - this.previous.timestamp) / 1000)
+      : null;
+    const cpuTotalDelta = this.previous ? sample.cpu.total - this.previous.sample.cpu.total : 0;
+    const cpuIdleDelta = this.previous ? sample.cpu.idle - this.previous.sample.cpu.idle : 0;
+    const cpuPercent = cpuTotalDelta > 0
+      ? Math.max(0, Math.min(100, ((cpuTotalDelta - cpuIdleDelta) / cpuTotalDelta) * 100))
+      : 0;
+    const byteRate = (current, previous) => {
+      if (
+        elapsedSeconds === null
+        || !Number.isFinite(current)
+        || !Number.isFinite(previous)
+        || current < previous
+      ) return 0;
+      return ((current - previous) * 8) / elapsedSeconds;
+    };
+    const telemetry = {
+      cpuPercent: Number(cpuPercent.toFixed(1)),
+      memoryUsedBytes: sample.memoryUsedBytes,
+      memoryTotalBytes: sample.memoryTotalBytes,
+      networkRxBytes: sample.networkRxBytes,
+      networkTxBytes: sample.networkTxBytes,
+      networkRxBps: byteRate(sample.networkRxBytes, this.previous?.sample.networkRxBytes),
+      networkTxBps: byteRate(sample.networkTxBytes, this.previous?.sample.networkTxBytes),
+      serviceStatus: await this.serviceProvider()
+    };
+    this.previous = { sample, timestamp };
+    return telemetry;
   }
 }
 
@@ -89,7 +179,7 @@ export class NodeRuntimeAdapter {
   }
 }
 
-export async function collectNodeMetadata(binaryPath = "sing-box") {
+export async function collectNodeMetadata(binaryPath = "sing-box", telemetryCollector = null) {
   let runtimeVersion = null;
   let buildTags = [];
   try {
@@ -106,7 +196,8 @@ export async function collectNodeMetadata(binaryPath = "sing-box") {
     architecture: arch(),
     agentVersion: AGENT_VERSION,
     runtimeVersion,
-    buildTags
+    buildTags,
+    telemetry: telemetryCollector ? await telemetryCollector.collect() : undefined
   };
 }
 
@@ -117,7 +208,11 @@ export class RayLinkNode {
     this.statePath = options.statePath || "/etc/raylink-node/node.json";
     this.fetchFn = options.fetchFn || globalThis.fetch;
     this.runtimeAdapter = options.runtimeAdapter || new NodeRuntimeAdapter(options);
-    this.metadataProvider = options.metadataProvider || (() => collectNodeMetadata(this.runtimeAdapter.binaryPath));
+    this.telemetryCollector = options.telemetryCollector || new NodeTelemetryCollector({
+      systemdUnit: this.runtimeAdapter.systemdUnit
+    });
+    this.metadataProvider = options.metadataProvider
+      || (() => collectNodeMetadata(this.runtimeAdapter.binaryPath, this.telemetryCollector));
     this.pollIntervalMs = Number(options.pollIntervalMs || 10_000);
     this.state = null;
   }

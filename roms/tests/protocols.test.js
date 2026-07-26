@@ -164,7 +164,7 @@ test("protocol availability is gated by schema version, platform and client buil
   const redirect = protocolCatalog.find((protocol) => protocol.type === "redirect");
   const base = {
     installed: true,
-    version: "1.13.14",
+    version: "1.13.12",
     platform: "linux",
     tags: []
   };

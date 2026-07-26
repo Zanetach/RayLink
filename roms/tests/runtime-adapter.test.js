@@ -13,7 +13,7 @@ test("local adapter validates before atomically replacing the active config", as
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 if (args[0] === "version") {
-  console.log("sing-box version 1.13.14");
+  console.log("sing-box version 1.13.12");
   process.exit(0);
 }
 if (args[0] !== "check" || args[1] !== "-c") process.exit(2);
@@ -39,7 +39,7 @@ console.log("configuration is valid");
     configText: "{\"inbounds\":[]}\n"
   });
   assert.equal(first.mode, "dry-run");
-  assert.equal(first.runtimeVersion, "1.13.14");
+  assert.equal(first.runtimeVersion, "1.13.12");
 
   const activePath = join(dataDir, "sing-box", "config.json");
   assert.equal(await readFile(activePath, "utf8"), "{\"inbounds\":[]}\n");
@@ -61,7 +61,7 @@ test("first systemd publish failure does not leave an unstarted config active", 
   await writeFile(fakeBinary, `#!${process.execPath}
 const args = process.argv.slice(2);
 if (args[0] === "version") {
-  console.log("sing-box version 1.13.14");
+  console.log("sing-box version 1.13.12");
   process.exit(0);
 }
 process.exit(args[0] === "check" ? 0 : 2);

@@ -53,7 +53,7 @@ export class SingBoxInstaller {
       } else if (this.platform === "linux") {
         await this.runner("sh", [
           "-c",
-          "curl -fsSL https://sing-box.app/install.sh | sh -s -- --version 1.13.14"
+          "curl -fsSL https://sing-box.app/install.sh | sh -s -- --version 1.13.12"
         ], {
           timeout: 10 * 60 * 1000,
           maxBuffer: 8 * 1024 * 1024

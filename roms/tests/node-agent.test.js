@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NodeRuntimeAdapter, RayLinkNode } from "../web/node/raylink-node.mjs";
+import {
+  NodeRuntimeAdapter,
+  NodeTelemetryCollector,
+  RayLinkNode
+} from "../web/node/raylink-node.mjs";
 
 function jsonResponse(body, status = 200) {
   return new Response(body === undefined ? null : JSON.stringify(body), {
@@ -26,7 +30,7 @@ test("RayLink Node enrolls once and persists its node credential", async () => {
       platform: "linux",
       architecture: "x64",
       agentVersion: "0.1.0",
-      runtimeVersion: "1.13.14",
+      runtimeVersion: "1.13.12",
       buildTags: ["with_quic"]
     }),
     fetchFn: async (url, init) => {
@@ -78,13 +82,13 @@ test("RayLink Node heartbeats, applies the next config and reports success", asy
       platform: "linux",
       architecture: "x64",
       agentVersion: "0.1.0",
-      runtimeVersion: "1.13.14",
+      runtimeVersion: "1.13.12",
       buildTags: ["with_quic"]
     }),
     runtimeAdapter: {
       async publish(task) {
         publications.push(task);
-        return { runtimeVersion: "1.13.14", configPath: "/var/lib/raylink-node/sing-box/config.json" };
+        return { runtimeVersion: "1.13.12", configPath: "/var/lib/raylink-node/sing-box/config.json" };
       }
     },
     fetchFn: async (url, init = {}) => {
@@ -104,7 +108,7 @@ test("RayLink Node heartbeats, applies the next config and reports success", asy
   assert.deepEqual(JSON.parse(completion.init.body), {
     status: "succeeded",
     result: {
-      runtimeVersion: "1.13.14",
+      runtimeVersion: "1.13.12",
       configPath: "/var/lib/raylink-node/sing-box/config.json"
     }
   });
@@ -148,6 +152,42 @@ test("RayLink Node reports a failed task without swallowing the next poll cycle"
   });
 });
 
+test("node telemetry reports interval CPU, memory, network and service health", async () => {
+  const samples = [
+    {
+      cpu: { idle: 4_000, total: 10_000 },
+      memoryUsedBytes: 2_000,
+      memoryTotalBytes: 8_000,
+      networkRxBytes: 10_000,
+      networkTxBytes: 4_000
+    },
+    {
+      cpu: { idle: 4_200, total: 11_000 },
+      memoryUsedBytes: 2_500,
+      memoryTotalBytes: 8_000,
+      networkRxBytes: 1_010_000,
+      networkTxBytes: 504_000
+    }
+  ];
+  const timestamps = [1_000, 2_000];
+  const collector = new NodeTelemetryCollector({
+    sampleProvider: async () => samples.shift(),
+    serviceProvider: async () => "running",
+    clock: () => timestamps.shift()
+  });
+
+  const initial = await collector.collect();
+  const current = await collector.collect();
+
+  assert.equal(initial.networkRxBps, 0);
+  assert.equal(current.cpuPercent, 80);
+  assert.equal(current.memoryUsedBytes, 2_500);
+  assert.equal(current.memoryTotalBytes, 8_000);
+  assert.equal(current.networkRxBps, 8_000_000);
+  assert.equal(current.networkTxBps, 4_000_000);
+  assert.equal(current.serviceStatus, "running");
+});
+
 test("node runtime restores the previous config when systemd rejects a publication", async () => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-node-rollback-"));
   await mkdir(directory, { recursive: true });
@@ -161,7 +201,7 @@ test("node runtime restores the previous config when systemd rejects a publicati
       if (command === "systemctl" && commands.filter(([name]) => name === "systemctl").length === 1) {
         throw new Error("service failed to start");
       }
-      return { stdout: "sing-box version 1.13.14\n", stderr: "" };
+      return { stdout: "sing-box version 1.13.12\n", stderr: "" };
     }
   });
 
@@ -179,7 +219,7 @@ test("node runtime removes a first config when the service cannot start", async 
     dataDir: directory,
     commandRunner: async (command) => {
       if (command === "systemctl") throw new Error("service failed to start");
-      return { stdout: "sing-box version 1.13.14\n", stderr: "" };
+      return { stdout: "sing-box version 1.13.12\n", stderr: "" };
     }
   });
 

@@ -13,6 +13,7 @@ import {
   protocolCatalog
 } from "./singbox/protocol-catalog.js";
 import { RuntimeManager } from "./singbox/runtime-manager.js";
+import { LocalTelemetryCollector } from "./telemetry.js";
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
@@ -138,6 +139,9 @@ export async function createRayLinkApp(options) {
     adapter: runtimeAdapter,
     listenPort
   });
+  const localTelemetryCollector = new LocalTelemetryCollector();
+  const telemetryProvider = options.telemetryProvider
+    || ((runtime) => localTelemetryCollector.collect(runtime));
   const installer = options.installer || new SingBoxInstaller({
     binaryPath: options.singBoxBinary || "sing-box"
   });
@@ -358,9 +362,12 @@ export async function createRayLinkApp(options) {
 
         if (request.method === "GET" && url.pathname === "/api/bootstrap") {
           const installation = await installer.status();
+          const runtime = await runtimeManager.status();
+          store.recordHostTelemetry("local", await telemetryProvider(runtime));
           sendJson(response, 200, {
             ...store.bootstrap(admin),
-            runtime: await runtimeManager.status(),
+            telemetry: store.telemetryOverview(),
+            runtime,
             runtimePreview: runtimeManager.preview(),
             deployments: store.listDeployments(),
             installation,

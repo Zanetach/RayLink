@@ -8,11 +8,6 @@ const clientCatalog = {
 
 const accountSummary = { totalUsers: 0 };
 
-const estimatedTrafficShape = {
-  download: [1.4, 1.1, 0.9, 0.8, 1.7, 3.2, 4.9, 6.6, 5.4, 7.1, 8.4, 7.6, 6.3],
-  upload: [0.3, 0.3, 0.2, 0.2, 0.5, 0.9, 1.4, 1.9, 1.6, 2.1, 2.4, 2.2, 1.8]
-};
-
 const controlPlane = {
   currentAdmin: null,
   hosts: [],
@@ -22,6 +17,7 @@ const controlPlane = {
   protocols: [],
   protocolCatalog: [],
   deployments: [],
+  telemetry: { windowHours: 24, networkSeries: [] },
   portalProfile: null
 };
 
@@ -143,6 +139,7 @@ function applyBootstrap(data) {
   controlPlane.protocols = data.protocols;
   controlPlane.protocolCatalog = data.protocolCatalog;
   controlPlane.deployments = data.deployments;
+  controlPlane.telemetry = data.telemetry || { windowHours: 24, networkSeries: [] };
   const rollbackButton = document.querySelector("#rollback-config");
   const rollbackTarget = data.deployments.find((deployment) => deployment.status === "superseded");
   if (rollbackButton) {
@@ -193,32 +190,37 @@ function renderRuntime() {
 
 function renderDashboard() {
   const runtime = controlPlane.runtime || { state: "not-configured", mode: "dry-run" };
-  const host = controlPlane.hosts[0];
+  const hosts = controlPlane.hosts;
+  const host = hosts.find((candidate) => candidate.id === "local") || hosts[0];
   const latestAttempt = controlPlane.deployments[0];
   const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
   const ready = ["running", "staged"].includes(runtime.state);
+  const readyHosts = hosts.filter((candidate) => {
+    if (candidate.id === "local") return ready;
+    return candidate.status === "online"
+      && !["stopped", "failed"].includes(candidate.telemetry?.serviceStatus);
+  });
   const activeUsers = users.filter((user) => ["active", "warning"].includes(user.state)).length;
   const setText = (selector, value) => {
     const element = document.querySelector(selector);
     if (element) element.textContent = value;
   };
-  setText("#dashboard-runtime-heading", ready ? "sing-box Runtime 已就绪" : "Runtime 等待首次发布");
-  setText("#dashboard-runtime-copy", ready
-    ? `${host?.name || "本机 Runtime"} 正在使用 ${runtime.runtimeVersion ? `sing-box ${runtime.runtimeVersion}` : runtime.mode}。`
+  setText("#dashboard-runtime-heading", hosts.length
+    ? `${readyHosts.length}/${hosts.length} 个 Runtime 可用`
+    : "尚未添加 Runtime");
+  setText("#dashboard-runtime-copy", readyHosts.length
+    ? `控制面正在管理 ${hosts.length} 台主机；节点指标来自本机采样与 RayLink Node 心跳。`
     : "完成主机配置后，在“配置发布”中生成并校验第一份受管配置。");
   const runtimeCount = document.querySelector("#dashboard-runtime-count");
-  if (runtimeCount) runtimeCount.innerHTML = `${ready ? 1 : 0}<small>/ 1</small>`;
+  if (runtimeCount) runtimeCount.innerHTML = `${readyHosts.length}<small>/ ${hosts.length}</small>`;
   setText("#dashboard-runtime-mode", `${runtime.mode} · ${runtime.state}`);
   setText("#dashboard-eligible-users", activeDeployment?.eligibleUsers ?? controlPlane.runtimePreview?.eligibleUsers ?? 0);
   setText("#dashboard-user-count", users.length);
   setText("#dashboard-active-users", `${activeUsers} 个账号启用`);
   setText("#dashboard-deployment-count", controlPlane.deployments.length);
   setText("#dashboard-latest-version", activeDeployment?.version || "尚未发布");
-  setText("#dashboard-host-name", host?.name || "本机 Runtime");
-  setText("#dashboard-host-address", host?.address || "尚未配置");
-  setText("#dashboard-host-region", host?.region || "—");
-  setText("#dashboard-host-status", ready ? "已就绪" : "待配置");
-  document.querySelector("#dashboard-host-pulse")?.classList.toggle("warning", !ready);
+  setText("#dashboard-host-name", `${hosts.length} 台主机`);
+  renderDashboardNodes({ hosts, runtime, ready });
   setText("#dashboard-deployment-version", activeDeployment?.version || "尚未发布");
   const deploymentStatus = document.querySelector("#dashboard-deployment-status");
   if (deploymentStatus) {
@@ -232,7 +234,7 @@ function renderDashboard() {
   setText("#dashboard-deployment-validation", latestAttempt?.status === "failed"
     ? `最近一次尝试失败：${latestAttempt.error}`
     : runtime.runtimeVersion ? `sing-box ${runtime.runtimeVersion}` : runtime.mode);
-  renderNetworkTrend({ activeUsers, ready });
+  renderNetworkTrend();
   const policyStatus = activeDeployment ? `策略 ${activeDeployment.version} 已生效` : "尚未发布账号策略";
   const policyMeta = activeDeployment?.publishedAt
     ? `${activeDeployment.publisherUsername || "管理员"} · ${new Date(activeDeployment.publishedAt).toLocaleString("zh-CN")}`
@@ -241,19 +243,99 @@ function renderDashboard() {
   setText("#user-policy-meta", policyMeta);
 }
 
-function renderNetworkTrend({ activeUsers, ready }) {
+function formatBytes(value) {
+  if (!Number.isFinite(value)) return "—";
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${Math.round(value)} B`;
+}
+
+function formatBitRate(value) {
+  if (!Number.isFinite(value)) return "—";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)} Mbps`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)} Kbps`;
+  return `${Math.round(value)} bps`;
+}
+
+function hostStatusView(host, runtime, localReady) {
+  if (host.id === "local") {
+    return localReady
+      ? { label: "运行中", className: "good" }
+      : { label: runtime.state === "not-configured" ? "待发布" : "异常", className: "warning" };
+  }
+  if (host.status === "offline") return { label: "离线", className: "danger" };
+  if (host.status === "pending") return { label: "等待接入", className: "neutral" };
+  if (host.status === "degraded" || ["stopped", "failed"].includes(host.telemetry?.serviceStatus)) {
+    return { label: "服务异常", className: "warning" };
+  }
+  return { label: "运行中", className: "good" };
+}
+
+function renderDashboardNodes({ hosts, runtime, ready }) {
+  const compactList = document.querySelector("#dashboard-node-list");
+  const healthGrid = document.querySelector("#dashboard-node-health-grid");
+  if (!compactList || !healthGrid) return;
+  if (!hosts.length) {
+    const empty = '<div class="empty-state">尚未添加受管主机</div>';
+    compactList.innerHTML = empty;
+    healthGrid.innerHTML = empty;
+    return;
+  }
+  compactList.innerHTML = hosts.map((host) => {
+    const telemetry = host.telemetry || {};
+    const status = hostStatusView(host, runtime, ready);
+    const cpu = Number.isFinite(telemetry.cpuPercent) ? telemetry.cpuPercent : 0;
+    return `
+      <button class="node-row" data-open-host="${escapeHtml(host.id)}">
+        <span class="node-pulse ${status.className === "good" ? "" : "warning"}"></span>
+        <span class="node-name"><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></span>
+        <span class="node-load" title="CPU ${cpu.toFixed(1)}%"><i style="--load:${cpu}%"></i></span>
+        <span class="latency ${status.className === "good" ? "" : "warning"}">${escapeHtml(status.label)}</span>
+      </button>`;
+  }).join("");
+  healthGrid.innerHTML = hosts.map((host) => {
+    const telemetry = host.telemetry || {};
+    const status = hostStatusView(host, runtime, ready);
+    const runtimeVersion = host.runtimeVersion
+      || (host.id === "local" ? runtime.runtimeVersion : null)
+      || "版本待上报";
+    const memoryPercent = Number.isFinite(telemetry.memoryUsedBytes) && Number.isFinite(telemetry.memoryTotalBytes)
+      ? (telemetry.memoryUsedBytes / telemetry.memoryTotalBytes) * 100
+      : null;
+    const networkTotal = (telemetry.networkRxBps || 0) + (telemetry.networkTxBps || 0);
+    return `
+      <article class="node-health-card">
+        <div class="node-health-heading">
+          <button class="identity-link" data-open-host="${escapeHtml(host.id)}"><span class="flag">SB</span><span><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></span></button>
+          <span class="status-badge ${status.className}"><i></i>${escapeHtml(status.label)}</span>
+        </div>
+        <div class="node-health-metrics">
+          <span><small>CPU</small><strong>${Number.isFinite(telemetry.cpuPercent) ? `${telemetry.cpuPercent.toFixed(1)}%` : "—"}</strong><i style="--load:${telemetry.cpuPercent || 0}%"></i></span>
+          <span><small>内存</small><strong>${memoryPercent === null ? "—" : `${memoryPercent.toFixed(1)}%`}</strong><em>${formatBytes(telemetry.memoryUsedBytes)} / ${formatBytes(telemetry.memoryTotalBytes)}</em></span>
+          <span><small>网络</small><strong>${formatBitRate(networkTotal)}</strong><em>↓ ${formatBitRate(telemetry.networkRxBps)} · ↑ ${formatBitRate(telemetry.networkTxBps)}</em></span>
+          <span><small>sing-box 服务</small><strong>${escapeHtml({ running: "运行中", stopped: "已停止", failed: "异常", unknown: "待上报" }[telemetry.serviceStatus] || "待上报")}</strong><em>${escapeHtml(runtimeVersion)}</em></span>
+        </div>
+      </article>`;
+  }).join("");
+}
+
+function renderNetworkTrend() {
   const downloadLine = document.querySelector("#dashboard-download-line");
   const uploadLine = document.querySelector("#dashboard-upload-line");
   const downloadArea = document.querySelector("#dashboard-download-area");
   if (!downloadLine || !uploadLine || !downloadArea) return;
 
-  const demandFactor = ready && activeUsers > 0
-    ? Math.min(1.6, Math.max(0.55, activeUsers / 5))
-    : 0;
-  const download = estimatedTrafficShape.download.map((value) => value * demandFactor);
-  const upload = estimatedTrafficShape.upload.map((value) => value * demandFactor);
+  const sourceSeries = controlPlane.telemetry?.networkSeries || [];
+  const plottedSeries = sourceSeries.slice(-288);
+  const download = plottedSeries.length
+    ? plottedSeries.map((point) => Number(point.downloadBps || 0) / 1_000_000)
+    : [0, 0];
+  const upload = plottedSeries.length
+    ? plottedSeries.map((point) => Number(point.uploadBps || 0) / 1_000_000)
+    : [0, 0];
   const peak = Math.max(...download, ...upload, 0);
-  const axisMax = Math.max(2, Math.ceil(peak / 2) * 2);
+  const axisMax = Math.max(1, Math.ceil(peak));
   const downloadPath = trafficPath(download, axisMax);
   const uploadPath = trafficPath(upload, axisMax);
 
@@ -265,18 +347,29 @@ function renderNetworkTrend({ activeUsers, ready }) {
     const element = document.querySelector(selector);
     if (element) element.textContent = value;
   };
-  setText("#dashboard-download-total", `${estimatedGigabytes(download).toFixed(1)} GB`);
-  setText("#dashboard-upload-total", `${estimatedGigabytes(upload).toFixed(1)} GB`);
+  const sampledDownloadBytes = plottedSeries.reduce((sum, point) => sum + Number(point.downloadBps || 0) * 300 / 8, 0);
+  const sampledUploadBytes = plottedSeries.reduce((sum, point) => sum + Number(point.uploadBps || 0) * 300 / 8, 0);
+  setText("#dashboard-download-total", formatBytes(sampledDownloadBytes));
+  setText("#dashboard-upload-total", formatBytes(sampledUploadBytes));
   setText("#dashboard-traffic-peak", `${peak.toFixed(1)} Mbps`);
   setText(
     "#dashboard-traffic-current",
     `${((download.at(-1) || 0) + (upload.at(-1) || 0)).toFixed(1)} Mbps`
   );
-  setText("#dashboard-trend-updated", ready ? "已生成样例" : "等待 Runtime");
+  setText("#dashboard-trend-updated", plottedSeries.length
+    ? `最近采样 ${new Date(plottedSeries.at(-1).recordedAt).toLocaleString("zh-CN")}`
+    : "等待首次采样");
+  const telemetryStatus = document.querySelector("#dashboard-telemetry-status");
+  if (telemetryStatus) {
+    telemetryStatus.className = `status-badge ${plottedSeries.length ? "good" : "neutral"}`;
+    telemetryStatus.innerHTML = `<i></i>${plottedSeries.length ? "真实遥测" : "等待遥测"}`;
+  }
   setText(
     "#dashboard-chart-description",
-    `估算样例：24 小时下行约 ${estimatedGigabytes(download).toFixed(1)} GB，`
-      + `上行约 ${estimatedGigabytes(upload).toFixed(1)} GB，样例峰值 ${peak.toFixed(1)} Mbps。`
+    plottedSeries.length
+      ? `主机网络遥测：采样下行 ${formatBytes(sampledDownloadBytes)}，`
+        + `采样上行 ${formatBytes(sampledUploadBytes)}，峰值 ${peak.toFixed(1)} Mbps。`
+      : "尚未收到主机网络遥测。"
   );
 
   const chartY = document.querySelector("#dashboard-chart-y");
@@ -290,15 +383,18 @@ function renderNetworkTrend({ activeUsers, ready }) {
   }
   const chartX = document.querySelector("#dashboard-chart-x");
   if (chartX) {
-    const now = new Date();
+    const lastPoint = plottedSeries.at(-1)?.recordedAt ? new Date(plottedSeries.at(-1).recordedAt) : new Date();
+    const firstPoint = plottedSeries.length > 1 && plottedSeries[0]?.recordedAt
+      ? new Date(plottedSeries[0].recordedAt)
+      : new Date(lastPoint.getTime() - (controlPlane.telemetry?.windowHours || 24) * 60 * 60 * 1000);
     const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false
     });
-    chartX.innerHTML = [-24, -18, -12, -6, 0].map((hours, index, ticks) => {
-      if (index === ticks.length - 1) return "<span>现在</span>";
-      const tick = new Date(now.getTime() + hours * 60 * 60 * 1000);
+    chartX.innerHTML = [0, 0.25, 0.5, 0.75, 1].map((ratio, index, ticks) => {
+      if (index === ticks.length - 1) return "<span>最新</span>";
+      const tick = new Date(firstPoint.getTime() + (lastPoint.getTime() - firstPoint.getTime()) * ratio);
       return `<span>${timeFormatter.format(tick)}</span>`;
     }).join("");
   }
@@ -313,14 +409,6 @@ function trafficPath(values, maxValue) {
     const y = bottom - (value / maxValue) * (bottom - top);
     return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
   }).join(" ");
-}
-
-function estimatedGigabytes(values) {
-  const intervalSeconds = 2 * 60 * 60;
-  const megabits = values.slice(1).reduce((total, value, index) => (
-    total + ((values[index] + value) / 2) * intervalSeconds
-  ), 0);
-  return megabits / 8 / 1000;
 }
 
 function renderHosts() {

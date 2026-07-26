@@ -5,7 +5,7 @@ RAYLINK_SERVER="${RAYLINK_SERVER:-}"
 RAYLINK_ENROLL_TOKEN="${RAYLINK_ENROLL_TOKEN:-}"
 RAYLINK_NODE_ROOT="${RAYLINK_NODE_ROOT:-/opt/raylink-node}"
 RAYLINK_NODE_VERSION="${RAYLINK_NODE_VERSION:-22}"
-SING_BOX_VERSION="${SING_BOX_VERSION:-1.13.14}"
+SING_BOX_VERSION="${SING_BOX_VERSION:-1.13.12}"
 
 fail() {
   printf 'RayLink Node 安装失败：%s\n' "$1" >&2
@@ -56,6 +56,12 @@ if ! command -v sing-box >/dev/null 2>&1; then
   curl -fsSL https://sing-box.app/install.sh | sh -s -- --version "$SING_BOX_VERSION"
 fi
 sing_box_bin="$(command -v sing-box)"
+
+# The official package can enable its own runtime unit. RayLink owns the
+# configuration lifecycle, so keep exactly one sing-box service active.
+if systemctl list-unit-files sing-box.service >/dev/null 2>&1; then
+  systemctl disable --now sing-box.service >/dev/null 2>&1 || true
+fi
 
 {
   printf 'RAYLINK_SERVER=%s\n' "$RAYLINK_SERVER"

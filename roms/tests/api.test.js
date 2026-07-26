@@ -87,6 +87,32 @@ test("production initialization can start without known demo users", async (t) =
   assert.equal("plans" in body, false);
 });
 
+test("authenticated bootstrap reports current local host telemetry", async (t) => {
+  const testApp = await startTestApp({
+    telemetryProvider: async () => ({
+      cpuPercent: 21.4,
+      memoryUsedBytes: 3_000,
+      memoryTotalBytes: 8_000,
+      networkRxBytes: 40_000,
+      networkTxBytes: 20_000,
+      networkRxBps: 640_000,
+      networkTxBps: 160_000,
+      serviceStatus: "running"
+    })
+  });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const response = await api(testApp.baseUrl, cookie, "/api/bootstrap");
+  const body = await response.json();
+  const localHost = body.hosts.find((host) => host.id === "local");
+
+  assert.equal(localHost.telemetry.cpuPercent, 21.4);
+  assert.equal(localHost.telemetry.memoryUsedBytes, 3_000);
+  assert.equal(localHost.telemetry.serviceStatus, "running");
+  assert.equal(body.telemetry.networkSeries.at(-1).downloadBps, 640_000);
+});
+
 test("admin creates and updates a user-owned entitlement", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -165,10 +191,10 @@ test("admin previews and publishes the current database snapshot", async (t) => 
   const runtimeAdapter = {
     async publish(publication) {
       publications.push(publication);
-      return { state: "running", mode: "test", runtimeVersion: "1.13.14" };
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
     },
     async status() {
-      return { state: "running", mode: "test", runtimeVersion: "1.13.14" };
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
     }
   };
   const testApp = await startTestApp({ runtimeAdapter });
@@ -198,7 +224,7 @@ test("admin detects sing-box, enables a protocol profile and triggers one-click 
     async status() {
       return {
         installed: installCalls > 0,
-        version: installCalls > 0 ? "1.13.14" : null,
+        version: installCalls > 0 ? "1.13.12" : null,
         platform: "darwin",
         architecture: "arm64",
         tags: installCalls > 0 ? ["with_quic", "with_utls"] : [],
@@ -225,7 +251,7 @@ test("admin detects sing-box, enables a protocol profile and triggers one-click 
 
   const installResponse = await api(testApp.baseUrl, cookie, "/api/runtime/install", { method: "POST" });
   assert.equal(installResponse.status, 200);
-  assert.equal((await installResponse.json()).version, "1.13.14");
+  assert.equal((await installResponse.json()).version, "1.13.12");
 
   const updateResponse = await api(testApp.baseUrl, cookie, "/api/runtime/protocols/vless", {
     method: "PATCH",
@@ -266,7 +292,7 @@ test("admin cannot enable Reality or QUIC transport when the sing-box build tags
     async status() {
       return {
         installed: true,
-        version: "1.13.14",
+        version: "1.13.12",
         platform: "linux",
         architecture: "amd64",
         tags: [],
@@ -470,7 +496,7 @@ test("admin creates a remote host and RayLink Node enrolls with a one-time token
       platform: "linux",
       architecture: "amd64",
       agentVersion: "0.1.0",
-      runtimeVersion: "1.13.14",
+      runtimeVersion: "1.13.12",
       buildTags: ["with_quic", "with_utls"]
     })
   });
@@ -495,8 +521,18 @@ test("admin creates a remote host and RayLink Node enrolls with a one-time token
     },
     body: JSON.stringify({
       runtimeState: "running",
-      runtimeVersion: "1.13.14",
-      agentVersion: "0.1.0"
+      runtimeVersion: "1.13.12",
+      agentVersion: "0.1.0",
+      telemetry: {
+        cpuPercent: 37.5,
+        memoryUsedBytes: 2_147_483_648,
+        memoryTotalBytes: 4_294_967_296,
+        networkRxBytes: 12_884_901_888,
+        networkTxBytes: 3_221_225_472,
+        networkRxBps: 12_500_000,
+        networkTxBps: 2_500_000,
+        serviceStatus: "running"
+      }
     })
   });
   assert.equal(heartbeatResponse.status, 200);
@@ -506,8 +542,25 @@ test("admin creates a remote host and RayLink Node enrolls with a one-time token
   const refreshed = await refreshedResponse.json();
   const onlineHost = refreshed.hosts.find((host) => host.id === created.host.id);
   assert.equal(onlineHost.status, "online");
-  assert.equal(onlineHost.runtimeVersion, "1.13.14");
+  assert.equal(onlineHost.runtimeVersion, "1.13.12");
   assert.ok(onlineHost.lastSeenAt);
+  assert.deepEqual({
+    ...onlineHost.telemetry,
+    updatedAt: undefined
+  }, {
+    cpuPercent: 37.5,
+    memoryUsedBytes: 2_147_483_648,
+    memoryTotalBytes: 4_294_967_296,
+    networkRxBytes: 12_884_901_888,
+    networkTxBytes: 3_221_225_472,
+    networkRxBps: 12_500_000,
+    networkTxBps: 2_500_000,
+    serviceStatus: "running",
+    updatedAt: undefined
+  });
+  assert.ok(onlineHost.telemetry.updatedAt);
+  assert.equal(refreshed.telemetry.networkSeries.at(-1).downloadBps, 12_500_000);
+  assert.equal(refreshed.telemetry.networkSeries.at(-1).uploadBps, 2_500_000);
 });
 
 test("admin can replace a lost enrollment token before the remote host enrolls", async (t) => {
@@ -576,7 +629,7 @@ test("user subscription includes every online host allowed by the user node scop
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "x64",
-      runtimeVersion: "1.13.14"
+      runtimeVersion: "1.13.12"
     })
   });
   assert.equal(enrollResponse.status, 201);
@@ -615,7 +668,7 @@ test("user subscription includes every online host allowed by the user node scop
     {
       method: "POST",
       headers: { ...nodeHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ status: "succeeded", result: { runtimeVersion: "1.13.14" } })
+      body: JSON.stringify({ status: "succeeded", result: { runtimeVersion: "1.13.12" } })
     }
   );
   assert.equal(completionResponse.status, 200);
@@ -635,10 +688,10 @@ test("user subscription includes every online host allowed by the user node scop
 test("publishing queues a host-specific sing-box configuration for an enrolled RayLink Node", async (t) => {
   const runtimeAdapter = {
     async publish() {
-      return { state: "running", mode: "test", runtimeVersion: "1.13.14" };
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
     },
     async status() {
-      return { state: "running", mode: "test", runtimeVersion: "1.13.14" };
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
     }
   };
   const testApp = await startTestApp({ runtimeAdapter });
@@ -663,7 +716,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
       platform: "linux",
       architecture: "amd64",
       agentVersion: "0.1.0",
-      runtimeVersion: "1.13.14"
+      runtimeVersion: "1.13.12"
     })
   });
   const enrolled = await enrollResponse.json();
@@ -694,7 +747,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
     headers: { ...nodeHeaders, "content-type": "application/json" },
     body: JSON.stringify({
       status: "succeeded",
-      runtimeVersion: "1.13.14",
+      runtimeVersion: "1.13.12",
       validation: "sing-box"
     })
   });
@@ -809,8 +862,10 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.doesNotMatch(indexHtml, /方案管理/);
   assert.match(indexHtml, /网络流量趋势/);
   assert.match(indexHtml, /dashboard-network-trend/);
-  assert.match(indexHtml, /按启用账号数量缩放趋势样例/);
-  assert.doesNotMatch(indexHtml, /根据用户累计用量生成趋势样例/);
+  assert.match(indexHtml, /节点运行情况/);
+  assert.match(indexHtml, /dashboard-node-health-grid/);
+  assert.match(indexHtml, /来自 RayLink Node 的真实遥测/);
+  assert.doesNotMatch(indexHtml, /按启用账号数量缩放趋势样例/);
 
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);
@@ -819,7 +874,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   const nodeInstallerResponse = await fetch(`${testApp.baseUrl}/node/install.sh`);
   assert.equal(nodeInstallerResponse.status, 200);
   assert.match(nodeInstallerResponse.headers.get("content-type"), /text\/plain/);
-  assert.match(await nodeInstallerResponse.text(), /raylink-node\.service/);
+  const nodeInstaller = await nodeInstallerResponse.text();
+  assert.match(nodeInstaller, /raylink-node\.service/);
+  assert.match(nodeInstaller, /systemctl disable --now sing-box\.service/);
 
   const nodeRuntimeResponse = await fetch(`${testApp.baseUrl}/node/raylink-node.mjs`);
   assert.equal(nodeRuntimeResponse.status, 200);

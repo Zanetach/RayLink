@@ -1,4 +1,4 @@
-const sourceRoot = "https://github.com/SagerNet/sing-box/tree/v1.13.14";
+const sourceRoot = "https://github.com/SagerNet/sing-box/tree/v1.13.12";
 const docsRoot = "https://sing-box.sagernet.org/configuration/inbound";
 
 export const protocolCatalog = [

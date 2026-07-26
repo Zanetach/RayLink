@@ -92,7 +92,7 @@ test("runtime manager rejects a concurrent publication", async (t) => {
   const adapter = {
     async publish() {
       await gate;
-      return { mode: "test", runtimeVersion: "1.13.14" };
+      return { mode: "test", runtimeVersion: "1.13.12" };
     },
     async status() {
       return { state: "running", mode: "test" };

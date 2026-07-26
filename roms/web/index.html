@@ -6,7 +6,7 @@
   <meta name="description" content="RayLink sing-box 多用户控制台前端原型">
   <title>RayLink · sing-box control plane</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23242b28'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='24' font-weight='700' fill='%23e7ece8'%3ER/%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=0.1.0-20260726">
 </head>
 <body>
   <section class="auth-screen" id="admin-auth" aria-labelledby="admin-auth-title">
@@ -99,8 +99,8 @@
         </button>
         <div class="environment">
           <span class="environment-dot"></span>
-          <strong>单机环境</strong>
-          <span>RayLink / local Runtime</span>
+          <strong>多节点环境</strong>
+          <span>RayLink / Control Plane</span>
         </div>
         <div class="topbar-actions">
           <button class="command-button" id="global-search">
@@ -121,7 +121,7 @@
         <section class="view active" id="view-dashboard" data-view="dashboard">
           <div class="page-heading">
             <div>
-              <p class="eyebrow">单机控制面总览</p>
+              <p class="eyebrow">多节点控制面总览</p>
               <h1 id="dashboard-runtime-heading">Runtime 待配置</h1>
               <p id="dashboard-runtime-copy">正在读取 sing-box 运行状态。</p>
             </div>
@@ -140,17 +140,10 @@
           <div class="dashboard-grid">
             <section class="panel host-summary">
               <div class="panel-heading">
-                <div><p class="eyebrow">受管主机</p><h2 id="dashboard-host-name">本机 Runtime</h2></div>
+                <div><p class="eyebrow">受管主机</p><h2 id="dashboard-host-name">0 台主机</h2></div>
                 <button class="text-button" data-view-target="system">配置主机 <svg><use href="#i-arrow"/></svg></button>
               </div>
-              <div class="node-list">
-                <button class="node-row" data-open-host="local">
-                  <span class="node-pulse" id="dashboard-host-pulse"></span>
-                  <span class="node-name"><strong id="dashboard-host-address">尚未配置</strong><small id="dashboard-host-region">—</small></span>
-                  <span class="node-load"><i id="dashboard-host-load" style="--load:0%"></i></span>
-                  <span class="latency" id="dashboard-host-status">待配置</span>
-                </button>
-              </div>
+              <div class="node-list" id="dashboard-node-list"></div>
             </section>
 
             <section class="panel deployment-panel">
@@ -170,13 +163,24 @@
             </section>
           </div>
 
+          <section class="panel node-health-panel" aria-labelledby="dashboard-node-health-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">实时基础设施</p>
+                <h2 id="dashboard-node-health-title">节点运行情况</h2>
+              </div>
+              <span class="status-badge neutral"><i></i>来自 RayLink Node 的真实遥测</span>
+            </div>
+            <div class="node-health-grid" id="dashboard-node-health-grid"></div>
+          </section>
+
           <section class="panel traffic-panel dashboard-network-trend" id="dashboard-network-trend" aria-labelledby="dashboard-network-trend-title">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">网络流量趋势</p>
                 <h2 id="dashboard-network-trend-title">最近 24 小时</h2>
               </div>
-              <span class="status-badge neutral"><i></i>估算数据</span>
+              <span class="status-badge neutral" id="dashboard-telemetry-status"><i></i>等待遥测</span>
             </div>
             <div class="network-trend-summary" aria-label="网络流量摘要">
               <span><small>24h 下行</small><strong id="dashboard-download-total">—</strong></span>
@@ -192,7 +196,7 @@
               <div class="chart-y" id="dashboard-chart-y"><span>—</span><span>—</span><span>—</span><span>0</span></div>
               <svg viewBox="0 0 760 230" preserveAspectRatio="none" role="img" aria-labelledby="dashboard-chart-title dashboard-chart-description">
                 <title id="dashboard-chart-title">最近 24 小时网络流量趋势</title>
-                <desc id="dashboard-chart-description">估算样例，包含下行与上行两条速率曲线。</desc>
+                <desc id="dashboard-chart-description">来自受管主机的下行与上行速率曲线。</desc>
                 <g class="grid-lines"><path d="M0 20H760M0 83H760M0 146H760M0 209H760"/></g>
                 <path class="area-line down-area" id="dashboard-download-area" d="M0 209H760V230H0Z"/>
                 <path class="chart-line download" id="dashboard-download-line" d="M0 209H760"/>
@@ -201,8 +205,8 @@
               <div class="chart-x" id="dashboard-chart-x"><span>—</span><span>—</span><span>—</span><span>—</span><span>现在</span></div>
             </div>
             <div class="network-trend-note">
-              <span>当前按启用账号数量缩放趋势样例；接入 sing-box 流量采集器后切换为实时数据。</span>
-              <span id="dashboard-trend-updated">已生成样例</span>
+              <span>汇总各受管主机上报的网卡吞吐；这是主机总流量，不等同于单个用户计费流量。</span>
+              <span id="dashboard-trend-updated">等待首次采样</span>
             </div>
           </section>
         </section>
@@ -471,6 +475,6 @@
     <div class="toast" id="toast"><span><svg><use href="#i-check"/></svg></span><div><strong id="toast-title">已保存</strong><p id="toast-message">设置已经更新。</p></div></div>
   </div>
 
-  <script src="./app.js"></script>
+  <script src="./app.js?v=0.1.0-20260726"></script>
 </body>
 </html>

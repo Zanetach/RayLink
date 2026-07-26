@@ -9,7 +9,7 @@ test("runtime inspection parses version, platform and build tags", async () => {
     platform: "darwin",
     runner: async () => ({
       stdout: [
-        "sing-box version 1.13.14",
+        "sing-box version 1.13.12",
         "",
         "Environment: go1.26.5 darwin/arm64",
         "Tags: with_quic,with_utls,with_acme"
@@ -19,7 +19,7 @@ test("runtime inspection parses version, platform and build tags", async () => {
 
   assert.deepEqual(await installer.status(), {
     installed: true,
-    version: "1.13.14",
+    version: "1.13.12",
     platform: "darwin",
     architecture: "arm64",
     tags: ["with_quic", "with_utls", "with_acme"],
@@ -40,7 +40,7 @@ test("one-click installer uses the fixed official package command for macOS", as
         throw error;
       }
       if (file === "sing-box") {
-        return { stdout: "sing-box version 1.13.14\nEnvironment: go1.26.5 darwin/arm64\nTags: with_quic" };
+        return { stdout: "sing-box version 1.13.12\nEnvironment: go1.26.5 darwin/arm64\nTags: with_quic" };
       }
       return { stdout: "" };
     }
@@ -64,7 +64,7 @@ test("one-click installer uses the official sing-box installer on Linux", async 
         throw error;
       }
       if (file === "sing-box") {
-        return { stdout: "sing-box version 1.13.14\nEnvironment: go1.26.5 linux/amd64\nTags: with_quic" };
+        return { stdout: "sing-box version 1.13.12\nEnvironment: go1.26.5 linux/amd64\nTags: with_quic" };
       }
       return { stdout: "" };
     }
@@ -73,7 +73,7 @@ test("one-click installer uses the official sing-box installer on Linux", async 
   assert.equal((await installer.install()).installed, true);
   assert.deepEqual(calls[1], [
     "sh",
-    ["-c", "curl -fsSL https://sing-box.app/install.sh | sh -s -- --version 1.13.14"]
+    ["-c", "curl -fsSL https://sing-box.app/install.sh | sh -s -- --version 1.13.12"]
   ]);
 });
 
@@ -94,7 +94,7 @@ test("one-click installer rejects a concurrent package-manager run", async () =>
           error.code = "ENOENT";
           throw error;
         }
-        return { stdout: "sing-box version 1.13.14\nEnvironment: go1.26.5 darwin/arm64\nTags: with_quic" };
+        return { stdout: "sing-box version 1.13.12\nEnvironment: go1.26.5 darwin/arm64\nTags: with_quic" };
       }
       return { stdout: "" };
     }

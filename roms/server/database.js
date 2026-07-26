@@ -119,6 +119,27 @@ function userFromRow(row) {
   };
 }
 
+function finiteMetric(value, minimum, maximum) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
+}
+
+function normalizeTelemetry(input = {}) {
+  const serviceStatus = ["running", "stopped", "failed", "unknown"].includes(input.serviceStatus)
+    ? input.serviceStatus
+    : "unknown";
+  return {
+    cpuPercent: finiteMetric(input.cpuPercent, 0, 100),
+    memoryUsedBytes: finiteMetric(input.memoryUsedBytes, 0, Number.MAX_SAFE_INTEGER),
+    memoryTotalBytes: finiteMetric(input.memoryTotalBytes, 1, Number.MAX_SAFE_INTEGER),
+    networkRxBytes: finiteMetric(input.networkRxBytes, 0, Number.MAX_SAFE_INTEGER),
+    networkTxBytes: finiteMetric(input.networkTxBytes, 0, Number.MAX_SAFE_INTEGER),
+    networkRxBps: finiteMetric(input.networkRxBps, 0, Number.MAX_SAFE_INTEGER),
+    networkTxBps: finiteMetric(input.networkTxBps, 0, Number.MAX_SAFE_INTEGER),
+    serviceStatus
+  };
+}
+
 function hostFromRow(row) {
   const lastSeenAt = row.last_seen_at || null;
   const remoteOffline = (row.kind || "local") === "remote"
@@ -138,7 +159,18 @@ function hostFromRow(row) {
     runtimeVersion: row.runtime_version || null,
     buildTags: parseJson(row.build_tags_json, []),
     lastSeenAt,
-    enrolledAt: row.enrolled_at || null
+    enrolledAt: row.enrolled_at || null,
+    telemetry: {
+      cpuPercent: row.cpu_percent ?? null,
+      memoryUsedBytes: row.memory_used_bytes ?? null,
+      memoryTotalBytes: row.memory_total_bytes ?? null,
+      networkRxBytes: row.network_rx_bytes ?? null,
+      networkTxBytes: row.network_tx_bytes ?? null,
+      networkRxBps: row.network_rx_bps ?? null,
+      networkTxBps: row.network_tx_bps ?? null,
+      serviceStatus: row.service_status || "unknown",
+      updatedAt: row.metrics_updated_at || null
+    }
   };
 }
 
@@ -243,6 +275,15 @@ export class RayLinkStore {
         build_tags_json TEXT NOT NULL DEFAULT '[]',
         last_seen_at TEXT,
         enrolled_at TEXT,
+        cpu_percent REAL,
+        memory_used_bytes INTEGER,
+        memory_total_bytes INTEGER,
+        network_rx_bytes INTEGER,
+        network_tx_bytes INTEGER,
+        network_rx_bps REAL,
+        network_tx_bps REAL,
+        service_status TEXT,
+        metrics_updated_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -274,6 +315,21 @@ export class RayLinkStore {
       );
       CREATE INDEX IF NOT EXISTS node_tasks_host_status_created
       ON node_tasks(host_id, status, created_at);
+      CREATE TABLE IF NOT EXISTS host_metric_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        cpu_percent REAL,
+        memory_used_bytes INTEGER,
+        memory_total_bytes INTEGER,
+        network_rx_bytes INTEGER,
+        network_tx_bytes INTEGER,
+        network_rx_bps REAL,
+        network_tx_bps REAL,
+        service_status TEXT NOT NULL,
+        recorded_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS host_metric_samples_host_recorded
+      ON host_metric_samples(host_id, recorded_at);
     `);
     const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
@@ -304,7 +360,16 @@ export class RayLinkStore {
       ["runtime_version", "TEXT"],
       ["build_tags_json", "TEXT NOT NULL DEFAULT '[]'"],
       ["last_seen_at", "TEXT"],
-      ["enrolled_at", "TEXT"]
+      ["enrolled_at", "TEXT"],
+      ["cpu_percent", "REAL"],
+      ["memory_used_bytes", "INTEGER"],
+      ["memory_total_bytes", "INTEGER"],
+      ["network_rx_bytes", "INTEGER"],
+      ["network_tx_bytes", "INTEGER"],
+      ["network_rx_bps", "REAL"],
+      ["network_tx_bps", "REAL"],
+      ["service_status", "TEXT"],
+      ["metrics_updated_at", "TEXT"]
     ];
     for (const [column, definition] of hostMigrations) {
       if (!hostColumns.some((candidate) => candidate.name === column)) {
@@ -662,7 +727,98 @@ export class RayLinkStore {
       timestamp,
       hostId
     );
+    if (input.telemetry && typeof input.telemetry === "object") {
+      this.recordHostTelemetry(hostId, input.telemetry, timestamp);
+    }
     return this.getHost(hostId);
+  }
+
+  recordHostTelemetry(hostId, input = {}, timestamp = nowIso()) {
+    const host = this.getHost(hostId);
+    if (!host) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    const telemetry = normalizeTelemetry(input);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`
+        UPDATE hosts
+        SET cpu_percent = ?, memory_used_bytes = ?, memory_total_bytes = ?,
+            network_rx_bytes = ?, network_tx_bytes = ?,
+            network_rx_bps = ?, network_tx_bps = ?, service_status = ?,
+            metrics_updated_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        telemetry.cpuPercent,
+        telemetry.memoryUsedBytes,
+        telemetry.memoryTotalBytes,
+        telemetry.networkRxBytes,
+        telemetry.networkTxBytes,
+        telemetry.networkRxBps,
+        telemetry.networkTxBps,
+        telemetry.serviceStatus,
+        timestamp,
+        timestamp,
+        hostId
+      );
+      this.db.prepare(`
+        INSERT INTO host_metric_samples (
+          host_id, cpu_percent, memory_used_bytes, memory_total_bytes,
+          network_rx_bytes, network_tx_bytes, network_rx_bps, network_tx_bps,
+          service_status, recorded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        hostId,
+        telemetry.cpuPercent,
+        telemetry.memoryUsedBytes,
+        telemetry.memoryTotalBytes,
+        telemetry.networkRxBytes,
+        telemetry.networkTxBytes,
+        telemetry.networkRxBps,
+        telemetry.networkTxBps,
+        telemetry.serviceStatus,
+        timestamp
+      );
+      this.db.prepare(`
+        DELETE FROM host_metric_samples
+        WHERE recorded_at < ?
+      `).run(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getHost(hostId).telemetry;
+  }
+
+  telemetryOverview(hours = 24) {
+    const boundedHours = Math.min(168, Math.max(1, Number(hours) || 24));
+    const since = new Date(Date.now() - boundedHours * 60 * 60 * 1000).toISOString();
+    const rows = this.db.prepare(`
+      WITH per_host AS (
+        SELECT
+          (unixepoch(recorded_at) / 300) * 300 AS bucket_epoch,
+          host_id,
+          AVG(COALESCE(network_rx_bps, 0)) AS download_bps,
+          AVG(COALESCE(network_tx_bps, 0)) AS upload_bps
+        FROM host_metric_samples
+        WHERE recorded_at >= ?
+        GROUP BY bucket_epoch, host_id
+      )
+      SELECT
+        bucket_epoch,
+        SUM(download_bps) AS download_bps,
+        SUM(upload_bps) AS upload_bps
+      FROM per_host
+      GROUP BY bucket_epoch
+      ORDER BY bucket_epoch
+    `).all(since);
+    return {
+      windowHours: boundedHours,
+      networkSeries: rows.map((row) => ({
+        recordedAt: new Date(Number(row.bucket_epoch) * 1000).toISOString(),
+        downloadBps: Number(row.download_bps || 0),
+        uploadBps: Number(row.upload_bps || 0)
+      }))
+    };
   }
 
   queueNodeTask(hostId, kind, payload) {
