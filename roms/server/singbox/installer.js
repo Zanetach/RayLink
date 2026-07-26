@@ -4,6 +4,7 @@ import { platform as currentPlatform } from "node:os";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
+const TARGET_VERSION = "1.13.12";
 
 export class SingBoxInstaller {
   constructor({
@@ -44,9 +45,11 @@ export class SingBoxInstaller {
     this.installing = true;
     try {
       const existing = await this.status();
-      if (existing.installed) return { ...existing, alreadyInstalled: true };
+      if (existing.installed && existing.version === TARGET_VERSION) {
+        return { ...existing, alreadyInstalled: true };
+      }
       if (this.platform === "darwin") {
-        await this.runner("brew", ["install", "sing-box"], {
+        await this.runner("brew", [existing.installed ? "upgrade" : "install", "sing-box"], {
           timeout: 10 * 60 * 1000,
           maxBuffer: 8 * 1024 * 1024
         });
@@ -68,6 +71,13 @@ export class SingBoxInstaller {
       const installed = await this.status();
       if (!installed.installed) {
         throw installerError("INSTALLATION_NOT_DETECTED", "安装命令已完成，但未找到 sing-box 可执行文件", 500);
+      }
+      if (installed.version !== TARGET_VERSION) {
+        throw installerError(
+          "INSTALLATION_VERSION_MISMATCH",
+          `期望 sing-box ${TARGET_VERSION}，实际检测到 ${installed.version || "未知版本"}`,
+          500
+        );
       }
       return installed;
     } catch (error) {

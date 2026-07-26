@@ -1,4 +1,7 @@
 const users = [];
+let bootstrapRefreshTimer = null;
+let bootstrapRefreshInFlight = false;
+const requiredNodeAgentVersion = "0.2.0";
 
 const clientCatalog = {
   "mihomo": { name: "Mihomo", platforms: "macOS / Windows / Android", action: "一键导入" },
@@ -169,8 +172,12 @@ function renderRuntime() {
   const railStatus = document.querySelector(".rail-status");
   const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
   const deploymentVersion = activeDeployment?.version || "尚未发布";
-  const healthy = ["running", "staged"].includes(runtime.state);
-  railStatus.querySelector("strong").textContent = healthy ? "Runtime 已就绪" : "Runtime 待配置";
+  const healthy = runtime.state === "running";
+  railStatus.querySelector("strong").textContent = healthy
+    ? "Runtime 运行中"
+    : runtime.state === "staged"
+      ? "Runtime 已暂存"
+      : "Runtime 待配置";
   railStatus.querySelector("small").textContent = runtime.runtimeVersion
     ? `sing-box ${runtime.runtimeVersion}`
     : `${runtime.mode} · ${runtime.state}`;
@@ -194,11 +201,13 @@ function renderDashboard() {
   const host = hosts.find((candidate) => candidate.id === "local") || hosts[0];
   const latestAttempt = controlPlane.deployments[0];
   const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
-  const ready = ["running", "staged"].includes(runtime.state);
+  const ready = runtime.state === "running";
   const readyHosts = hosts.filter((candidate) => {
     if (candidate.id === "local") return ready;
     return candidate.status === "online"
-      && !["stopped", "failed"].includes(candidate.telemetry?.serviceStatus);
+      && candidate.telemetry?.serviceStatus === "running"
+      && candidate.telemetry?.updatedAt
+      && Date.now() - new Date(candidate.telemetry.updatedAt).getTime() <= 30_000;
   });
   const activeUsers = users.filter((user) => ["active", "warning"].includes(user.state)).length;
   const setText = (selector, value) => {
@@ -210,7 +219,9 @@ function renderDashboard() {
     : "尚未添加 Runtime");
   setText("#dashboard-runtime-copy", readyHosts.length
     ? `控制面正在管理 ${hosts.length} 台主机；节点指标来自本机采样与 RayLink Node 心跳。`
-    : "完成主机配置后，在“配置发布”中生成并校验第一份受管配置。");
+    : hosts.length
+      ? `控制面正在管理 ${hosts.length} 台主机，但目前没有实际运行的 Runtime。`
+      : "完成主机配置后，在“配置发布”中生成并校验第一份受管配置。");
   const runtimeCount = document.querySelector("#dashboard-runtime-count");
   if (runtimeCount) runtimeCount.innerHTML = `${readyHosts.length}<small>/ ${hosts.length}</small>`;
   setText("#dashboard-runtime-mode", `${runtime.mode} · ${runtime.state}`);
@@ -262,10 +273,19 @@ function hostStatusView(host, runtime, localReady) {
   if (host.id === "local") {
     return localReady
       ? { label: "运行中", className: "good" }
-      : { label: runtime.state === "not-configured" ? "待发布" : "异常", className: "warning" };
+      : runtime.state === "staged"
+        ? { label: "已暂存", className: "neutral" }
+        : { label: runtime.state === "not-configured" ? "待发布" : "异常", className: "warning" };
   }
   if (host.status === "offline") return { label: "离线", className: "danger" };
   if (host.status === "pending") return { label: "等待接入", className: "neutral" };
+  if (host.agentVersion !== requiredNodeAgentVersion) {
+    return { label: "Node 待升级", className: "warning" };
+  }
+  if (!host.telemetry?.updatedAt || Date.now() - new Date(host.telemetry.updatedAt).getTime() > 30_000) {
+    return { label: "状态过期", className: "warning" };
+  }
+  if (host.telemetry.serviceStatus === "unknown") return { label: "待上报", className: "neutral" };
   if (host.status === "degraded" || ["stopped", "failed"].includes(host.telemetry?.serviceStatus)) {
     return { label: "服务异常", className: "warning" };
   }
@@ -314,7 +334,7 @@ function renderDashboardNodes({ hosts, runtime, ready }) {
           <span><small>CPU</small><strong>${Number.isFinite(telemetry.cpuPercent) ? `${telemetry.cpuPercent.toFixed(1)}%` : "—"}</strong><i style="--load:${telemetry.cpuPercent || 0}%"></i></span>
           <span><small>内存</small><strong>${memoryPercent === null ? "—" : `${memoryPercent.toFixed(1)}%`}</strong><em>${formatBytes(telemetry.memoryUsedBytes)} / ${formatBytes(telemetry.memoryTotalBytes)}</em></span>
           <span><small>网络</small><strong>${formatBitRate(networkTotal)}</strong><em>↓ ${formatBitRate(telemetry.networkRxBps)} · ↑ ${formatBitRate(telemetry.networkTxBps)}</em></span>
-          <span><small>sing-box 服务</small><strong>${escapeHtml({ running: "运行中", stopped: "已停止", failed: "异常", unknown: "待上报" }[telemetry.serviceStatus] || "待上报")}</strong><em>${escapeHtml(runtimeVersion)}</em></span>
+          <span><small>sing-box 服务</small><strong>${escapeHtml({ running: "运行中", staged: "已暂存", stopped: "已停止", failed: "异常", unknown: "待上报" }[telemetry.serviceStatus] || "待上报")}</strong><em>${escapeHtml(runtimeVersion)}</em></span>
         </div>
       </article>`;
   }).join("");
@@ -347,10 +367,10 @@ function renderNetworkTrend() {
     const element = document.querySelector(selector);
     if (element) element.textContent = value;
   };
-  const sampledDownloadBytes = plottedSeries.reduce((sum, point) => sum + Number(point.downloadBps || 0) * 300 / 8, 0);
-  const sampledUploadBytes = plottedSeries.reduce((sum, point) => sum + Number(point.uploadBps || 0) * 300 / 8, 0);
-  setText("#dashboard-download-total", formatBytes(sampledDownloadBytes));
-  setText("#dashboard-upload-total", formatBytes(sampledUploadBytes));
+  const currentDownloadBps = Number(plottedSeries.at(-1)?.downloadBps || 0);
+  const currentUploadBps = Number(plottedSeries.at(-1)?.uploadBps || 0);
+  setText("#dashboard-download-total", formatBitRate(currentDownloadBps));
+  setText("#dashboard-upload-total", formatBitRate(currentUploadBps));
   setText("#dashboard-traffic-peak", `${peak.toFixed(1)} Mbps`);
   setText(
     "#dashboard-traffic-current",
@@ -367,8 +387,8 @@ function renderNetworkTrend() {
   setText(
     "#dashboard-chart-description",
     plottedSeries.length
-      ? `主机网络遥测：采样下行 ${formatBytes(sampledDownloadBytes)}，`
-        + `采样上行 ${formatBytes(sampledUploadBytes)}，峰值 ${peak.toFixed(1)} Mbps。`
+      ? `主机网络遥测：当前下行 ${formatBitRate(currentDownloadBps)}，`
+        + `当前上行 ${formatBitRate(currentUploadBps)}，峰值 ${peak.toFixed(1)} Mbps。`
       : "尚未收到主机网络遥测。"
   );
 
@@ -425,11 +445,15 @@ function renderHosts() {
   elements.hostBody.innerHTML = hosts.map((host) => {
     const isLocal = host.kind !== "remote";
     const healthy = isLocal
-      ? ["running", "staged"].includes(runtime.state)
-      : host.status === "online";
+      ? runtime.state === "running"
+      : host.status === "online"
+        && host.agentVersion === requiredNodeAgentVersion
+        && host.telemetry?.serviceStatus === "running";
     const status = isLocal
-      ? (healthy ? "已就绪" : "待配置")
-      : ({ pending: "等待接入", online: "在线", degraded: "发布失败" }[host.status] || "离线");
+      ? (healthy ? "运行中" : runtime.state === "staged" ? "已暂存" : "待配置")
+      : host.agentVersion && host.agentVersion !== requiredNodeAgentVersion
+        ? "Node 待升级"
+        : ({ pending: "等待接入", online: "在线", degraded: "发布失败" }[host.status] || "离线");
     const statusClass = healthy ? "good" : host.status === "degraded" ? "warning" : "neutral";
     const lastSeen = host.lastSeenAt
       ? new Intl.DateTimeFormat("zh-CN", {
@@ -824,6 +848,16 @@ function openNewUser() {
 function hostDrawerMarkup(hostId) {
   const host = controlPlane.hosts.find((item) => item.id === hostId);
   const isRemote = host.kind === "remote";
+  const nodeNeedsUpgrade = isRemote
+    && host.enrolledAt
+    && host.agentVersion !== requiredNodeAgentVersion;
+  const nodeUpgradeCommand = [
+    'raylink_node_tmp="$(mktemp)"',
+    `curl -fsSL ${shellQuote(`${location.origin}/node/raylink-node.mjs`)} -o "$raylink_node_tmp"`,
+    'sudo install -m 0755 "$raylink_node_tmp" /opt/raylink-node/raylink-node.mjs',
+    'rm -f "$raylink_node_tmp"',
+    "sudo systemctl restart raylink-node.service"
+  ].join(" && ");
   const runtimeCopy = isRemote
     ? `${host.status === "online" ? "在线" : host.status === "pending" ? "等待接入" : "需要检查"} · ${host.runtimeVersion || host.agentVersion || "尚未上报版本"}`
     : `${controlPlane.runtime?.mode || "dry-run"} · ${controlPlane.runtime?.configPath || "尚未生成配置"}`;
@@ -839,6 +873,9 @@ function hostDrawerMarkup(hostId) {
       <div class="switch-row"><div><strong>${isRemote ? "RayLink Node" : "Runtime 模式"}</strong><small>${escapeHtml(runtimeCopy)}</small></div><span class="status-badge neutral"><i></i>${escapeHtml(isRemote ? host.status : controlPlane.runtime?.state || "unknown")}</span></div>
       ${isRemote && !host.enrolledAt
         ? `<button type="button" class="button secondary" data-reissue-host="${escapeHtml(host.id)}">${icon("refresh")}重新生成接入命令</button><p class="field-hint">新的接入令牌会立即替换之前的令牌。</p>`
+        : ""}
+      ${nodeNeedsUpgrade
+        ? `<p class="drawer-section-label">Node 升级</p><p class="field-hint">当前 ${escapeHtml(host.agentVersion || "旧版")} 不会上报正式版所需服务遥测，升级前不会进入用户配置。</p><pre class="advanced-preview"><code id="node-upgrade-command">${escapeHtml(nodeUpgradeCommand)}</code></pre><button type="button" class="button secondary" data-copy-target="node-upgrade-command">${icon("copy")}复制升级命令</button>`
         : ""}
     </form>`;
 }
@@ -1633,6 +1670,22 @@ async function enterControlPlane() {
   syncResponsiveNavigation();
   const initialRoute = location.hash.replace(/^#\//, "") || "dashboard";
   navigate(initialRoute, false);
+  if (!bootstrapRefreshTimer) {
+    bootstrapRefreshTimer = setInterval(async () => {
+      if (document.hidden || bootstrapRefreshInFlight) return;
+      bootstrapRefreshInFlight = true;
+      try {
+        await loadBootstrap();
+      } catch (error) {
+        if (error.status === 401) {
+          clearInterval(bootstrapRefreshTimer);
+          bootstrapRefreshTimer = null;
+        }
+      } finally {
+        bootstrapRefreshInFlight = false;
+      }
+    }, 10_000);
+  }
 }
 
 elements.authForm.addEventListener("submit", async (event) => {

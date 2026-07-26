@@ -110,6 +110,8 @@ sing-box check -c data/sing-box/config.json
 4. 等待主机状态变为“在线”，然后在配置工作台执行一次发布。
 
 接入前若命令丢失，可在该主机详情中重新生成；旧令牌会立即失效。节点注册成功后不能通过此入口替换节点身份。
+升级控制面后，如果已有主机显示“Node 待升级”，可打开主机详情复制升级命令；升级完成并重新上报服务遥测前，
+该节点不会进入正式用户配置。
 
 远程 VPS 必须能通过 HTTPS 访问 `RAYLINK_PUBLIC_ORIGIN`。节点凭据保存在
 `/etc/raylink-node/node.json`（`0600`），受管 sing-box 配置位于

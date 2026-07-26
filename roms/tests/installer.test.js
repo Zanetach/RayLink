@@ -77,6 +77,31 @@ test("one-click installer uses the official sing-box installer on Linux", async 
   ]);
 });
 
+test("one-click installer replaces a mismatched Linux sing-box version", async () => {
+  const calls = [];
+  let version = "1.12.9";
+  const installer = new SingBoxInstaller({
+    binaryPath: "sing-box",
+    platform: "linux",
+    runner: async (file, args) => {
+      calls.push([file, args]);
+      if (file === "sh") {
+        version = "1.13.12";
+        return { stdout: "" };
+      }
+      return {
+        stdout: `sing-box version ${version}\nEnvironment: go1.26.5 linux/amd64\nTags: with_quic`
+      };
+    }
+  });
+
+  assert.equal((await installer.install()).version, "1.13.12");
+  assert.deepEqual(calls[1], [
+    "sh",
+    ["-c", "curl -fsSL https://sing-box.app/install.sh | sh -s -- --version 1.13.12"]
+  ]);
+});
+
 test("one-click installer rejects a concurrent package-manager run", async () => {
   let releaseProbe;
   const probeBlocked = new Promise((resolve) => {

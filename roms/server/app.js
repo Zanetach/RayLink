@@ -142,10 +142,29 @@ export async function createRayLinkApp(options) {
   const localTelemetryCollector = new LocalTelemetryCollector();
   const telemetryProvider = options.telemetryProvider
     || ((runtime) => localTelemetryCollector.collect(runtime));
+  const telemetryIntervalMs = Math.max(10, Number(options.telemetryIntervalMs || 10_000));
+  let telemetryTimer = null;
+  let telemetrySamplePromise = null;
+  const sampleLocalTelemetry = () => {
+    if (telemetrySamplePromise) return telemetrySamplePromise;
+    telemetrySamplePromise = (async () => {
+      try {
+        const runtime = await runtimeManager.status();
+        store.recordHostTelemetry("local", await telemetryProvider(runtime));
+      } catch (error) {
+        console.warn(`[RayLink] Local telemetry sample failed: ${error.message}`);
+      }
+    })().finally(() => {
+      telemetrySamplePromise = null;
+    });
+    return telemetrySamplePromise;
+  };
   const installer = options.installer || new SingBoxInstaller({
     binaryPath: options.singBoxBinary || "sing-box"
   });
   const authAttempts = new Map();
+  const nodeHeartbeatWrites = new Map();
+  const nodeHeartbeatMinIntervalMs = Math.max(0, Number(options.nodeHeartbeatMinIntervalMs ?? 5_000));
   const authWindowMs = 10 * 60 * 1000;
   const authAttemptLimit = 8;
   const clientAddress = (request) => {
@@ -260,8 +279,19 @@ export async function createRayLinkApp(options) {
         if (request.method === "GET" && url.pathname === "/api/portal/config/sing-box") {
           const credential = store.clientCredential(sessionUser.id);
           const expiresAt = new Date(`${credential.expiresAt}T23:59:59.999Z`);
+          const runtime = await runtimeManager.status();
+          const allowStagedClientConfigs = options.allowStagedClientConfigs
+            ?? process.env.NODE_ENV !== "production";
           const eligibleHosts = store.listClientHosts().filter((host) => {
-            const connected = host.id === "local" || ["online", "degraded"].includes(host.status);
+            const metricsAgeMs = host.telemetry.updatedAt
+              ? Date.now() - new Date(host.telemetry.updatedAt).getTime()
+              : Number.POSITIVE_INFINITY;
+            const connected = host.id === "local"
+              ? runtime.state === "running"
+                || allowStagedClientConfigs
+              : host.status === "online"
+                && host.telemetry.serviceStatus === "running"
+                && metricsAgeMs <= 30_000;
             const regionAllowed = credential.nodeScope.includes("all")
               || credential.nodeScope.includes(host.region);
             return connected && regionAllowed;
@@ -317,7 +347,18 @@ export async function createRayLinkApp(options) {
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/node/heartbeat") {
-          store.heartbeatNode(node.id, await readJson(request));
+          const heartbeat = await readJson(request);
+          const timestamp = Date.now();
+          const lastWriteAt = nodeHeartbeatWrites.get(node.id) || 0;
+          if (timestamp - lastWriteAt < nodeHeartbeatMinIntervalMs) {
+            sendJson(response, 429, {
+              error: { code: "HEARTBEAT_RATE_LIMITED", message: "节点心跳过于频繁" },
+              nextPollSeconds: Math.ceil(nodeHeartbeatMinIntervalMs / 1_000)
+            }, { "retry-after": String(Math.ceil(nodeHeartbeatMinIntervalMs / 1_000)) });
+            return;
+          }
+          store.heartbeatNode(node.id, heartbeat);
+          nodeHeartbeatWrites.set(node.id, timestamp);
           sendJson(response, 200, { nextPollSeconds: 10 });
           return;
         }
@@ -363,7 +404,6 @@ export async function createRayLinkApp(options) {
         if (request.method === "GET" && url.pathname === "/api/bootstrap") {
           const installation = await installer.status();
           const runtime = await runtimeManager.status();
-          store.recordHostTelemetry("local", await telemetryProvider(runtime));
           sendJson(response, 200, {
             ...store.bootstrap(admin),
             telemetry: store.telemetryOverview(),
@@ -536,8 +576,16 @@ export async function createRayLinkApp(options) {
           resolve();
         });
       });
+      await sampleLocalTelemetry();
+      telemetryTimer = setInterval(sampleLocalTelemetry, telemetryIntervalMs);
+      telemetryTimer.unref?.();
     },
     async close() {
+      if (telemetryTimer) {
+        clearInterval(telemetryTimer);
+        telemetryTimer = null;
+      }
+      if (telemetrySamplePromise) await telemetrySamplePromise;
       if (server.listening) {
         await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       }

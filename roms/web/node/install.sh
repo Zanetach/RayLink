@@ -20,6 +20,12 @@ printf '%s' "$RAYLINK_SERVER" | grep -Eq '^https?://[A-Za-z0-9._:-]+$' || fail "
 printf '%s' "$RAYLINK_ENROLL_TOKEN" | grep -Eq '^[A-Za-z0-9_-]{20,256}$' || fail "接入令牌格式无效"
 command -v curl >/dev/null 2>&1 || fail "需要 curl"
 command -v tar >/dev/null 2>&1 || fail "需要 tar"
+command -v systemctl >/dev/null 2>&1 || fail "需要 systemd"
+
+if systemctl list-unit-files sing-box.service >/dev/null 2>&1 \
+  && systemctl is-active --quiet sing-box.service; then
+  fail "检测到现有 sing-box.service 正在运行；为避免业务中断，请先迁移或停止现有服务后重试"
+fi
 
 machine_arch="$(uname -m)"
 case "$machine_arch" in
@@ -52,15 +58,25 @@ fi
 curl -fsSL "$RAYLINK_SERVER/node/raylink-node.mjs" -o "$RAYLINK_NODE_ROOT/raylink-node.mjs"
 chmod 0755 "$RAYLINK_NODE_ROOT/raylink-node.mjs"
 
-if ! command -v sing-box >/dev/null 2>&1; then
+installed_sing_box_version=""
+if command -v sing-box >/dev/null 2>&1; then
+  installed_sing_box_version="$(sing-box version 2>/dev/null | awk 'NR == 1 { print $3 }')"
+fi
+if [ "$installed_sing_box_version" != "$SING_BOX_VERSION" ]; then
   curl -fsSL https://sing-box.app/install.sh | sh -s -- --version "$SING_BOX_VERSION"
 fi
 sing_box_bin="$(command -v sing-box)"
+actual_sing_box_version="$("$sing_box_bin" version 2>/dev/null | awk 'NR == 1 { print $3 }')"
+[ "$actual_sing_box_version" = "$SING_BOX_VERSION" ] \
+  || fail "sing-box 版本不匹配：期望 $SING_BOX_VERSION，实际 ${actual_sing_box_version:-未知}"
 
 # The official package can enable its own runtime unit. RayLink owns the
 # configuration lifecycle, so keep exactly one sing-box service active.
 if systemctl list-unit-files sing-box.service >/dev/null 2>&1; then
-  systemctl disable --now sing-box.service >/dev/null 2>&1 || true
+  if systemctl is-active --quiet sing-box.service; then
+    fail "官方安装过程启动了 sing-box.service；为避免服务冲突，已停止后续接管，请检查现有配置"
+  fi
+  systemctl disable sing-box.service >/dev/null 2>&1 || true
 fi
 
 {

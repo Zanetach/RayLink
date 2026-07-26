@@ -66,8 +66,10 @@ export class LocalTelemetryCollector {
       networkTxBytes: sample.networkTxBytes,
       networkRxBps: byteRate(sample.networkRxBytes, this.previous?.sample.networkRxBytes),
       networkTxBps: byteRate(sample.networkTxBytes, this.previous?.sample.networkTxBytes),
-      serviceStatus: ["running", "staged"].includes(runtime.state)
+      serviceStatus: runtime.state === "running"
         ? "running"
+        : runtime.state === "staged"
+          ? "staged"
         : runtime.state === "stopped"
           ? "stopped"
           : "unknown"

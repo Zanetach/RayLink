@@ -6,7 +6,7 @@
   <meta name="description" content="RayLink sing-box 多用户控制台前端原型">
   <title>RayLink · sing-box control plane</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23242b28'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial' font-size='24' font-weight='700' fill='%23e7ece8'%3ER/%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./styles.css?v=0.1.0-20260726">
+  <link rel="stylesheet" href="./styles.css?v=0.1.0-20260726d">
 </head>
 <body>
   <section class="auth-screen" id="admin-auth" aria-labelledby="admin-auth-title">
@@ -183,10 +183,10 @@
               <span class="status-badge neutral" id="dashboard-telemetry-status"><i></i>等待遥测</span>
             </div>
             <div class="network-trend-summary" aria-label="网络流量摘要">
-              <span><small>24h 下行</small><strong id="dashboard-download-total">—</strong></span>
-              <span><small>24h 上行</small><strong id="dashboard-upload-total">—</strong></span>
-              <span><small>样例峰值</small><strong id="dashboard-traffic-peak">—</strong></span>
-              <span><small>样例末点</small><strong id="dashboard-traffic-current">—</strong></span>
+              <span><small>当前下行</small><strong id="dashboard-download-total">—</strong></span>
+              <span><small>当前上行</small><strong id="dashboard-upload-total">—</strong></span>
+              <span><small>24h 峰值</small><strong id="dashboard-traffic-peak">—</strong></span>
+              <span><small>当前合计</small><strong id="dashboard-traffic-current">—</strong></span>
             </div>
             <div class="chart-legend">
               <span><i class="line down"></i>下行</span>
@@ -475,6 +475,6 @@
     <div class="toast" id="toast"><span><svg><use href="#i-check"/></svg></span><div><strong id="toast-title">已保存</strong><p id="toast-message">设置已经更新。</p></div></div>
   </div>
 
-  <script src="./app.js?v=0.1.0-20260726"></script>
+  <script src="./app.js?v=0.1.0-20260726d"></script>
 </body>
 </html>

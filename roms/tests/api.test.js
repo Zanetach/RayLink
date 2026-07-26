@@ -14,6 +14,7 @@ async function startTestApp(overrides = {}) {
     adminPassword: "Admin@2026",
     publicOrigin: "http://127.0.0.1",
     runtimeMode: "dry-run",
+    nodeHeartbeatMinIntervalMs: 0,
     ...overrides
   });
   await app.listen({ host: "127.0.0.1", port: 0 });
@@ -88,20 +89,26 @@ test("production initialization can start without known demo users", async (t) =
 });
 
 test("authenticated bootstrap reports current local host telemetry", async (t) => {
+  let telemetrySamples = 0;
   const testApp = await startTestApp({
-    telemetryProvider: async () => ({
-      cpuPercent: 21.4,
-      memoryUsedBytes: 3_000,
-      memoryTotalBytes: 8_000,
-      networkRxBytes: 40_000,
-      networkTxBytes: 20_000,
-      networkRxBps: 640_000,
-      networkTxBps: 160_000,
-      serviceStatus: "running"
-    })
+    telemetryIntervalMs: 20,
+    telemetryProvider: async () => {
+      telemetrySamples += 1;
+      return {
+        cpuPercent: 21.4,
+        memoryUsedBytes: 3_000,
+        memoryTotalBytes: 8_000,
+        networkRxBytes: 40_000,
+        networkTxBytes: 20_000,
+        networkRxBps: 640_000,
+        networkTxBps: 160_000,
+        serviceStatus: "running"
+      };
+    }
   });
   t.after(() => testApp.close());
   const cookie = await login(testApp.baseUrl);
+  await new Promise((resolve) => setTimeout(resolve, 45));
 
   const response = await api(testApp.baseUrl, cookie, "/api/bootstrap");
   const body = await response.json();
@@ -111,6 +118,7 @@ test("authenticated bootstrap reports current local host telemetry", async (t) =
   assert.equal(localHost.telemetry.memoryUsedBytes, 3_000);
   assert.equal(localHost.telemetry.serviceStatus, "running");
   assert.equal(body.telemetry.networkSeries.at(-1).downloadBps, 640_000);
+  assert.ok(telemetrySamples >= 2);
 });
 
 test("admin creates and updates a user-owned entitlement", async (t) => {
@@ -385,6 +393,30 @@ test("active user logs in and downloads a credential-scoped sing-box client conf
   assert.equal(JSON.stringify(config).includes("shadowsocks_master_password"), false);
 });
 
+test("portal excludes a staged local Runtime when production delivery is enforced", async (t) => {
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    allowStagedClientConfigs: false
+  });
+  t.after(() => testApp.close());
+  const loginResponse = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = loginResponse.headers.getSetCookie()[0].split(";")[0];
+
+  const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  });
+
+  assert.equal(configResponse.status, 403);
+  assert.equal((await configResponse.json()).error.code, "ENTITLEMENT_INACTIVE");
+});
+
 test("invited user cannot log in before activation", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -561,6 +593,48 @@ test("admin creates a remote host and RayLink Node enrolls with a one-time token
   assert.ok(onlineHost.telemetry.updatedAt);
   assert.equal(refreshed.telemetry.networkSeries.at(-1).downloadBps, 12_500_000);
   assert.equal(refreshed.telemetry.networkSeries.at(-1).uploadBps, 2_500_000);
+
+  const failedHeartbeat = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${enrolled.nodeSecret}`,
+      "content-type": "application/json",
+      "x-raylink-host-id": enrolled.hostId
+    },
+    body: JSON.stringify({ telemetry: { serviceStatus: "failed" } })
+  });
+  assert.equal(failedHeartbeat.status, 200);
+  let recoveryBootstrap = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  assert.equal(recoveryBootstrap.hosts.find((host) => host.id === created.host.id).status, "degraded");
+
+  const recoveredHeartbeat = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${enrolled.nodeSecret}`,
+      "content-type": "application/json",
+      "x-raylink-host-id": enrolled.hostId
+    },
+    body: JSON.stringify({
+      telemetry: {
+        networkRxBytes: null,
+        networkTxBytes: null,
+        networkRxBps: 1_000,
+        networkTxBps: 2_000,
+        serviceStatus: "running"
+      }
+    })
+  });
+  assert.equal(recoveredHeartbeat.status, 200);
+  recoveryBootstrap = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  const recoveredHost = recoveryBootstrap.hosts.find((host) => host.id === created.host.id);
+  assert.equal(recoveredHost.status, "online");
+  assert.equal(recoveredHost.telemetry.networkRxBytes, null);
+  assert.equal(
+    testApp.app.store.db.prepare(
+      "SELECT COUNT(*) AS count FROM host_metric_samples WHERE host_id = ?"
+    ).get(created.host.id).count,
+    1
+  );
 });
 
 test("admin can replace a lost enrollment token before the remote host enrolls", async (t) => {
@@ -606,6 +680,50 @@ test("admin can replace a lost enrollment token before the remote host enrolls",
     { method: "POST" }
   );
   assert.equal(enrolledRotationResponse.status, 409);
+});
+
+test("control plane rate limits authenticated node heartbeat writes", async (t) => {
+  const testApp = await startTestApp({ nodeHeartbeatMinIntervalMs: 5_000 });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "限速测试节点",
+      address: "rate-limit.example.com",
+      region: "singapore"
+    })
+  })).json();
+  const enrolled = await (await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "rate-limit-vps",
+      agentVersion: "0.2.0",
+      runtimeVersion: "1.13.12"
+    })
+  })).json();
+  const headers = {
+    authorization: `Bearer ${enrolled.nodeSecret}`,
+    "content-type": "application/json",
+    "x-raylink-host-id": enrolled.hostId
+  };
+
+  const first = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ telemetry: { serviceStatus: "running" } })
+  });
+  const second = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ telemetry: { serviceStatus: "running" } })
+  });
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 429);
+  assert.equal((await second.json()).error.code, "HEARTBEAT_RATE_LIMITED");
 });
 
 test("user subscription includes every online host allowed by the user node scope", async (t) => {
@@ -672,6 +790,24 @@ test("user subscription includes every online host allowed by the user node scop
     }
   );
   assert.equal(completionResponse.status, 200);
+  const heartbeatResponse = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      runtimeState: "running",
+      telemetry: {
+        cpuPercent: 10,
+        memoryUsedBytes: 1_000,
+        memoryTotalBytes: 2_000,
+        networkRxBytes: 1_000,
+        networkTxBytes: 1_000,
+        networkRxBps: 0,
+        networkTxBps: 0,
+        serviceStatus: "running"
+      }
+    })
+  });
+  assert.equal(heartbeatResponse.status, 200);
 
   const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
     headers: { cookie: portalCookie }
@@ -876,12 +1012,21 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(nodeInstallerResponse.headers.get("content-type"), /text\/plain/);
   const nodeInstaller = await nodeInstallerResponse.text();
   assert.match(nodeInstaller, /raylink-node\.service/);
-  assert.match(nodeInstaller, /systemctl disable --now sing-box\.service/);
+  assert.match(nodeInstaller, /installed_sing_box_version/);
+  assert.match(nodeInstaller, /systemctl is-active --quiet sing-box\.service/);
+  assert.match(nodeInstaller, /systemctl disable sing-box\.service/);
+  assert.doesNotMatch(nodeInstaller, /disable --now sing-box\.service/);
+  assert.ok(
+    nodeInstaller.indexOf("systemctl is-active --quiet sing-box.service")
+      < nodeInstaller.indexOf("https://sing-box.app/install.sh")
+  );
 
   const nodeRuntimeResponse = await fetch(`${testApp.baseUrl}/node/raylink-node.mjs`);
   assert.equal(nodeRuntimeResponse.status, 200);
   assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);
-  assert.match(await nodeRuntimeResponse.text(), /class RayLinkNode/);
+  const nodeRuntime = await nodeRuntimeResponse.text();
+  assert.match(nodeRuntime, /class RayLinkNode/);
+  assert.match(nodeRuntime, /AGENT_VERSION = "0\.2\.0"/);
 
   const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);
   assert.equal(portalResponse.status, 200);

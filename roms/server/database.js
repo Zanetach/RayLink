@@ -120,12 +120,13 @@ function userFromRow(row) {
 }
 
 function finiteMetric(value, minimum, maximum) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
 }
 
 function normalizeTelemetry(input = {}) {
-  const serviceStatus = ["running", "stopped", "failed", "unknown"].includes(input.serviceStatus)
+  const serviceStatus = ["running", "staged", "stopped", "failed", "unknown"].includes(input.serviceStatus)
     ? input.serviceStatus
     : "unknown";
   return {
@@ -202,6 +203,7 @@ export class RayLinkStore {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+    this.lastTelemetryPruneAt = 0;
     this.migrate();
     this.seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData });
   }
@@ -330,6 +332,8 @@ export class RayLinkStore {
       );
       CREATE INDEX IF NOT EXISTS host_metric_samples_host_recorded
       ON host_metric_samples(host_id, recorded_at);
+      CREATE INDEX IF NOT EXISTS host_metric_samples_recorded
+      ON host_metric_samples(recorded_at);
     `);
     const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
@@ -706,9 +710,11 @@ export class RayLinkStore {
       throw domainError("NODE_NOT_FOUND", "节点不存在", 404);
     }
     const reportedRuntimeState = String(input.runtimeState || "");
-    const runtimeState = ["running", "staged"].includes(reportedRuntimeState)
+    const reportedServiceStatus = normalizeTelemetry(input.telemetry).serviceStatus;
+    const runtimeState = reportedRuntimeState === "running" || reportedServiceStatus === "running"
       ? "online"
-      : ["stopped", "failed"].includes(reportedRuntimeState)
+      : ["staged", "stopped", "failed"].includes(reportedRuntimeState)
+          || ["staged", "stopped", "failed"].includes(reportedServiceStatus)
         ? "degraded"
         : current.status === "degraded"
           ? "degraded"
@@ -759,28 +765,64 @@ export class RayLinkStore {
         timestamp,
         hostId
       );
-      this.db.prepare(`
-        INSERT INTO host_metric_samples (
-          host_id, cpu_percent, memory_used_bytes, memory_total_bytes,
-          network_rx_bytes, network_tx_bytes, network_rx_bps, network_tx_bps,
-          service_status, recorded_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        hostId,
-        telemetry.cpuPercent,
-        telemetry.memoryUsedBytes,
-        telemetry.memoryTotalBytes,
-        telemetry.networkRxBytes,
-        telemetry.networkTxBytes,
-        telemetry.networkRxBps,
-        telemetry.networkTxBps,
-        telemetry.serviceStatus,
-        timestamp
-      );
-      this.db.prepare(`
-        DELETE FROM host_metric_samples
-        WHERE recorded_at < ?
-      `).run(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+      const latestSample = this.db.prepare(`
+        SELECT id, recorded_at
+        FROM host_metric_samples
+        WHERE host_id = ?
+        ORDER BY recorded_at DESC
+        LIMIT 1
+      `).get(hostId);
+      const currentBucket = Math.floor(new Date(timestamp).getTime() / 300_000);
+      const latestBucket = latestSample
+        ? Math.floor(new Date(latestSample.recorded_at).getTime() / 300_000)
+        : null;
+      if (latestSample && currentBucket === latestBucket) {
+        this.db.prepare(`
+          UPDATE host_metric_samples
+          SET cpu_percent = ?, memory_used_bytes = ?, memory_total_bytes = ?,
+              network_rx_bytes = ?, network_tx_bytes = ?,
+              network_rx_bps = ?, network_tx_bps = ?, service_status = ?,
+              recorded_at = ?
+          WHERE id = ?
+        `).run(
+          telemetry.cpuPercent,
+          telemetry.memoryUsedBytes,
+          telemetry.memoryTotalBytes,
+          telemetry.networkRxBytes,
+          telemetry.networkTxBytes,
+          telemetry.networkRxBps,
+          telemetry.networkTxBps,
+          telemetry.serviceStatus,
+          timestamp,
+          latestSample.id
+        );
+      } else {
+        this.db.prepare(`
+          INSERT INTO host_metric_samples (
+            host_id, cpu_percent, memory_used_bytes, memory_total_bytes,
+            network_rx_bytes, network_tx_bytes, network_rx_bps, network_tx_bps,
+            service_status, recorded_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          hostId,
+          telemetry.cpuPercent,
+          telemetry.memoryUsedBytes,
+          telemetry.memoryTotalBytes,
+          telemetry.networkRxBytes,
+          telemetry.networkTxBytes,
+          telemetry.networkRxBps,
+          telemetry.networkTxBps,
+          telemetry.serviceStatus,
+          timestamp
+        );
+      }
+      if (Date.now() - this.lastTelemetryPruneAt >= 60 * 60 * 1000) {
+        this.db.prepare(`
+          DELETE FROM host_metric_samples
+          WHERE recorded_at < ?
+        `).run(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+        this.lastTelemetryPruneAt = Date.now();
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

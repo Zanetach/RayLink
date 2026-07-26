@@ -18,7 +18,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const AGENT_VERSION = "0.1.0";
+const AGENT_VERSION = "0.2.0";
 
 async function pathExists(path) {
   try {
