@@ -169,6 +169,21 @@
 .setup-summary dt { color: var(--faint); font-size: 10px; }
 .setup-summary dd { min-width: 0; margin: 0; color: var(--text-soft); font-size: 10px; overflow-wrap: anywhere; }
 
+.setup-preflight {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.setup-preflight span {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+}
+.setup-preflight span[data-state="passed"] { color: var(--accent); }
+
 .setup-confirm { display: flex; gap: 10px; color: var(--muted); font-size: 10px; }
 .setup-confirm input { accent-color: var(--accent); }
 .setup-error { margin-top: auto; padding-top: 18px; }

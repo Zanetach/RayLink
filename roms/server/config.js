@@ -13,11 +13,7 @@ export function loadConfig(env = process.env) {
   const port = positiveInteger(env.RAYLINK_PORT, 4173, "RAYLINK_PORT");
   const publicOrigin = env.RAYLINK_PUBLIC_ORIGIN || `http://${host}:${port}`;
   const setupRequired = env.RAYLINK_SETUP_REQUIRED === "true";
-  if (
-    env.NODE_ENV === "production"
-    && !setupRequired
-    && new URL(publicOrigin).protocol !== "https:"
-  ) {
+  if (env.NODE_ENV === "production" && new URL(publicOrigin).protocol !== "https:") {
     throw new Error("RAYLINK_PUBLIC_ORIGIN must use HTTPS in production");
   }
   if (setupRequired && (!env.RAYLINK_SETUP_TOKEN_HASH || !env.RAYLINK_SETUP_TOKEN_EXPIRES_AT)) {

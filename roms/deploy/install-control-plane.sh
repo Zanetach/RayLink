@@ -87,6 +87,11 @@ if [ -z "$public_ip" ]; then
 fi
 [ -n "$public_ip" ] || fail "无法检测服务器 IP，请设置 RAYLINK_PUBLIC_IP"
 printf '%s' "$public_ip" | grep -Eq '^[0-9a-fA-F:.]+$' || fail "RAYLINK_PUBLIC_IP 格式不正确"
+case "$public_ip" in
+  *:*) public_host="[$public_ip]" ;;
+  *) public_host="$public_ip" ;;
+esac
+public_origin="https://${public_host}"
 
 openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 825 \
   -subj "/CN=${public_ip}" \
@@ -116,7 +121,7 @@ umask 077
     'NODE_ENV=production' \
     'RAYLINK_HOST=127.0.0.1' \
     'RAYLINK_PORT=4173' \
-    "RAYLINK_PUBLIC_ORIGIN=https://${public_ip}" \
+    "RAYLINK_PUBLIC_ORIGIN=${public_origin}" \
     'RAYLINK_TRUST_PROXY=true' \
     'RAYLINK_ADMIN_USERNAME=bootstrap-admin' \
     "RAYLINK_ADMIN_PASSWORD=${bootstrap_password}" \
@@ -138,10 +143,11 @@ cp "$install_root/deploy/nginx-first-run.conf.example" /etc/nginx/conf.d/raylink
 nginx -t
 systemctl daemon-reload
 systemctl enable --now nginx
+systemctl enable sing-box-raylink
 systemctl enable --now raylink
 
 printf '\nRayLink 已安装。\n'
 printf '首次初始化地址（令牌 30 分钟有效）：\n'
-printf 'https://%s/setup#token=%s\n\n' "$public_ip" "$setup_token"
+printf '%s/setup#token=%s\n\n' "$public_origin" "$setup_token"
 printf '首次使用 IP 证书时浏览器会提示自签名证书；核对证书指纹后继续：\n'
 openssl x509 -in "$config_root/tls/control-plane.crt" -noout -fingerprint -sha256

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -241,7 +241,9 @@ function normalizedHostInput(input, current = {}) {
     address: input.address === undefined ? current.address : String(input.address).trim(),
     region: input.region === undefined ? current.region : String(input.region).trim()
   };
-  if (!host.name) throw domainError("INVALID_HOST_NAME", "主机名称不能为空");
+  if (!host.name || host.name.length > 80) {
+    throw domainError("INVALID_HOST_NAME", "主机名称不能为空且不能超过 80 个字符");
+  }
   if (!/^(?:[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:]+\])$/i.test(host.address)) {
     throw domainError("INVALID_HOST_ADDRESS", "请输入有效的主机域名或 IP 地址");
   }
@@ -635,6 +637,13 @@ export class RayLinkStore {
       "SELECT value FROM settings WHERE key = 'setup_state'"
     ).get();
     if (existing) {
+      if (existing.value === "INITIALIZING") {
+        this.db.prepare(`
+          UPDATE settings SET value = 'SETUP_PENDING', updated_at = ?
+          WHERE key = 'setup_state'
+        `).run(nowIso());
+        existing.value = "SETUP_PENDING";
+      }
       if (
         existing.value === "SETUP_PENDING"
         && setupRequired
@@ -704,11 +713,31 @@ export class RayLinkStore {
     const stored = this.db.prepare(
       "SELECT value FROM settings WHERE key = 'setup_token_hash'"
     ).get()?.value;
-    return Boolean(stored) && hashSessionSecret(String(token || "")) === stored;
+    if (!stored) return false;
+    const actual = Buffer.from(hashSessionSecret(String(token || "")));
+    const expected = Buffer.from(stored);
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  }
+
+  beginSetupInitialization() {
+    const result = this.db.prepare(`
+      UPDATE settings SET value = 'INITIALIZING', updated_at = ?
+      WHERE key = 'setup_state' AND value = 'SETUP_PENDING'
+    `).run(nowIso());
+    if (result.changes !== 1) {
+      throw domainError("SETUP_IN_PROGRESS", "RayLink 正在初始化或已经完成", 409);
+    }
+  }
+
+  failSetupInitialization() {
+    this.db.prepare(`
+      UPDATE settings SET value = 'SETUP_PENDING', updated_at = ?
+      WHERE key = 'setup_state' AND value = 'INITIALIZING'
+    `).run(nowIso());
   }
 
   completeSetup({ access, certificate, admin, runtime }) {
-    if (this.setupStatus().state !== "SETUP_PENDING") {
+    if (this.setupStatus().state !== "INITIALIZING") {
       throw domainError("SETUP_ALREADY_COMPLETE", "RayLink 已完成初始化", 409);
     }
     const currentAdmin = this.db.prepare(
@@ -1162,13 +1191,17 @@ export class RayLinkStore {
   }
 
   updateHost(id, input) {
-    const current = this.getHost(id);
-    if (!current) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
-    const next = normalizedHostInput(input, current);
+    const next = this.normalizeHostUpdate(id, input);
     this.db.prepare(`
       UPDATE hosts SET name = ?, address = ?, region = ?, updated_at = ? WHERE id = ?
     `).run(next.name, next.address, next.region, nowIso(), id);
     return this.getHost(id);
+  }
+
+  normalizeHostUpdate(id, input) {
+    const current = this.getHost(id);
+    if (!current) throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    return normalizedHostInput(input, current);
   }
 
   updateLocalRuntimeCapabilities(runtime = {}) {

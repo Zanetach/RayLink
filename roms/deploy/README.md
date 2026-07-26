@@ -35,6 +35,13 @@ bash install-control-plane.sh
 SHA-256 证书指纹。初始化令牌只以哈希形式写入服务器，默认 30 分钟后失效；
 初始化成功后立即作废。
 
+若令牌过期，在服务器上执行以下命令可安全轮换令牌。新明文令牌仍只显示一次，
+服务器只保存其哈希：
+
+```bash
+bash /opt/raylink/deploy/rotate-setup-token.sh
+```
+
 首次初始化包含五步：
 
 1. 验证一次性安装令牌；

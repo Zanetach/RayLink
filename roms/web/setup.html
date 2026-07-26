@@ -47,7 +47,7 @@
         <section class="setup-step" data-step="1" hidden>
           <p class="eyebrow">Step 2 / 5</p>
           <h2>访问入口与 HTTPS</h2>
-          <p class="setup-intro">域名和 IP 均可作为管理入口。公网环境必须使用 HTTPS；可由 RayLink 管理域名证书，也可接入已有反向代理。</p>
+          <p class="setup-intro">域名和 IP 均可作为管理入口。公网环境必须使用 HTTPS；域名方式需先准备有效证书和反向代理，IP 方式可使用安装器生成的证书。</p>
           <div class="setup-choice-grid">
             <label class="setup-choice">
               <input type="radio" name="accessMode" value="domain" checked>
@@ -103,8 +103,8 @@
             <input name="runtimeName" value="RayLink Runtime" maxlength="80" required>
           </label>
           <label class="field">
-            <span>节点地址</span>
-            <input name="runtimeAddress" placeholder="node.example.com 或服务器 IP" required>
+            <span>主机地址</span>
+            <input name="runtimeAddress" placeholder="host.example.com 或服务器 IP" required>
           </label>
           <label class="field">
             <span>区域标识</span>
@@ -116,8 +116,11 @@
         <section class="setup-step" data-step="4" hidden>
           <p class="eyebrow">Step 5 / 5</p>
           <h2>检查并完成</h2>
-          <p class="setup-intro">完成后一次性令牌立即失效。若主访问地址发生变化，浏览器会跳转到新的入口。</p>
+          <p class="setup-intro">系统会验证当前访问入口、HTTPS 和 sing-box Runtime。完成后一次性令牌立即失效。</p>
           <dl class="setup-summary" id="setup-summary"></dl>
+          <div class="setup-preflight" id="setup-preflight" aria-live="polite">
+            正在检查访问入口与 Runtime…
+          </div>
           <label class="setup-confirm">
             <input name="confirmed" type="checkbox" required>
             <span>我已确认管理入口可达，并已安全保存管理员凭据。</span>

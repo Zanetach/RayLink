@@ -8,7 +8,9 @@ const errorElement = document.querySelector("#setup-error");
 const stateLabel = document.querySelector("#setup-state-label");
 const expiryLabel = document.querySelector("#setup-expiry");
 const summary = document.querySelector("#setup-summary");
+const preflightElement = document.querySelector("#setup-preflight");
 let currentStep = 0;
+let preflightPassed = false;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -46,8 +48,8 @@ function updateCertificateOptions() {
         ["external", "已有 HTTPS / 反向代理"]
       ]
     : [
-        ["external", "已有 IP HTTPS / 反向代理"],
-        ["ip-self-signed", "自签名 IP 证书"]
+        ["ip-self-signed", "安装器生成的 IP 证书"],
+        ["external", "已有 IP HTTPS / 反向代理"]
       ];
   for (const [value, label] of choices) {
     select.add(new Option(label, value));
@@ -86,7 +88,7 @@ function renderSummary() {
     ["证书方式", form.elements.certificateMode.selectedOptions[0]?.textContent || ""],
     ["管理员", form.elements.username.value.trim()],
     ["本机 Runtime", `${form.elements.runtimeName.value.trim()} · ${form.elements.runtimeRegion.value.trim()}`],
-    ["节点地址", form.elements.runtimeAddress.value.trim()]
+    ["主机地址", form.elements.runtimeAddress.value.trim()]
   ];
   summary.replaceChildren(...rows.map(([term, value]) => {
     const row = document.createElement("div");
@@ -97,6 +99,36 @@ function renderSummary() {
     row.append(dt, dd);
     return row;
   }));
+}
+
+async function runPreflight() {
+  preflightPassed = false;
+  submitButton.disabled = true;
+  preflightElement.textContent = "正在检查访问入口与 Runtime…";
+  try {
+    const result = await api("/api/setup/preflight", {
+      method: "POST",
+      body: JSON.stringify(setupPayload())
+    });
+    const labels = {
+      setupToken: "一次性令牌",
+      accessOrigin: "当前访问入口",
+      https: "HTTPS",
+      runtime: "sing-box Runtime"
+    };
+    preflightElement.replaceChildren(...Object.entries(result.checks).map(([key, value]) => {
+      const row = document.createElement("span");
+      row.textContent = `${labels[key] || key}：${value === "passed" ? "通过" : "开发模式"}`;
+      row.dataset.state = value;
+      return row;
+    }));
+    preflightPassed = true;
+    submitButton.disabled = false;
+  } catch (error) {
+    preflightElement.textContent = `检查未通过：${error.message}`;
+    errorElement.textContent = error.message;
+    if (error.code === "SETUP_TOKEN_INVALID") showStep(0);
+  }
 }
 
 function showStep(index) {
@@ -112,7 +144,10 @@ function showStep(index) {
   backButton.hidden = currentStep === 0;
   nextButton.hidden = currentStep === steps.length - 1;
   submitButton.hidden = currentStep !== steps.length - 1;
-  if (currentStep === steps.length - 1) renderSummary();
+  if (currentStep === steps.length - 1) {
+    renderSummary();
+    void runPreflight();
+  }
   steps[currentStep].querySelector("input, select, textarea")?.focus();
 }
 
@@ -151,6 +186,10 @@ document.querySelectorAll('input[name="accessMode"]').forEach((radio) => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!validateStep()) return;
+  if (!preflightPassed) {
+    await runPreflight();
+    if (!preflightPassed) return;
+  }
   errorElement.textContent = "";
   submitButton.disabled = true;
   submitButton.textContent = "正在初始化…";

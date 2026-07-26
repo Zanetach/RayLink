@@ -72,6 +72,26 @@ test("an uninitialized instance exposes only the setup flow", async (t) => {
   assert.equal((await login.json()).error.code, "SETUP_REQUIRED");
 });
 
+test("the durable INITIALIZING state keeps the control plane locked and is recoverable", async (t) => {
+  const testApp = await startSetupApp();
+  t.after(() => testApp.close());
+
+  testApp.app.store.beginSetupInitialization();
+  const initializing = await fetch(`${testApp.baseUrl}/api/setup/status`);
+  assert.deepEqual(await initializing.json(), {
+    state: "INITIALIZING",
+    version: 1
+  });
+
+  const bootstrap = await fetch(`${testApp.baseUrl}/api/bootstrap`);
+  assert.equal(bootstrap.status, 423);
+  assert.equal((await bootstrap.json()).error.code, "SETUP_REQUIRED");
+
+  testApp.app.store.failSetupInitialization();
+  const recovered = await fetch(`${testApp.baseUrl}/api/setup/status`);
+  assert.equal((await recovered.json()).state, "SETUP_PENDING");
+});
+
 test("the one-time setup token initializes access, admin, and local runtime", async (t) => {
   const testApp = await startSetupApp();
   t.after(() => testApp.close());
@@ -102,6 +122,34 @@ test("the one-time setup token initializes access, admin, and local runtime", as
   });
   assert.equal(rejected.status, 401);
   assert.equal((await rejected.json()).error.code, "SETUP_TOKEN_INVALID");
+
+  const inactiveOrigin = await fetch(`${testApp.baseUrl}/api/setup/preflight`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      access: {
+        ...payload.access,
+        canonicalOrigin: "http://localhost",
+        allowedOrigins: ["http://localhost"]
+      }
+    })
+  });
+  assert.equal(inactiveOrigin.status, 422);
+  assert.equal((await inactiveOrigin.json()).error.code, "SETUP_ORIGIN_NOT_ACTIVE");
+
+  const preflight = await fetch(`${testApp.baseUrl}/api/setup/preflight`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  assert.equal(preflight.status, 200);
+  assert.deepEqual((await preflight.json()).checks, {
+    setupToken: "passed",
+    accessOrigin: "passed",
+    https: "development",
+    runtime: "development"
+  });
 
   const completed = await fetch(`${testApp.baseUrl}/api/setup/complete`, {
     method: "POST",
@@ -145,8 +193,17 @@ test("the control-plane installer emits a fragment setup URL and never persists 
     new URL("../deploy/install-control-plane.sh", import.meta.url),
     "utf8"
   );
+  const rotator = await readFile(
+    new URL("../deploy/rotate-setup-token.sh", import.meta.url),
+    "utf8"
+  );
   assert.match(installer, /\/setup#token=/);
   assert.match(installer, /RAYLINK_SETUP_TOKEN_HASH=/);
   assert.doesNotMatch(installer, /RAYLINK_SETUP_TOKEN=/);
   assert.match(installer, /systemctl enable --now raylink/);
+  assert.match(installer, /\*:\*\) public_host="\[\$public_ip\]"/);
+  assert.match(installer, /systemctl enable sing-box-raylink/);
+  assert.match(rotator, /systemctl restart raylink/);
+  assert.match(rotator, /\/setup#token=/);
+  assert.doesNotMatch(rotator, /RAYLINK_SETUP_TOKEN=/);
 });

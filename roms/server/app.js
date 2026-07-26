@@ -198,7 +198,7 @@ function normalizeSetupInput(body) {
 
   const certificateMode = String(body.certificate?.mode || "");
   const certificateModes = accessMode === "domain"
-    ? ["managed", "external"]
+    ? ["external"]
     : ["external", "ip-self-signed"];
   if (!certificateModes.includes(certificateMode)) {
     throw httpError("INVALID_SETUP_INPUT", "证书模式与当前访问方式不匹配", 422);
@@ -224,15 +224,6 @@ function normalizeSetupInput(body) {
     address: String(body.runtime?.address || "").trim(),
     region: String(body.runtime?.region || "").trim()
   };
-  if (!runtime.name || runtime.name.length > 80) {
-    throw httpError("INVALID_SETUP_INPUT", "Runtime 名称不能为空且不能超过 80 个字符", 422);
-  }
-  if (!/^(?:[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:]+\])$/i.test(runtime.address)) {
-    throw httpError("INVALID_SETUP_INPUT", "Runtime 地址格式不正确", 422);
-  }
-  if (!/^[a-z0-9-]{2,32}$/i.test(runtime.region)) {
-    throw httpError("INVALID_SETUP_INPUT", "区域标识格式不正确", 422);
-  }
 
   return {
     access: {
@@ -357,6 +348,48 @@ export async function createRayLinkApp(options) {
     meteredRuntimeBuilder: options.meteredRuntimeBuilder,
     fetchImpl: options.runtimeReleaseFetch
   });
+  const requestOriginFor = (request) => {
+    const forwardedProtocol = options.trustProxy
+      ? String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim()
+      : "";
+    const requestProtocol = ["http", "https"].includes(forwardedProtocol)
+      ? forwardedProtocol
+      : request.socket.encrypted
+        ? "https"
+        : "http";
+    return request.headers.host ? `${requestProtocol}://${request.headers.host}` : "";
+  };
+  const preflightSetup = async (request, input) => {
+    const requestOrigin = requestOriginFor(request);
+    if (requestOrigin !== input.access.canonicalOrigin) {
+      throw httpError(
+        "SETUP_ORIGIN_NOT_ACTIVE",
+        "请先通过主访问地址打开初始化链接，确认 DNS 与 HTTPS 可用后再完成初始化",
+        422
+      );
+    }
+    const installation = await installer.status();
+    if (options.runtimeMode === "systemd") {
+      if (!installation.installed) {
+        throw httpError("RUNTIME_NOT_INSTALLED", "未检测到 sing-box Runtime", 409);
+      }
+      if (!installation.tags.includes("with_v2ray_api")) {
+        throw httpError(
+          "METERING_BUILD_MISSING",
+          "sing-box Runtime 缺少 with_v2ray_api，不能用于正式用户计量",
+          409
+        );
+      }
+    }
+    return {
+      checks: {
+        setupToken: "passed",
+        accessOrigin: "passed",
+        https: new URL(input.access.canonicalOrigin).protocol === "https:" ? "passed" : "development",
+        runtime: options.runtimeMode === "systemd" ? "passed" : "development"
+      }
+    };
+  };
   const refreshLocalRuntimeCapabilities = async () => {
     const installation = await installer.status();
     store.updateLocalRuntimeCapabilities(installation);
@@ -513,9 +546,13 @@ export async function createRayLinkApp(options) {
         return;
       }
 
-      if (request.method === "POST" && url.pathname === "/api/setup/complete") {
+      if (request.method === "POST" && url.pathname === "/api/setup/preflight") {
         if (setup.state !== "SETUP_PENDING") {
-          throw httpError("SETUP_ALREADY_COMPLETE", "RayLink 已完成初始化", 409);
+          throw httpError(
+            setup.state === "INITIALIZING" ? "SETUP_IN_PROGRESS" : "SETUP_ALREADY_COMPLETE",
+            setup.state === "INITIALIZING" ? "RayLink 正在初始化" : "RayLink 已完成初始化",
+            409
+          );
         }
         const attemptKey = authKey(request, "setup");
         if (!authAllowed(attemptKey)) {
@@ -527,33 +564,63 @@ export async function createRayLinkApp(options) {
           throw httpError("SETUP_TOKEN_INVALID", "初始化令牌无效或已经过期", 401);
         }
         const input = normalizeSetupInput(body);
-        const admin = store.completeSetup(input);
-        authAttempts.delete(attemptKey);
-        const session = store.createAdminSession(admin.id);
-        const finalOrigin = currentPublicOrigin();
-        const forwardedProtocol = options.trustProxy
-          ? String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim()
-          : "";
-        const requestProtocol = forwardedProtocol || (request.socket.encrypted ? "https" : "http");
-        const requestOrigin = request.headers.host
-          ? `${requestProtocol}://${request.headers.host}`
-          : "";
-        sendJson(response, 201, {
-          state: "READY",
-          currentAdmin: admin,
-          redirectTo: requestOrigin === finalOrigin.origin ? "/" : `${finalOrigin.origin}/`
-        }, {
-          "set-cookie": sessionCookie(
-            SESSION_COOKIE,
-            session.secret,
-            session.expiresAt,
-            finalOrigin.protocol === "https:"
-          )
-        });
+        input.runtime = store.normalizeHostUpdate("local", input.runtime);
+        sendJson(response, 200, await preflightSetup(request, input));
         return;
       }
 
-      if (setup.state === "SETUP_PENDING") {
+      if (request.method === "POST" && url.pathname === "/api/setup/complete") {
+        if (setup.state !== "SETUP_PENDING") {
+          throw httpError(
+            setup.state === "INITIALIZING" ? "SETUP_IN_PROGRESS" : "SETUP_ALREADY_COMPLETE",
+            setup.state === "INITIALIZING" ? "RayLink 正在初始化" : "RayLink 已完成初始化",
+            409
+          );
+        }
+        const attemptKey = authKey(request, "setup");
+        if (!authAllowed(attemptKey)) {
+          throw httpError("RATE_LIMITED", "初始化令牌尝试过多，请稍后再试", 429);
+        }
+        const body = await readJson(request);
+        if (!store.verifySetupToken(body.token)) {
+          recordAuthFailure(attemptKey);
+          throw httpError("SETUP_TOKEN_INVALID", "初始化令牌无效或已经过期", 401);
+        }
+        const input = normalizeSetupInput(body);
+        input.runtime = store.normalizeHostUpdate("local", input.runtime);
+        await preflightSetup(request, input);
+        store.beginSetupInitialization();
+        try {
+          if (options.runtimeMode === "systemd") {
+            await runLocalRuntimeOperation(
+              "首次配置发布",
+              () => runtimeManager.publish(null)
+            );
+          }
+          const admin = store.completeSetup(input);
+          authAttempts.delete(attemptKey);
+          const session = store.createAdminSession(admin.id);
+          const finalOrigin = currentPublicOrigin();
+          sendJson(response, 201, {
+            state: "READY",
+            currentAdmin: admin,
+            redirectTo: "/"
+          }, {
+            "set-cookie": sessionCookie(
+              SESSION_COOKIE,
+              session.secret,
+              session.expiresAt,
+              finalOrigin.protocol === "https:"
+            )
+          });
+        } catch (error) {
+          store.failSetupInitialization();
+          throw error;
+        }
+        return;
+      }
+
+      if (setup.state !== "READY") {
         if (request.method === "GET" && ["/", "/index.html"].includes(url.pathname)) {
           response.writeHead(302, { location: "/setup", "cache-control": "no-store" });
           response.end();

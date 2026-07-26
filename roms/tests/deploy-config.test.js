@@ -8,4 +8,6 @@ test("production reverse proxy excludes bearer subscription URLs from access log
   assert.match(config, /~\^\/sub\/\s+0;/);
   assert.match(config, /access_log .* if=\$raylink_loggable;/);
   assert.match(config, /proxy_pass http:\/\/127\.0\.0\.1:4173;/);
+  assert.match(config, /proxy_set_header X-Forwarded-For \$remote_addr;/);
+  assert.doesNotMatch(config, /\$proxy_add_x_forwarded_for/);
 });
