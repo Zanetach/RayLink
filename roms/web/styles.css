@@ -37,6 +37,8 @@
 [hidden] { display: none !important; }
 
 html { min-width: 320px; background: var(--canvas); }
+html.hide-root-scrollbar { scrollbar-width: none; }
+html.hide-root-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
 body {
   margin: 0;

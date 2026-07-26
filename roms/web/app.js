@@ -768,6 +768,10 @@ function navigate(viewName, updateHash = true) {
   const normalizedView = aliases[viewName] || viewName;
   const target = document.querySelector(`[data-view="${normalizedView}"]`) || document.querySelector('[data-view="not-found"]');
   const resolvedView = target.dataset.view;
+  document.documentElement.classList.toggle(
+    "hide-root-scrollbar",
+    ["operations", "system"].includes(resolvedView)
+  );
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view === target));
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
@@ -825,6 +829,7 @@ function showAdminLogin() {
   }
   setProfileMenu(false);
   closeDrawer({ restoreFocus: false, clearContent: true });
+  document.documentElement.classList.remove("hide-root-scrollbar");
   controlPlane.currentAdmin = null;
   elements.authError.textContent = "";
   elements.authForm.elements.password.value = "";
