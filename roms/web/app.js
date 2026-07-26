@@ -300,7 +300,12 @@ function renderNetworkTrend({ activeUsers, ready }) {
     "#dashboard-traffic-current",
     `${((download.at(-1) || 0) + (upload.at(-1) || 0)).toFixed(1)} Mbps`
   );
-  setText("#dashboard-trend-updated", ready ? "刚刚更新" : "等待 Runtime");
+  setText("#dashboard-trend-updated", ready ? "已生成样例" : "等待 Runtime");
+  setText(
+    "#dashboard-chart-description",
+    `估算样例：24 小时下行约 ${estimatedGigabytes(download).toFixed(1)} GB，`
+      + `上行约 ${estimatedGigabytes(upload).toFixed(1)} GB，样例峰值 ${peak.toFixed(1)} Mbps。`
+  );
 
   const chartY = document.querySelector("#dashboard-chart-y");
   if (chartY) {
@@ -310,6 +315,20 @@ function renderNetworkTrend({ activeUsers, ready }) {
       axisMax * (1 / 3),
       0
     ].map((value) => `<span>${value.toFixed(value % 1 === 0 ? 0 : 1)}</span>`).join("");
+  }
+  const chartX = document.querySelector("#dashboard-chart-x");
+  if (chartX) {
+    const now = new Date();
+    const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+    chartX.innerHTML = [-24, -18, -12, -6, 0].map((hours, index, ticks) => {
+      if (index === ticks.length - 1) return "<span>现在</span>";
+      const tick = new Date(now.getTime() + hours * 60 * 60 * 1000);
+      return `<span>${timeFormatter.format(tick)}</span>`;
+    }).join("");
   }
 }
 

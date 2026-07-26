@@ -528,6 +528,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /用户与订阅/);
   assert.match(indexHtml, /网络流量趋势/);
   assert.match(indexHtml, /dashboard-network-trend/);
+  assert.match(indexHtml, /按启用账号数量缩放趋势样例/);
+  assert.doesNotMatch(indexHtml, /根据用户累计用量生成趋势样例/);
 
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);

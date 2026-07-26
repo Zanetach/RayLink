@@ -1206,7 +1206,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   .dashboard-grid { display: block; }
   .dashboard-grid > .panel + .panel { margin-top: 14px; }
   .traffic-panel, .host-summary, .deployment-panel, .event-panel { padding: 18px 14px; }
-  .dashboard-network-trend { margin-top: 16px; padding: 16px 14px; }
+  .dashboard-network-trend { margin-top: 16px; padding: 16px; }
   .traffic-chart { height: 210px; }
   .network-trend-summary { grid-template-columns: 1fr 1fr; }
   .network-trend-summary > span { padding: 12px; }
