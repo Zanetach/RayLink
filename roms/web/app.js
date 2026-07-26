@@ -187,6 +187,9 @@ function renderRuntime() {
   renderProtocols();
   renderConfigPreview();
   renderDashboard();
+  renderOperations();
+  renderDiagnostics();
+  renderSystem();
 }
 
 function renderDashboard() {
@@ -350,7 +353,7 @@ function renderHosts() {
   document.querySelector("#host-map-status").innerHTML = `<i></i>${healthy ? "Runtime 已就绪" : "等待首次发布"}`;
   const managedTargetName = document.querySelector("#managed-target-name");
   if (managedTargetName) managedTargetName.textContent = host.name;
-  document.querySelectorAll('.nav-item[data-view-target="hosts"] .nav-count').forEach((count) => {
+  document.querySelectorAll('.nav-item[data-view-target="system"] .nav-count').forEach((count) => {
     count.textContent = controlPlane.hosts.length;
   });
 }
@@ -414,6 +417,10 @@ function renderProtocols() {
 
   const enabledCount = controlPlane.protocols.filter((profile) => profile.enabled).length;
   document.querySelector("#enabled-protocol-count").textContent = `${enabledCount} 个协议已启用`;
+  const inboundTabCount = document.querySelector("#inbound-tab-count");
+  if (inboundTabCount) inboundTabCount.textContent = enabledCount;
+  const serviceNavCount = document.querySelector("#service-nav-count");
+  if (serviceNavCount) serviceNavCount.textContent = enabledCount;
 }
 
 function renderConfigPreview() {
@@ -436,6 +443,92 @@ function renderConfigPreview() {
     lineNumbers.innerHTML = preview.textContent.split("\n").map((_, index) => `<li>${index + 1}</li>`).join("");
   }
   document.querySelector(".change-summary .add + strong").textContent = String(inbounds.length);
+  const systemPreview = document.querySelector("#system-config-preview");
+  if (systemPreview) systemPreview.textContent = preview.textContent;
+}
+
+function renderOperations() {
+  const runtime = controlPlane.runtime || { state: "unknown", mode: "dry-run" };
+  const installation = controlPlane.installation || { installed: false, version: null };
+  const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
+  const latestDeployment = controlPlane.deployments[0];
+  const ready = ["running", "staged"].includes(runtime.state);
+  const setText = (selector, value) => {
+    const element = document.querySelector(selector);
+    if (element) element.textContent = value;
+  };
+  setText("#operations-runtime-state", ready ? "运行正常" : "等待发布");
+  setText("#operations-config-state", activeDeployment?.version || "尚未发布");
+  setText(
+    "#operations-validation-state",
+    latestDeployment?.status === "failed" ? "最近一次失败" : activeDeployment ? "最近发布通过" : "尚无记录"
+  );
+  const facts = document.querySelector("#operations-runtime-facts");
+  if (facts) {
+    facts.innerHTML = `
+      <span><small>状态</small><strong>${escapeHtml(runtime.state || "unknown")}</strong></span>
+      <span><small>运行模式</small><strong>${escapeHtml(runtime.mode || "unknown")}</strong></span>
+      <span><small>sing-box</small><strong>${escapeHtml(runtime.runtimeVersion || installation.version || "未检测")}</strong></span>
+      <span><small>配置路径</small><strong>${escapeHtml(runtime.configPath || "尚未生成")}</strong></span>`;
+  }
+  const log = document.querySelector("#operations-log");
+  if (log) {
+    const entries = controlPlane.deployments.slice(0, 6).map((deployment) => {
+      const time = deployment.publishedAt || deployment.createdAt;
+      return `<span><time>${time ? new Date(time).toLocaleString("zh-CN") : "—"}</time> ${escapeHtml(deployment.version)} · ${escapeHtml(deployment.status)}</span>`;
+    });
+    log.innerHTML = entries.length
+      ? entries.join("")
+      : "<span>RayLink control plane ready.</span><span>等待首次发布事件…</span>";
+  }
+}
+
+function renderDiagnostics() {
+  const target = document.querySelector("#diagnostic-grid");
+  if (!target) return;
+  const installation = controlPlane.installation || { installed: false, version: null };
+  const host = controlPlane.hosts[0];
+  const enabledProtocols = controlPlane.protocols.filter((profile) => profile.enabled);
+  const eligibleUsers = controlPlane.runtimePreview?.eligibleUsers || 0;
+  const checks = [
+    {
+      name: "sing-box 安装",
+      detail: installation.installed ? `已检测到 ${installation.version || "可用版本"}` : "当前主机尚未安装",
+      pass: installation.installed
+    },
+    {
+      name: "Runtime 主机",
+      detail: host ? `${host.address} · ${host.region}` : "未配置主机地址",
+      pass: Boolean(host?.address)
+    },
+    {
+      name: "入站服务",
+      detail: `${enabledProtocols.length} 个协议已启用`,
+      pass: enabledProtocols.length > 0
+    },
+    {
+      name: "有效用户",
+      detail: `${eligibleUsers} 位用户可写入配置`,
+      pass: eligibleUsers > 0
+    }
+  ];
+  target.innerHTML = checks.map((check) => `
+    <article class="${check.pass ? "pass" : "warning"}">
+      <span>${check.pass ? icon("check") : "!"}</span>
+      <div><strong>${escapeHtml(check.name)}</strong><small>${escapeHtml(check.detail)}</small></div>
+    </article>`).join("");
+}
+
+function renderSystem() {
+  const installation = controlPlane.installation || { installed: false, version: null, platform: "unknown", architecture: null };
+  const version = document.querySelector("#system-version");
+  const build = document.querySelector("#system-build");
+  if (version) version.textContent = installation.installed
+    ? `sing-box ${installation.version || ""}`
+    : "sing-box 未安装";
+  if (build) build.textContent = installation.installed
+    ? `${installation.platform} / ${installation.architecture || "unknown"} · ${installation.tags?.length || 0} 个 build tags`
+    : "可在服务工作区执行一键安装。";
 }
 
 function formatDate(value) {
@@ -489,7 +582,13 @@ function renderUsers() {
 }
 
 function navigate(viewName, updateHash = true) {
-  const normalizedView = ["users/plans", "subscriptions"].includes(viewName) ? "users" : viewName;
+  const aliases = {
+    "users/plans": "users",
+    subscriptions: "users",
+    hosts: "system",
+    deploy: "operations"
+  };
+  const normalizedView = aliases[viewName] || viewName;
   const target = document.querySelector(`[data-view="${normalizedView}"]`) || document.querySelector('[data-view="not-found"]');
   const resolvedView = target.dataset.view;
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view === target));
@@ -509,12 +608,20 @@ function navigate(viewName, updateHash = true) {
     elements.indicator.style.transform = `translateY(${index * 48}px)`;
   }
 
-  const headings = { dashboard: "仪表盘", users: "用户管理", hosts: "主机", deploy: "配置发布", "not-found": "未找到" };
+  const headings = {
+    dashboard: "总览",
+    users: "用户",
+    services: "服务",
+    policies: "策略",
+    operations: "运维",
+    system: "系统",
+    "not-found": "未找到"
+  };
   document.title = `${headings[resolvedView]} · RayLink`;
   if (updateHash) {
     history.pushState({ view: resolvedView }, "", `#/${resolvedView}`);
   } else if (normalizedView !== viewName) {
-    history.replaceState({ view: "users" }, "", "#/users");
+    history.replaceState({ view: normalizedView }, "", `#/${normalizedView}`);
   }
   elements.rail.classList.remove("open");
   elements.rail.toggleAttribute("inert", window.innerWidth <= 920);
@@ -1080,6 +1187,43 @@ async function generateRealityKeypair(form) {
   }
 }
 
+function selectWorkspaceTab(kind, value) {
+  const buttons = [...document.querySelectorAll(`[data-${kind}-tab]`)];
+  buttons.forEach((button) => {
+    const active = button.dataset[`${kind}Tab`] === value;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+
+  const panels = [...document.querySelectorAll(`[data-${kind}-panel]`)];
+  panels.forEach((panel) => {
+    panel.hidden = panel.dataset[`${kind}Panel`] !== value;
+  });
+
+  if (kind === "service") {
+    const inboundPanel = document.querySelector("#view-services .runtime-console");
+    if (inboundPanel) inboundPanel.hidden = value !== "inbounds";
+  }
+}
+
+function openAdvancedConfig() {
+  const preview = document.querySelector("#managed-config-preview")?.textContent || "{}";
+  openDrawer({
+    title: "受管配置摘要",
+    eyebrow: "配置 JSON",
+    content: `
+      <div class="advanced-drawer">
+        <div class="notice-card">
+          <span>${icon("shield")}</span>
+          <div><strong>受管配置只读</strong><p>这里展示 RayLink 管理的核心字段。用户凭据、协议监听和发布字段由系统生成，请在对应工作区修改资源。</p></div>
+        </div>
+        <pre class="advanced-preview"><code>${escapeHtml(preview)}</code></pre>
+        <p class="field-hint">发布前仍会执行 sing-box check，并保存不可变快照。</p>
+      </div>`,
+    saveLabel: "关闭"
+  });
+}
+
 document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view-target]");
   if (viewButton) {
@@ -1102,6 +1246,56 @@ document.addEventListener("click", async (event) => {
   const protocolButton = event.target.closest("[data-protocol]");
   if (protocolButton) {
     openProtocol(protocolButton.dataset.protocol);
+    return;
+  }
+
+  const serviceTab = event.target.closest("[data-service-tab]");
+  if (serviceTab) {
+    selectWorkspaceTab("service", serviceTab.dataset.serviceTab);
+    return;
+  }
+
+  const policyTab = event.target.closest("[data-policy-tab]");
+  if (policyTab) {
+    selectWorkspaceTab("policy", policyTab.dataset.policyTab);
+    return;
+  }
+
+  const operationTab = event.target.closest("[data-operation-tab]");
+  if (operationTab) {
+    selectWorkspaceTab("operation", operationTab.dataset.operationTab);
+    return;
+  }
+
+  const systemTab = event.target.closest("[data-system-tab]");
+  if (systemTab) {
+    selectWorkspaceTab("system", systemTab.dataset.systemTab);
+    return;
+  }
+
+  if (event.target.closest("[data-advanced-json]")) {
+    openAdvancedConfig();
+    return;
+  }
+
+  if (event.target.closest("[data-refresh-runtime]")) {
+    try {
+      await loadBootstrap();
+      showToast("状态已刷新", "已重新读取 Runtime 与安装状态。");
+    } catch (error) {
+      showToast("刷新失败", error.message);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-run-diagnostics]")) {
+    try {
+      await loadBootstrap();
+      renderDiagnostics();
+      showToast("诊断完成", "安装、主机、协议和用户状态已重新检查。");
+    } catch (error) {
+      showToast("诊断失败", error.message);
+    }
     return;
   }
 

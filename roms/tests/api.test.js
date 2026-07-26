@@ -64,6 +64,7 @@ test("authenticated bootstrap returns users with independent entitlements", asyn
 
   const body = await response.json();
   assert.equal(body.currentAdmin.username, "admin");
+  assert.equal(body.hosts[0].name, "RayLink Runtime");
   assert.equal(body.users.length, 6);
   assert.equal("plans" in body, false);
   const user = body.users.find((candidate) => candidate.email === "lin.zhixia@meridian-log.cn");

@@ -58,16 +58,22 @@
       <nav class="primary-nav">
         <span class="nav-indicator" aria-hidden="true"></span>
         <button class="nav-item active" data-view-target="dashboard" aria-current="page">
-          <svg><use href="#i-grid"/></svg><span>仪表盘</span>
+          <svg><use href="#i-grid"/></svg><span>总览</span>
         </button>
         <button class="nav-item" data-view-target="users">
-          <svg><use href="#i-users"/></svg><span>用户管理</span><span class="nav-count">27</span>
+          <svg><use href="#i-users"/></svg><span>用户</span><span class="nav-count">27</span>
         </button>
-        <button class="nav-item" data-view-target="hosts">
-          <svg><use href="#i-server"/></svg><span>主机</span><span class="nav-count">4</span>
+        <button class="nav-item" data-view-target="services">
+          <svg><use href="#i-link"/></svg><span>服务</span><span class="nav-count" id="service-nav-count">0</span>
         </button>
-        <button class="nav-item" data-view-target="deploy">
-          <svg><use href="#i-code"/></svg><span>配置发布</span>
+        <button class="nav-item" data-view-target="policies">
+          <svg><use href="#i-shield"/></svg><span>策略</span>
+        </button>
+        <button class="nav-item" data-view-target="operations">
+          <svg><use href="#i-terminal"/></svg><span>运维</span>
+        </button>
+        <button class="nav-item" data-view-target="system">
+          <svg><use href="#i-server"/></svg><span>系统</span><span class="nav-count">1</span>
         </button>
       </nav>
 
@@ -119,7 +125,7 @@
               <h1 id="dashboard-runtime-heading">Runtime 待配置</h1>
               <p id="dashboard-runtime-copy">正在读取 sing-box 运行状态。</p>
             </div>
-            <button class="button secondary" data-view-target="deploy">
+            <button class="button secondary" data-view-target="operations">
               <svg><use href="#i-code"/></svg>查看当前配置
             </button>
           </div>
@@ -135,7 +141,7 @@
             <section class="panel host-summary">
               <div class="panel-heading">
                 <div><p class="eyebrow">受管主机</p><h2 id="dashboard-host-name">本机 Runtime</h2></div>
-                <button class="text-button" data-view-target="hosts">配置主机 <svg><use href="#i-arrow"/></svg></button>
+                <button class="text-button" data-view-target="system">配置主机 <svg><use href="#i-arrow"/></svg></button>
               </div>
               <div class="node-list">
                 <button class="node-row" data-open-host="local">
@@ -233,24 +239,21 @@
           </div>
         </section>
 
-        <section class="view" id="view-hosts" data-view="hosts">
+        <section class="view" id="view-services" data-view="services">
           <div class="page-heading">
-            <div><p class="eyebrow">基础设施</p><h1>主机</h1><p>监控 sing-box 节点、协议入口和同步状态。</p></div>
-            <button class="button primary" data-open-host="local"><svg><use href="#i-edit"/></svg>配置 Runtime</button>
+            <div><p class="eyebrow">连接与协议</p><h1>服务</h1><p>用一个工作区管理 sing-box 入站服务、出站能力和端点。</p></div>
+            <button class="button primary" data-service-tab="inbounds"><svg><use href="#i-link"/></svg>浏览入站协议</button>
           </div>
-          <section class="host-map">
-            <div class="map-header"><span>单机 Runtime 拓扑</span><span id="host-map-status"><i></i>等待连接</span></div>
-            <div class="map-stage" aria-label="RayLink 控制面到 sing-box Runtime 的拓扑">
-              <div class="map-route route-one"></div>
-              <button class="map-node tokyo" data-open-host="local"><i></i><span><strong id="host-map-name">本机 Runtime</strong><small id="host-map-address">尚未配置</small></span></button>
-              <span class="map-origin">RayLink 控制面</span>
-            </div>
-          </section>
+          <div class="workspace-tabs" role="tablist" aria-label="服务类型">
+            <button class="active" data-service-tab="inbounds" role="tab" aria-selected="true">入站服务 <span id="inbound-tab-count">0</span></button>
+            <button data-service-tab="outbounds" role="tab" aria-selected="false">出站节点 <span>1</span></button>
+            <button data-service-tab="endpoints" role="tab" aria-selected="false">端点 <span>0</span></button>
+          </div>
           <section class="runtime-console" aria-labelledby="runtime-console-title">
             <header class="runtime-console-heading">
               <div>
-                <p class="eyebrow">Runtime 管理</p>
-                <h2 id="runtime-console-title">sing-box 与入口协议</h2>
+                <p class="eyebrow">入站服务</p>
+                <h2 id="runtime-console-title">协议入口</h2>
                 <p id="runtime-installation-copy">正在检测本机 sing-box。</p>
               </div>
               <button class="button primary" id="install-sing-box"><svg><use href="#i-terminal"/></svg>一键安装 sing-box</button>
@@ -264,21 +267,76 @@
             </div>
             <div class="protocol-grid" id="protocol-grid"></div>
           </section>
-          <section class="table-panel host-table">
-            <div class="table-scroll">
-              <table>
-                <thead><tr><th>主机</th><th>状态</th><th>入口协议</th><th>CPU</th><th>吞吐</th><th>最后同步</th><th><span class="sr-only">操作</span></th></tr></thead>
-                <tbody id="host-table-body"></tbody>
-              </table>
+          <section class="resource-panel" data-service-panel="outbounds" hidden>
+            <div class="resource-panel-heading">
+              <div><p class="eyebrow">出站节点</p><h2>流量出口</h2><p>当前生产配置使用 direct 出站；本版本尚未开放高级出站的界面写入。</p></div>
+              <span class="status-badge good"><i></i>已接入运行时</span>
+            </div>
+            <div class="resource-list">
+              <article><span class="resource-icon"><svg><use href="#i-arrow"/></svg></span><div><strong>direct</strong><small>默认直连出口 · route.final</small></div><span class="tag">direct</span><span class="status-badge good"><i></i>启用</span></article>
+            </div>
+          </section>
+          <section class="resource-panel" data-service-panel="endpoints" hidden>
+            <div class="empty-resource">
+              <span class="resource-icon"><svg><use href="#i-link"/></svg></span>
+              <h2>尚未创建端点</h2>
+              <p>端点用于管理 WireGuard、Tailscale 等网络接口。它们不会影响当前入站服务。</p>
+              <button class="button secondary" data-advanced-json><svg><use href="#i-code"/></svg>查看配置 JSON</button>
             </div>
           </section>
         </section>
 
-        <section class="view" id="view-deploy" data-view="deploy">
+        <section class="view" id="view-policies" data-view="policies">
           <div class="page-heading">
-            <div><p class="eyebrow">变更管理</p><h1>配置发布</h1><p>编译、校验并原子发布到当前 sing-box Runtime。</p></div>
+            <div><p class="eyebrow">流量决策</p><h1>策略</h1><p>集中查看当前运行配置中的路由、DNS 和规则集，默认策略保持简单。</p></div>
+            <button class="button secondary" data-advanced-json><svg><use href="#i-code"/></svg>配置 JSON</button>
+          </div>
+          <div class="workspace-tabs" role="tablist" aria-label="策略类型">
+            <button class="active" data-policy-tab="route" role="tab" aria-selected="true">路由</button>
+            <button data-policy-tab="dns" role="tab" aria-selected="false">DNS</button>
+            <button data-policy-tab="rulesets" role="tab" aria-selected="false">规则集</button>
+          </div>
+          <section class="policy-layout" data-policy-panel="route">
+            <div class="panel policy-list">
+              <div class="panel-heading"><div><p class="eyebrow">规则顺序</p><h2>路由规则</h2></div><span class="status-badge good"><i></i>默认安全</span></div>
+              <div class="rule-row final"><span class="rule-order">∞</span><div><strong>最终出口</strong><small>未配置自定义规则</small></div><span class="tag">direct</span></div>
+            </div>
+            <aside class="panel policy-inspector">
+              <p class="eyebrow">简单模式</p><h2>默认直连策略</h2>
+              <p>当前服务端只负责接收用户连接并直连目标地址。无需额外规则即可运行。</p>
+              <div class="setting-row"><div><strong>最终出口</strong><small>写入 route.final</small></div><span class="status-badge good"><i></i>direct</span></div>
+              <div class="setting-row"><div><strong>自定义规则</strong><small>当前配置未启用</small></div><span class="status-badge neutral"><i></i>0 条</span></div>
+            </aside>
+          </section>
+          <section class="policy-layout" data-policy-panel="dns" hidden>
+            <div class="panel policy-list">
+              <div class="panel-heading"><div><p class="eyebrow">解析链路</p><h2>DNS 服务器</h2></div><span class="status-badge neutral"><i></i>系统默认</span></div>
+              <div class="rule-row"><span class="resource-icon">OS</span><div><strong>local</strong><small>使用 Runtime 系统解析器</small></div><span class="tag">默认</span></div>
+            </div>
+            <aside class="panel policy-inspector"><p class="eyebrow">当前行为</p><h2>遵循系统 DNS</h2><p>RayLink 未覆盖主机 DNS。本版本尚未开放分流解析、FakeIP 或 DoH 的界面写入。</p></aside>
+          </section>
+          <section class="resource-panel" data-policy-panel="rulesets" hidden>
+            <div class="empty-resource"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><h2>没有外部规则集</h2><p>当前默认策略不依赖远程规则，发布时不会额外下载文件。</p><button class="button secondary" data-advanced-json>查看高级 JSON</button></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-operations" data-view="operations">
+          <div class="page-heading">
+            <div><p class="eyebrow">运行与变更</p><h1>运维</h1><p>查看 Runtime 状态、校验发布、诊断结果和历史版本。</p></div>
             <div class="heading-actions"><button class="button secondary" id="rollback-config" disabled><svg><use href="#i-rollback"/></svg>回滚上一版本</button><button class="button primary" id="publish-config"><svg><use href="#i-terminal"/></svg>校验并发布</button></div>
           </div>
+          <div class="operations-summary">
+            <article><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><small>Runtime</small><strong id="operations-runtime-state">检测中</strong></div></article>
+            <article><span class="resource-icon"><svg><use href="#i-code"/></svg></span><div><small>配置状态</small><strong id="operations-config-state">等待发布</strong></div></article>
+            <article><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><small>最近校验</small><strong id="operations-validation-state">尚无记录</strong></div></article>
+          </div>
+          <div class="workspace-tabs operations-tabs" role="tablist" aria-label="运维工具">
+            <button class="active" data-operation-tab="publish" role="tab" aria-selected="true">发布</button>
+            <button data-operation-tab="runtime" role="tab" aria-selected="false">Runtime</button>
+            <button data-operation-tab="logs" role="tab" aria-selected="false">日志</button>
+            <button data-operation-tab="diagnostics" role="tab" aria-selected="false">诊断</button>
+          </div>
+          <div data-operation-panel="publish">
           <section class="release-header">
             <div><span class="release-version">v2026.07.25-05</span><span class="status-badge neutral"><i></i>草稿</span></div>
             <p>根据当前用户权益和 Runtime 主机生成受管配置</p>
@@ -292,7 +350,7 @@
           </ol>
           <div class="deploy-layout">
             <section class="config-editor">
-              <div class="editor-tabs"><button class="active">config.json</button><button>route.json</button><button>dns.json</button><span>JSON</span></div>
+              <div class="editor-tabs"><button class="active">config.json</button><span>由工作区生成</span></div>
               <div class="editor-body">
                 <ol class="line-numbers" aria-hidden="true"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li></ol>
                 <pre><code id="managed-config-preview">{
@@ -324,12 +382,68 @@
               </div>
               <div class="change-summary">
                 <span><i class="add">+</i><strong>1</strong> 个入站</span>
-                <span><i class="modify">~</i><strong>2</strong> 条路由</span>
+                <span><i class="modify">~</i><strong>0</strong> 条路由</span>
                 <span><i class="remove">−</i><strong>0</strong> 个删除</span>
               </div>
-              <div class="target-nodes"><p>目标 Runtime</p><label><input type="checkbox" checked disabled><span id="managed-target-name">CycleLink Runtime</span><small>本机受管</small></label></div>
+              <div class="target-nodes"><p>目标 Runtime</p><label><input type="checkbox" checked disabled><span id="managed-target-name">RayLink Runtime</span><small>本机受管</small></label></div>
             </aside>
           </div>
+          </div>
+          <section class="resource-panel" data-operation-panel="runtime" hidden>
+            <div class="resource-panel-heading"><div><p class="eyebrow">运行时</p><h2>sing-box 进程</h2><p>状态来自当前主机适配器，而不是页面模拟值。</p></div><button class="button secondary" data-refresh-runtime><svg><use href="#i-refresh"/></svg>刷新状态</button></div>
+            <div class="runtime-facts" id="operations-runtime-facts"><span>正在读取运行状态…</span></div>
+          </section>
+          <section class="resource-panel" data-operation-panel="logs" hidden>
+            <div class="resource-panel-heading"><div><p class="eyebrow">运行日志</p><h2>最近事件</h2><p>当前版本暂不采集 sing-box 日志，先展示控制面的可审计事件。</p></div><span class="status-badge neutral"><i></i>只读</span></div>
+            <div class="terminal-log" id="operations-log"><span>RayLink control plane ready.</span><span>等待首次运行事件…</span></div>
+          </section>
+          <section class="resource-panel" data-operation-panel="diagnostics" hidden>
+            <div class="resource-panel-heading"><div><p class="eyebrow">诊断</p><h2>发布前检查</h2><p>检查安装、主机、协议、有效用户和配置快照。</p></div><button class="button secondary" data-run-diagnostics><svg><use href="#i-refresh"/></svg>重新诊断</button></div>
+            <div class="diagnostic-grid" id="diagnostic-grid"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-system" data-view="system">
+          <div class="page-heading">
+            <div><p class="eyebrow">平台与 Runtime</p><h1>系统</h1><p>管理主机、安装状态、证书、版本和备份；高频业务配置放在服务与策略中。</p></div>
+            <button class="button primary" data-open-host="local"><svg><use href="#i-edit"/></svg>配置主机</button>
+          </div>
+          <div class="workspace-tabs" role="tablist" aria-label="系统设置">
+            <button class="active" data-system-tab="hosts" role="tab" aria-selected="true">主机</button>
+            <button data-system-tab="certificates" role="tab" aria-selected="false">证书</button>
+            <button data-system-tab="maintenance" role="tab" aria-selected="false">版本与备份</button>
+            <button data-system-tab="advanced" role="tab" aria-selected="false">高级</button>
+          </div>
+          <div data-system-panel="hosts">
+            <section class="host-map">
+              <div class="map-header"><span>单机 Runtime 拓扑</span><span id="host-map-status"><i></i>等待连接</span></div>
+              <div class="map-stage" aria-label="RayLink 控制面到 sing-box Runtime 的拓扑">
+                <div class="map-route route-one"></div>
+                <button class="map-node tokyo" data-open-host="local"><i></i><span><strong id="host-map-name">本机 Runtime</strong><small id="host-map-address">尚未配置</small></span></button>
+                <span class="map-origin">RayLink 控制面</span>
+              </div>
+            </section>
+            <section class="table-panel host-table">
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>主机</th><th>状态</th><th>入口协议</th><th>CPU</th><th>吞吐</th><th>运行版本</th><th><span class="sr-only">操作</span></th></tr></thead>
+                  <tbody id="host-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+          <section class="system-card-grid" data-system-panel="certificates" hidden>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><p class="eyebrow">TLS 资产</p><h2>证书路径由协议管理</h2><p>在“服务 → 入站服务”编辑支持 TLS 的协议，可指定证书和私钥路径。</p><button class="text-button" data-view-target="services">前往入站服务 <svg><use href="#i-arrow"/></svg></button></div></article>
+            <article class="panel system-card"><span class="resource-icon">R</span><div><p class="eyebrow">Reality</p><h2>密钥按协议生成</h2><p>VLESS 等协议可在编辑抽屉中一键生成 Reality 密钥对。</p></div></article>
+          </section>
+          <section class="system-card-grid" data-system-panel="maintenance" hidden>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><p class="eyebrow">版本</p><h2 id="system-version">检测中</h2><p id="system-build">正在读取当前二进制构建。</p><button class="button secondary" data-view-target="services">查看协议兼容性</button></div></article>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-rollback"/></svg></span><div><p class="eyebrow">备份</p><h2>发布快照</h2><p>每次发布都会保留不可变配置快照，可在运维工作区回滚。</p><button class="button secondary" data-view-target="operations">查看发布记录</button></div></article>
+          </section>
+          <section class="resource-panel" data-system-panel="advanced" hidden>
+            <div class="resource-panel-heading"><div><p class="eyebrow">高级配置</p><h2>受管配置摘要</h2><p>这里展示 RayLink 管理的核心字段。受管字段需回到对应工作区修改。</p></div><button class="button secondary" data-view-target="operations"><svg><use href="#i-code"/></svg>打开配置工作台</button></div>
+            <pre class="advanced-preview"><code id="system-config-preview">{}</code></pre>
+          </section>
         </section>
 
         <section class="view not-found" id="view-not-found" data-view="not-found">
@@ -341,9 +455,9 @@
 
   <nav class="mobile-nav" aria-label="移动端主导航">
     <button class="active" data-view-target="dashboard"><svg><use href="#i-grid"/></svg><span>总览</span></button>
-    <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户管理</span></button>
-    <button data-view-target="hosts"><svg><use href="#i-server"/></svg><span>主机</span></button>
-    <button data-view-target="deploy"><svg><use href="#i-code"/></svg><span>发布</span></button>
+    <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户</span></button>
+    <button data-view-target="services"><svg><use href="#i-link"/></svg><span>服务</span></button>
+    <button data-view-target="operations"><svg><use href="#i-terminal"/></svg><span>运维</span></button>
   </nav>
 
   <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-labelledby="drawer-title" inert>

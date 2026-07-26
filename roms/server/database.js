@@ -313,8 +313,12 @@ export class RayLinkStore {
 
     this.db.prepare(`
       INSERT OR IGNORE INTO hosts (id, name, address, region, status, created_at, updated_at)
-      VALUES ('local', '本机 Runtime', ?, 'tokyo', 'unknown', ?, ?)
+      VALUES ('local', 'RayLink Runtime', ?, 'tokyo', 'unknown', ?, ?)
     `).run(initialHostAddress, createdAt, createdAt);
+    this.db.prepare(`
+      UPDATE hosts SET name = 'RayLink Runtime', updated_at = ?
+      WHERE id = 'local' AND name = 'CycleLink Runtime'
+    `).run(createdAt);
     this.db.prepare(`
       INSERT OR IGNORE INTO settings (key, value, updated_at)
       VALUES ('shadowsocks_master_password', ?, ?)

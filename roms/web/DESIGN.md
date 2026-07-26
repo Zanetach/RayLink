@@ -8,6 +8,8 @@ The primary signature is the deployment trail: every configuration change is sho
 
 Each user owns an independent entitlement. The user workspace creates and edits identity, traffic allowance, expiry, device limit, node scope, and client capabilities in one flow.
 
+The information architecture uses six stable destinations: Overview, Users, Services, Policies, Operations, and System. High-frequency managed fields stay in simple forms; raw configuration is exposed as an advanced, read-only preview so the interface never implies that an unconnected control has changed the runtime.
+
 ## 2. Color palette and roles
 
 | Token | Value | Role |
