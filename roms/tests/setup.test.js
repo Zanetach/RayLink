@@ -396,6 +396,8 @@ test("one-command bootstrap verifies and prepares the matching release package",
       ""
     ].join("\n")
   );
+  await writeFile(join(directory, `._raylink-${version}`), "appledouble metadata");
+  await writeFile(join(packageDirectory, "._package.json"), "appledouble metadata");
   const archiveName = `raylink-${version}-linux-${architecture}.tar.gz`;
   const archivePath = join(releaseDirectory, archiveName);
   await execFile("tar", [
@@ -403,6 +405,7 @@ test("one-command bootstrap verifies and prepares the matching release package",
     archivePath,
     "-C",
     directory,
+    `._raylink-${version}`,
     `raylink-${version}`
   ]);
   const digest = createHash("sha256").update(await readFile(archivePath)).digest("hex");

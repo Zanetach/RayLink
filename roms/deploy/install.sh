@@ -140,6 +140,7 @@ fi
 expected_root="raylink-${version}"
 while IFS= read -r archive_entry; do
   case "$archive_entry" in
+    "._${expected_root}") ;;
     "$expected_root"|"$expected_root"/*) ;;
     *) fail "发布包目录结构不正确" ;;
   esac
@@ -150,7 +151,11 @@ if tar -tvzf "$archive_path" | grep -Eq '^[lh]'; then
   fail "发布包不能包含符号链接或硬链接"
 fi
 
-tar -xzf "$archive_path" -C "$temporary_root"
+tar \
+  --exclude="._${expected_root}" \
+  --exclude='*/._*' \
+  -xzf "$archive_path" \
+  -C "$temporary_root"
 installer="${temporary_root}/${expected_root}/deploy/install-control-plane.sh"
 [ -f "$installer" ] || fail "发布包缺少控制面安装器"
 
