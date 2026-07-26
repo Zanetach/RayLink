@@ -109,6 +109,7 @@ export async function queryV2RayUserStats(options = {}) {
   const session = connect(endpoint.origin);
   let timeoutHandle;
   return new Promise((resolve, reject) => {
+    session.on("error", reject);
     timeoutHandle = setTimeout(() => {
       session.destroy();
       reject(new Error("V2Ray Stats 查询超时"));

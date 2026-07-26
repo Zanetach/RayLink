@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -243,6 +243,15 @@ test("the one-time setup token initializes access, admin, and local runtime", as
   assert.equal(result.currentAdmin.username, "admin");
   assert.equal(result.redirectTo, "/");
   assert.match(completed.headers.get("set-cookie"), /^raylink_session=/);
+  const setupCookie = completed.headers.get("set-cookie").split(";")[0];
+
+  const bootstrap = await fetch(`${testApp.baseUrl}/api/bootstrap`, {
+    headers: { cookie: setupCookie }
+  });
+  assert.equal(bootstrap.status, 200);
+  const cleanWorkspace = await bootstrap.json();
+  assert.deepEqual(cleanWorkspace.users, []);
+  assert.deepEqual(cleanWorkspace.hosts.map((host) => host.id), ["local"]);
 
   const status = await fetch(`${testApp.baseUrl}/api/setup/status`);
   assert.deepEqual(await status.json(), { state: "READY", version: 1 });
@@ -290,7 +299,63 @@ test("the control-plane installer emits a fragment setup URL and never persists 
     "public address validation must happen before the installation root is created"
   );
   assert.match(installer, /systemctl enable sing-box-raylink/);
+  assert.match(
+    installer,
+    /web\/node\/runtime\/raylink-sing-box-\$\{runtime_version\}-linux-\$\{runtime_arch\}/
+  );
+  assert.match(installer, /未找到预编译 Runtime，回退到本机编译/);
+  assert.match(installer, /with_naive_outbound/);
+  assert.match(installer, /with_v2ray_api/);
+  assert.doesNotMatch(installer, /\$source_root\/data/);
+  const artifactBuilder = await readFile(
+    new URL("../deploy/build-runtime-artifact.sh", import.meta.url),
+    "utf8"
+  );
+  assert.match(artifactBuilder, /web\/node\/runtime/);
+  assert.match(artifactBuilder, /RAYLINK_TARGET_ARCH="\$runtime_arch"/);
+  assert.match(
+    artifactBuilder,
+    /output_root="\$\(CDPATH= cd -- "\$output_root" && pwd\)"/
+  );
+  const runtimeBuilder = await readFile(
+    new URL("../web/node/build-metered-runtime.sh", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(runtimeBuilder, /go\.dev\/dl\/\$\{archive\}\.sha256/);
+  assert.match(
+    runtimeBuilder,
+    /da18191ddb7db8a9339816f3e2b54bdded8047cdc2a5d67059478f8d1595c43f/
+  );
+  assert.match(
+    runtimeBuilder,
+    /fd2bccce882e29369f56c86487663bb78ba7ea9e02188a5b0269303a0c3d33ab/
+  );
+  assert.ok(
+    runtimeBuilder.includes(
+      String.raw`sed -n 's/^[[:space:]]*"Sum": "\([^"]*\)",[[:space:]]*$/\1/p'`
+    ),
+    "the approved sing-box module checksum must be parsed from go mod JSON"
+  );
+  assert.match(
+    runtimeBuilder,
+    /github\.com\/sagernet\/sing-box\/constant\.Version=\$\{SING_BOX_VERSION\}/
+  );
   assert.match(rotator, /systemctl restart raylink/);
   assert.match(rotator, /\/setup#token=/);
   assert.doesNotMatch(rotator, /RAYLINK_SETUP_TOKEN=/);
+});
+
+test("the release package keeps every installer dependency executable", async () => {
+  for (const relativePath of [
+    "../web/node/build-metered-runtime.sh",
+    "../deploy/build-runtime-artifact.sh",
+    "../deploy/package-release.sh"
+  ]) {
+    const dependency = await stat(new URL(relativePath, import.meta.url));
+    assert.notEqual(
+      dependency.mode & 0o111,
+      0,
+      `${relativePath} must be executable in the release package`
+    );
+  }
 });

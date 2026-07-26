@@ -34,7 +34,8 @@ bash install-control-plane.sh
 安装器会完成：
 
 - 从 Node.js 官方源安装并校验 Node.js 22；
-- 构建审批版本的 sing-box 1.13.14 计量版；
+- 优先校验并安装发布包内预编译的 sing-box 1.13.14 计量版；
+- 开发源码包未携带预编译 Runtime 时，才回退到本机编译；
 - 安装 RayLink、systemd 和 Nginx；
 - 为服务器 IP 生成带 SAN 的首次访问证书；
 - 输出仅显示一次的 `https://服务器IP/setup#token=...` 初始化地址。
@@ -42,6 +43,51 @@ bash install-control-plane.sh
 浏览器首次访问 IP 证书会提示证书由本机签发。继续前应核对安装器输出的
 SHA-256 证书指纹。初始化令牌只以哈希形式写入服务器，默认 30 分钟后失效；
 初始化成功后立即作废。
+
+### 发布时预编译 Runtime
+
+正式发布包应同时包含 `linux-amd64` 和 `linux-arm64` 两个 Runtime，避免每台 VPS
+重复下载 Go 模块和编译。分别在对应架构的可信 Linux 构建机执行：
+
+```bash
+sudo bash deploy/build-runtime-artifact.sh 1.13.14
+```
+
+默认产物写入 `web/node/runtime/`。将两台构建机生成的二进制及 `.sha256`
+文件合并到发布包的该目录；控制台首机安装和后续 RayLink Node 接入都会按 VPS
+架构选择同一份产物，验证 SHA-256、sing-box 版本及完整审批 build tags 后直接
+安装。仓库源码不提交大型二进制，正式发布流水线负责生成并装配这些产物。
+
+也可以指定自定义目录；相对路径会先转换为绝对路径，避免构建器拒绝：
+
+```bash
+sudo bash deploy/build-runtime-artifact.sh 1.13.14 ./release-runtime
+```
+
+第三个参数可以指定目标架构，例如在 ARM64 构建机上交叉构建 AMD64：
+
+```bash
+sudo bash deploy/build-runtime-artifact.sh 1.13.14 ./release-runtime amd64
+```
+
+交叉构建阶段会验证目标 ELF 架构；发布前还必须在 AMD64 Linux 用户空间执行
+`raylink-sing-box-1.13.14-linux-amd64 version`，确认版本和完整审批 build tags。
+原生架构构建会在脚本内部直接完成这项执行校验。
+
+产物准备完成后构建正式安装包。默认要求 AMD64 和 ARM64 都齐全：
+
+```bash
+bash deploy/package-release.sh 0.1.0
+```
+
+若当前交付目标全部是 AMD/x86 VPS，可以只装配 AMD64：
+
+```bash
+RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.1.0
+```
+
+发布包只包含 `package.json`、`server/`、`web/` 和 `deploy/`，不会打包本地
+`data/`、测试数据库或开发输出，并会同时生成发布包 `.sha256`。
 
 若令牌过期，在服务器上执行以下命令可安全轮换令牌。新明文令牌仍只显示一次，
 服务器只保存其哈希：

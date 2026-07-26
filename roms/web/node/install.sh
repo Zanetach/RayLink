@@ -19,7 +19,7 @@ fail() {
 [ -n "$RAYLINK_ENROLL_TOKEN" ] || fail "缺少 RAYLINK_ENROLL_TOKEN"
 if ! printf '%s' "$RAYLINK_SERVER" | grep -Eq '^https://[A-Za-z0-9._:-]+$'; then
   if [ "${RAYLINK_ALLOW_INSECURE_HTTP:-false}" != "true" ] \
-    || ! printf '%s' "$RAYLINK_SERVER" | grep -Eq '^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?$'; then
+    || ! printf '%s' "$RAYLINK_SERVER" | grep -Eq '^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?$'; then
     fail "RAYLINK_SERVER 生产环境必须是 HTTPS 根地址"
   fi
 fi
@@ -35,42 +35,70 @@ fi
 
 machine_arch="$(uname -m)"
 case "$machine_arch" in
-  x86_64|amd64) node_arch="x64" ;;
-  aarch64|arm64) node_arch="arm64" ;;
+  x86_64|amd64) node_arch="x64"; runtime_arch="amd64" ;;
+  aarch64|arm64) node_arch="arm64"; runtime_arch="arm64" ;;
   *) fail "暂不支持 CPU 架构：$machine_arch" ;;
 esac
 
 install -d -m 0755 "$RAYLINK_NODE_ROOT"
 install -d -m 0700 /etc/raylink-node
 install -d -m 0750 /var/lib/raylink-node/sing-box
+temporary_root="$(mktemp -d)"
+trap 'rm -rf "$temporary_root"' EXIT
 
 if [ ! -x "$RAYLINK_NODE_ROOT/node/bin/node" ]; then
   node_dist_url="https://nodejs.org/dist/latest-v${RAYLINK_NODE_VERSION}.x"
   node_archive="$(curl -fsSL "$node_dist_url/SHASUMS256.txt" | awk -v arch="$node_arch" '$2 ~ ("linux-" arch "\\.tar\\.xz$") { print $2; exit }')"
   [ -n "$node_archive" ] || fail "无法解析 Node.js v${RAYLINK_NODE_VERSION} 安装包"
-  work_dir="$(mktemp -d)"
-  trap 'rm -rf "$work_dir"' EXIT
-  curl -fsSL "$node_dist_url/$node_archive" -o "$work_dir/$node_archive"
-  curl -fsSL "$node_dist_url/SHASUMS256.txt" -o "$work_dir/SHASUMS256.txt"
+  curl -fsSL "$node_dist_url/$node_archive" -o "$temporary_root/$node_archive"
+  curl -fsSL "$node_dist_url/SHASUMS256.txt" -o "$temporary_root/SHASUMS256.txt"
   (
-    cd "$work_dir"
+    cd "$temporary_root"
     grep "  $node_archive\$" SHASUMS256.txt | sha256sum -c -
   )
   rm -rf "$RAYLINK_NODE_ROOT/node"
   mkdir -p "$RAYLINK_NODE_ROOT/node"
-  tar -xJf "$work_dir/$node_archive" -C "$RAYLINK_NODE_ROOT/node" --strip-components=1
+  tar -xJf "$temporary_root/$node_archive" -C "$RAYLINK_NODE_ROOT/node" --strip-components=1
 fi
 
 curl -fsSL "$RAYLINK_SERVER/node/raylink-node.mjs" -o "$RAYLINK_NODE_ROOT/raylink-node.mjs"
 chmod 0755 "$RAYLINK_NODE_ROOT/raylink-node.mjs"
-curl -fsSL "$RAYLINK_SERVER/node/build-metered-runtime.sh" -o "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"
-chmod 0755 "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"
 
 if [ "$RAYLINK_ENABLE_USER_METERING" != "true" ]; then
   fail "正式版 RayLink Node 必须启用真实用户计量"
 fi
-"$RAYLINK_NODE_ROOT/build-metered-runtime.sh" "$SING_BOX_VERSION" \
-  /usr/local/bin/raylink-sing-box
+
+runtime_name="raylink-sing-box-${SING_BOX_VERSION}-linux-${runtime_arch}"
+runtime_url="$RAYLINK_SERVER/node/runtime/$runtime_name"
+runtime_candidate="$temporary_root/$runtime_name"
+runtime_checksum="$temporary_root/${runtime_name}.sha256"
+if curl -fsSL "$runtime_url" -o "$runtime_candidate" \
+  && curl -fsSL "${runtime_url}.sha256" -o "$runtime_checksum"; then
+  expected_runtime_sha256="$(awk 'NR == 1 { print $1 }' "$runtime_checksum")"
+  printf '%s' "$expected_runtime_sha256" | grep -Eq '^[a-f0-9]{64}$' \
+    || fail "预编译 Runtime 校验文件格式错误"
+  printf '%s  %s\n' "$expected_runtime_sha256" "$runtime_candidate" | sha256sum -c -
+  chmod 0755 "$runtime_candidate"
+  runtime_details="$("$runtime_candidate" version)" \
+    || fail "预编译 Runtime 无法执行"
+  printf '%s\n' "$runtime_details" | grep -q "sing-box version ${SING_BOX_VERSION}" \
+    || fail "预编译 Runtime 版本不匹配"
+  runtime_tags="$(printf '%s\n' "$runtime_details" | sed -n 's/^Tags:[[:space:]]*//p' | tr -d '[:space:]')"
+  required_runtime_tags="with_gvisor with_quic with_dhcp with_wireguard with_utls with_acme with_clash_api with_tailscale with_ccm with_ocm with_naive_outbound with_v2ray_api with_purego badlinkname tfogo_checklinkname0"
+  for required_runtime_tag in $required_runtime_tags; do
+    printf ',%s,' "$runtime_tags" | grep -Fq ",${required_runtime_tag}," \
+      || fail "预编译 Runtime 缺少 ${required_runtime_tag}"
+  done
+  install -m 0755 "$runtime_candidate" /usr/local/bin/raylink-sing-box
+  printf '已安装预编译 RayLink Runtime（linux-%s）\n' "$runtime_arch"
+else
+  printf '控制台未提供 linux-%s 预编译 Runtime，回退到本机编译\n' "$runtime_arch"
+  curl -fsSL "$RAYLINK_SERVER/node/build-metered-runtime.sh" \
+    -o "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"
+  chmod 0755 "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"
+  "$RAYLINK_NODE_ROOT/build-metered-runtime.sh" "$SING_BOX_VERSION" \
+    /usr/local/bin/raylink-sing-box
+fi
 sing_box_bin=/usr/local/bin/raylink-sing-box
 
 # The official package can enable its own runtime unit. RayLink owns the

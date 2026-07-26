@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttp2Server } from "node:http2";
+import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { RayLinkStore } from "../server/database.js";
 import {
   queryV2RayUserStats,
   V2RayStatsCollector
 } from "../server/usage/v2ray-stats.js";
+
+const execFile = promisify(execFileCallback);
 
 function testVarint(value) {
   let remaining = value;
@@ -58,6 +63,32 @@ test("V2Ray Stats client reads the official gRPC QueryStats wire response", asyn
     name: "user>>>wire@example.com>>>traffic>>>uplink",
     value: 2_048
   }]);
+});
+
+test("an unavailable V2Ray stats port rejects the query without crashing RayLink", async () => {
+  const server = createTcpServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+  const moduleUrl = new URL("../server/usage/v2ray-stats.js", import.meta.url).href;
+  const script = `
+    import { queryV2RayUserStats } from ${JSON.stringify(moduleUrl)};
+    try {
+      await queryV2RayUserStats({
+        endpoint: ${JSON.stringify(`http://127.0.0.1:${port}`)},
+        timeoutMs: 250
+      });
+      process.exitCode = 2;
+    } catch (error) {
+      process.stdout.write(error.code || error.message);
+    }
+  `;
+
+  const result = await execFile(process.execPath, ["--input-type=module", "-e", script]);
+
+  assert.match(result.stdout, /ECONNREFUSED|ERR_HTTP2_STREAM_CANCEL|V2Ray Stats/);
 });
 
 test("V2Ray Stats collector exposes cumulative per-user uplink and downlink counters", async () => {

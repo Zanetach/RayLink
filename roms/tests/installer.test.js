@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -84,6 +85,49 @@ test("Linux one-click installation uses only the approved metered builder", asyn
     [installer.meteredRuntimeBuilder, "1.13.14", binaryPath]
   ]);
   assert.equal(calls.some(([, args]) => args[0] === "-c"), false);
+});
+
+test("Linux one-click installation prefers the packaged Runtime artifact", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-release-install-"));
+  const runtimeArtifactDir = join(directory, "runtime");
+  const binaryPath = join(directory, "raylink-sing-box");
+  const artifactPath = join(
+    runtimeArtifactDir,
+    "raylink-sing-box-1.13.14-linux-amd64"
+  );
+  const artifact = Buffer.from("precompiled-runtime");
+  const checksum = createHash("sha256").update(artifact).digest("hex");
+  await mkdir(runtimeArtifactDir);
+  await writeFile(artifactPath, artifact);
+  await writeFile(`${artifactPath}.sha256`, `${checksum}  ${artifactPath}\n`);
+  let builderCalls = 0;
+  const installer = new SingBoxInstaller({
+    binaryPath,
+    platform: "linux",
+    runtimeArch: "x64",
+    runtimeArtifactDir,
+    runner: async (file) => {
+      if (file === "sh") builderCalls += 1;
+      if (file === binaryPath) {
+        try {
+          await readFile(binaryPath);
+        } catch (error) {
+          error.code = "ENOENT";
+          throw error;
+        }
+        return {
+          stdout: "sing-box version 1.13.14\nEnvironment: go1.24.7 linux/amd64\nTags: with_quic,with_v2ray_api"
+        };
+      }
+      return { stdout: "" };
+    }
+  });
+
+  const installed = await installer.install();
+
+  assert.equal(installed.version, "1.13.14");
+  assert.equal(builderCalls, 0);
+  assert.deepEqual(await readFile(binaryPath), artifact);
 });
 
 test("production installer rebuilds a compatible Linux Runtime with user metering", async () => {

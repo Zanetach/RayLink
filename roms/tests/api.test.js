@@ -1774,6 +1774,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type"), /javascript/);
+  assert.doesNotMatch(await scriptResponse.text(), /priya@vantage-bioworks\.in/);
 
   const nodeInstallerResponse = await fetch(`${testApp.baseUrl}/node/install.sh`);
   assert.equal(nodeInstallerResponse.status, 200);
@@ -1781,6 +1782,16 @@ test("control plane serves the RayLink web application on the same origin", asyn
   const nodeInstaller = await nodeInstallerResponse.text();
   assert.match(nodeInstaller, /raylink-node\.service/);
   assert.match(nodeInstaller, /build-metered-runtime\.sh/);
+  assert.match(
+    nodeInstaller,
+    /node\/runtime\/\$runtime_name/
+  );
+  assert.match(nodeInstaller, /已安装预编译 RayLink Runtime/);
+  assert.match(nodeInstaller, /回退到本机编译/);
+  assert.match(nodeInstaller, /sha256sum -c/);
+  assert.match(nodeInstaller, /with_naive_outbound/);
+  assert.match(nodeInstaller, /with_v2ray_api/);
+  assert.match(nodeInstaller, /\^http:\/\/\(127\\\.0\\\.0\\\.1\|localhost\|\\\[::1\\\]\)/);
   assert.match(nodeInstaller, /systemctl is-active --quiet sing-box\.service/);
   assert.match(nodeInstaller, /systemctl disable sing-box\.service/);
   assert.doesNotMatch(nodeInstaller, /disable --now sing-box\.service/);

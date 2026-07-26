@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { access, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -373,6 +374,61 @@ test("managed node upgrades an untagged Runtime to the approved metered build", 
   const result = await adapter.upgrade({ targetVersion: "1.13.14" });
   assert.equal(result.runtimeVersion, "1.13.14");
   assert.equal(metered, true);
+});
+
+test("managed node upgrades from the signed release artifact without compiling", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-upgrade-release-"));
+  const binaryPath = join(directory, "sing-box");
+  await writeFile(binaryPath, "previous-binary");
+  await writeFile(join(directory, "config.json"), "{}");
+  const artifact = Buffer.from("precompiled-runtime");
+  const checksum = createHash("sha256").update(artifact).digest("hex");
+  const downloads = [];
+  let installed = false;
+  let builderCalls = 0;
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath,
+    meteredRuntimeBuilder: join(directory, "missing-builder.sh"),
+    runtimeArtifactBaseUrl: "https://panel.example.com/node/runtime",
+    runtimeArch: "arm64",
+    fetchFn: async (url) => {
+      downloads.push(url);
+      if (url.endsWith(".sha256")) {
+        installed = true;
+        return new Response(`${checksum}  raylink-sing-box\n`);
+      }
+      return new Response(artifact);
+    },
+    preferMeteredRuntime: true,
+    runtimeMode: "dry-run",
+    commandRunner: async (command, args) => {
+      if (command === "sh") builderCalls += 1;
+      if (command === binaryPath && args[0] === "version") {
+        return {
+          stdout: installed
+            ? "sing-box version 1.13.14\nTags: with_v2ray_api\n"
+            : "sing-box version 1.13.13\n",
+          stderr: ""
+        };
+      }
+      if (command === binaryPath && args[0] === "check") return { stdout: "", stderr: "" };
+      if (command === "systemctl" && args[0] === "list-unit-files") {
+        return { stdout: "", stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    }
+  });
+
+  const result = await adapter.upgrade({ targetVersion: "1.13.14" });
+
+  assert.equal(result.runtimeVersion, "1.13.14");
+  assert.equal(builderCalls, 0);
+  assert.deepEqual(downloads, [
+    "https://panel.example.com/node/runtime/raylink-sing-box-1.13.14-linux-arm64",
+    "https://panel.example.com/node/runtime/raylink-sing-box-1.13.14-linux-arm64.sha256"
+  ]);
+  assert.deepEqual(await readFile(binaryPath), artifact);
 });
 
 test("RayLink Node rejects non-loopback HTTP control planes by default", () => {

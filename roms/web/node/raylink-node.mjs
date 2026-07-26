@@ -2,6 +2,7 @@
 
 import { execFile as execFileCallback } from "node:child_process";
 import {
+  createHash,
   createDecipheriv,
   createPrivateKey,
   createPublicKey,
@@ -436,6 +437,9 @@ export class NodeRuntimeAdapter {
     this.runtimeMode = options.runtimeMode || "systemd";
     this.meteredRuntimeBuilder = options.meteredRuntimeBuilder
       || "/opt/raylink-node/build-metered-runtime.sh";
+    this.runtimeArtifactBaseUrl = String(options.runtimeArtifactBaseUrl || "").replace(/\/+$/, "");
+    this.runtimeArch = options.runtimeArch || arch();
+    this.fetchFn = options.fetchFn || globalThis.fetch;
     this.preferMeteredRuntime = options.preferMeteredRuntime === true;
     this.commandRunner = options.commandRunner || runCommand;
     this.healthCheckDelayMs = Math.max(0, Number(options.healthCheckDelayMs ?? 2_000) || 0);
@@ -623,8 +627,9 @@ export class NodeRuntimeAdapter {
   }
 
   async installMeteredVersion(version, outputPath) {
+    if (await this.installReleaseArtifact(version, outputPath)) return;
     if (!await pathExists(this.meteredRuntimeBuilder)) {
-      throw new Error("缺少 RayLink 计量版 Runtime 构建器，请先升级 RayLink Node");
+      throw new Error("控制台缺少预编译 Runtime，节点也缺少构建器，请先升级 RayLink 发布包");
     }
     await this.commandRunner("sh", [
       this.meteredRuntimeBuilder,
@@ -634,6 +639,48 @@ export class NodeRuntimeAdapter {
       timeout: 20 * 60 * 1000,
       maxBuffer: 8 * 1024 * 1024
     });
+  }
+
+  async installReleaseArtifact(version, outputPath) {
+    if (!this.runtimeArtifactBaseUrl) return false;
+    const runtimeArch = this.runtimeArch === "x64"
+      ? "amd64"
+      : this.runtimeArch === "arm64"
+        ? "arm64"
+        : "";
+    if (!runtimeArch) {
+      throw new Error(`预编译 Runtime 不支持当前架构：${this.runtimeArch}`);
+    }
+    const artifactName = `raylink-sing-box-${version}-linux-${runtimeArch}`;
+    const artifactUrl = `${this.runtimeArtifactBaseUrl}/${artifactName}`;
+    const artifactResponse = await this.fetchFn(artifactUrl);
+    if (artifactResponse.status === 404) return false;
+    if (!artifactResponse.ok) {
+      throw new Error(`下载预编译 Runtime 失败：HTTP ${artifactResponse.status}`);
+    }
+    const checksumResponse = await this.fetchFn(`${artifactUrl}.sha256`);
+    if (checksumResponse.status === 404) return false;
+    if (!checksumResponse.ok) {
+      throw new Error(`下载 Runtime 校验文件失败：HTTP ${checksumResponse.status}`);
+    }
+    const expectedChecksum = String(await checksumResponse.text()).trim().split(/\s+/)[0];
+    if (!/^[a-f0-9]{64}$/.test(expectedChecksum)) {
+      throw new Error("预编译 Runtime 校验文件格式错误");
+    }
+    const artifact = Buffer.from(await artifactResponse.arrayBuffer());
+    const actualChecksum = createHash("sha256").update(artifact).digest("hex");
+    if (actualChecksum !== expectedChecksum) {
+      throw new Error("预编译 Runtime SHA-256 校验失败");
+    }
+    const candidatePath = `${outputPath}.release-${process.pid}-${Date.now()}`;
+    try {
+      await writeFile(candidatePath, artifact, { mode: 0o755 });
+      await chmod(candidatePath, 0o755);
+      await rename(candidatePath, outputPath);
+    } finally {
+      await rm(candidatePath, { force: true });
+    }
+    return true;
   }
 
   async commandState(action, unit) {
@@ -795,6 +842,9 @@ export class RayLinkNode {
     this.fetchFn = options.fetchFn || globalThis.fetch;
     this.runtimeAdapter = options.runtimeAdapter || new NodeRuntimeAdapter({
       ...options,
+      fetchFn: this.fetchFn,
+      runtimeArtifactBaseUrl: options.runtimeArtifactBaseUrl
+        || `${this.serverUrl}/node/runtime`,
       preferMeteredRuntime: options.preferMeteredRuntime !== false
     });
     this.telemetryCollector = options.telemetryCollector || new NodeTelemetryCollector({

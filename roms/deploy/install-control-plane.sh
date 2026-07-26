@@ -59,8 +59,8 @@ else
 fi
 
 case "$(uname -m)" in
-  x86_64|amd64) node_arch=x64 ;;
-  aarch64|arm64) node_arch=arm64 ;;
+  x86_64|amd64) node_arch=x64; runtime_arch=amd64 ;;
+  aarch64|arm64) node_arch=arm64; runtime_arch=arm64 ;;
   *) fail "不支持的 CPU 架构：$(uname -m)" ;;
 esac
 
@@ -102,9 +102,34 @@ install -d -m 0755 "$install_root"
 cp -a "$source_root/package.json" "$source_root/server" "$source_root/web" "$source_root/deploy" "$install_root/"
 install -d -m 0700 "$data_root" "$config_root" "$config_root/tls"
 
-"$install_root/web/node/build-metered-runtime.sh" \
-  1.13.14 \
-  /usr/local/bin/raylink-sing-box
+runtime_version=1.13.14
+runtime_artifact="$source_root/web/node/runtime/raylink-sing-box-${runtime_version}-linux-${runtime_arch}"
+runtime_checksum="${runtime_artifact}.sha256"
+if [ -f "$runtime_artifact" ] && [ -f "$runtime_checksum" ]; then
+  expected_runtime_sha256="$(awk 'NR == 1 { print $1 }' "$runtime_checksum")"
+  printf '%s' "$expected_runtime_sha256" | grep -Eq '^[a-f0-9]{64}$' \
+    || fail "预编译 Runtime 校验文件格式错误"
+  printf '%s  %s\n' "$expected_runtime_sha256" "$runtime_artifact" | sha256sum -c -
+  runtime_candidate="$temporary_root/raylink-sing-box"
+  install -m 0755 "$runtime_artifact" "$runtime_candidate"
+  runtime_details="$("$runtime_candidate" version)" \
+    || fail "预编译 Runtime 无法执行"
+  printf '%s\n' "$runtime_details" | grep -q "sing-box version ${runtime_version}" \
+    || fail "预编译 Runtime 版本不匹配"
+  runtime_tags="$(printf '%s\n' "$runtime_details" | sed -n 's/^Tags:[[:space:]]*//p' | tr -d '[:space:]')"
+  required_runtime_tags="with_gvisor with_quic with_dhcp with_wireguard with_utls with_acme with_clash_api with_tailscale with_ccm with_ocm with_naive_outbound with_v2ray_api with_purego badlinkname tfogo_checklinkname0"
+  for required_runtime_tag in $required_runtime_tags; do
+    printf ',%s,' "$runtime_tags" | grep -Fq ",${required_runtime_tag}," \
+      || fail "预编译 Runtime 缺少 ${required_runtime_tag}"
+  done
+  install -m 0755 "$runtime_candidate" /usr/local/bin/raylink-sing-box
+  printf '已安装预编译 RayLink Runtime（linux-%s）\n' "$runtime_arch"
+else
+  printf '未找到预编译 Runtime，回退到本机编译\n'
+  "$install_root/web/node/build-metered-runtime.sh" \
+    "$runtime_version" \
+    /usr/local/bin/raylink-sing-box
+fi
 
 openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 825 \
   -subj "/CN=${public_ip}" \

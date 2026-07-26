@@ -12,7 +12,7 @@ fi
 RAYLINK_NODE_ROOT="${RAYLINK_NODE_ROOT:-$default_build_root}"
 GO_VERSION="${GO_VERSION:-1.24.7}"
 SING_BOX_BUILD_TAGS="${SING_BOX_BUILD_TAGS:-with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,with_naive_outbound,with_v2ray_api,with_purego,badlinkname,tfogo_checklinkname0}"
-SING_BOX_LDFLAGS="${SING_BOX_LDFLAGS:--X internal/godebug.defaultGODEBUG=multipathtcp=0 -checklinkname=0}"
+SING_BOX_LDFLAGS="${SING_BOX_LDFLAGS:--X github.com/sagernet/sing-box/constant.Version=${SING_BOX_VERSION} -X internal/godebug.defaultGODEBUG=multipathtcp=0 -s -w -buildid= -checklinkname=0}"
 
 fail() {
   printf 'RayLink 计量版 Runtime 构建失败：%s\n' "$1" >&2
@@ -35,6 +35,16 @@ case "$(uname -m)" in
   aarch64|arm64) go_arch="arm64" ;;
   *) fail "不支持的 CPU 架构：$(uname -m)" ;;
 esac
+target_arch="${RAYLINK_TARGET_ARCH:-$go_arch}"
+case "$target_arch" in
+  amd64|arm64) ;;
+  *) fail "不支持的目标 CPU 架构：$target_arch" ;;
+esac
+case "${GO_VERSION}:${go_arch}" in
+  1.24.7:amd64) expected_go_sha256="da18191ddb7db8a9339816f3e2b54bdded8047cdc2a5d67059478f8d1595c43f" ;;
+  1.24.7:arm64) expected_go_sha256="fd2bccce882e29369f56c86487663bb78ba7ea9e02188a5b0269303a0c3d33ab" ;;
+  *) fail "该 Go 版本或架构尚未进入 RayLink 审批清单" ;;
+esac
 
 go_root="$RAYLINK_NODE_ROOT/go"
 go_binary="$go_root/bin/go"
@@ -43,9 +53,7 @@ if [ ! -x "$go_binary" ] || ! "$go_binary" version | grep -q "go${GO_VERSION}"; 
   download_dir="$(mktemp -d)"
   trap 'rm -rf "$download_dir"' EXIT
   curl -fsSL "https://go.dev/dl/${archive}" -o "$download_dir/$archive"
-  curl -fsSL "https://go.dev/dl/${archive}.sha256" -o "$download_dir/$archive.sha256"
-  expected_sha256="$(tr -d '[:space:]' < "$download_dir/$archive.sha256")"
-  printf '%s  %s\n' "$expected_sha256" "$download_dir/$archive" | sha256sum -c -
+  printf '%s  %s\n' "$expected_go_sha256" "$download_dir/$archive" | sha256sum -c -
   rm -rf "$go_root"
   install -d -m 0755 "$go_root"
   tar -xzf "$download_dir/$archive" -C "$go_root" --strip-components=1
@@ -60,24 +68,51 @@ module_metadata="$(
   GOSUMDB=sum.golang.org \
   "$go_binary" mod download -json "github.com/sagernet/sing-box@v${SING_BOX_VERSION}"
 )"
-actual_module_sum="$(printf '%s\n' "$module_metadata" | sed -n 's/^[[:space:]]*"Sum": "\\([^"]*\\)",[[:space:]]*$/\\1/p')"
+actual_module_sum="$(printf '%s\n' "$module_metadata" | sed -n 's/^[[:space:]]*"Sum": "\([^"]*\)",[[:space:]]*$/\1/p')"
 [ "$actual_module_sum" = "$expected_module_sum" ] \
   || fail "sing-box 源码模块校验失败"
-GOBIN="$build_dir" \
+module_directory="$(printf '%s\n' "$module_metadata" | sed -n 's/^[[:space:]]*"Dir": "\([^"]*\)",[[:space:]]*$/\1/p')"
+[ -d "$module_directory/cmd/sing-box" ] \
+  || fail "无法定位已校验的 sing-box 源码目录"
+(
+cd "$module_directory"
 GOPATH="$RAYLINK_NODE_ROOT/gopath" \
 GOCACHE="$RAYLINK_NODE_ROOT/gocache" \
 GOSUMDB=sum.golang.org \
-CGO_ENABLED=0 "$go_binary" install \
+GOOS=linux \
+GOARCH="$target_arch" \
+CGO_ENABLED=0 "$go_binary" build \
+  -o "$build_dir/sing-box" \
   -trimpath \
   -tags "$SING_BOX_BUILD_TAGS" \
   -ldflags "$SING_BOX_LDFLAGS" \
-  "github.com/sagernet/sing-box/cmd/sing-box@v${SING_BOX_VERSION}"
+  ./cmd/sing-box
+)
 
 candidate="${OUTPUT_PATH}.candidate"
 install -m 0755 "$build_dir/sing-box" "$candidate"
-"$candidate" version | grep -q "sing-box version ${SING_BOX_VERSION}" \
-  || fail "构建版本校验失败"
-"$candidate" version | grep -q "with_v2ray_api" \
-  || fail "构建结果缺少 with_v2ray_api"
+if [ "$target_arch" = "$go_arch" ]; then
+  runtime_details="$("$candidate" version)" || fail "构建结果无法执行"
+  printf '%s\n' "$runtime_details" | grep -q "sing-box version ${SING_BOX_VERSION}" \
+    || fail "构建版本校验失败"
+  runtime_tags="$(printf '%s\n' "$runtime_details" | sed -n 's/^Tags:[[:space:]]*//p' | tr -d '[:space:]')"
+  for required_runtime_tag in $(printf '%s' "$SING_BOX_BUILD_TAGS" | tr ',' ' '); do
+    printf ',%s,' "$runtime_tags" | grep -Fq ",${required_runtime_tag}," \
+      || fail "构建结果缺少 ${required_runtime_tag}"
+  done
+else
+  [ "${RAYLINK_ALLOW_CROSS_BUILD:-false}" = "true" ] \
+    || fail "交叉构建必须显式设置 RAYLINK_ALLOW_CROSS_BUILD=true，并在目标用户空间执行最终校验"
+  command -v file >/dev/null 2>&1 || fail "交叉构建需要 file"
+  candidate_format="$(file -b "$candidate")"
+  case "$target_arch" in
+    amd64) printf '%s' "$candidate_format" | grep -q "x86-64" \
+      || fail "交叉构建结果不是 AMD64 ELF" ;;
+    arm64) printf '%s' "$candidate_format" | grep -Eq "aarch64|ARM aarch64" \
+      || fail "交叉构建结果不是 ARM64 ELF" ;;
+  esac
+  printf '交叉构建已验证 ELF 架构；发布前必须在 linux-%s 用户空间运行 version 校验\n' \
+    "$target_arch"
+fi
 mv -f "$candidate" "$OUTPUT_PATH"
 printf 'RayLink 计量版 sing-box %s 已安装到 %s\n' "$SING_BOX_VERSION" "$OUTPUT_PATH"

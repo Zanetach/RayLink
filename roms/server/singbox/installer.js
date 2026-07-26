@@ -1,7 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { access, chmod, copyFile, mkdir } from "node:fs/promises";
-import { platform as currentPlatform, tmpdir } from "node:os";
+import { createHash, randomBytes } from "node:crypto";
+import { access, chmod, copyFile, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { arch as currentArch, platform as currentPlatform, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -14,6 +14,9 @@ const LATEST_RELEASE_URL = "https://api.github.com/repos/SagerNet/sing-box/relea
 const LATEST_RELEASE_REDIRECT_URL = "https://github.com/SagerNet/sing-box/releases/latest";
 const defaultMeteredRuntimeBuilder = fileURLToPath(
   new URL("../../web/node/build-metered-runtime.sh", import.meta.url)
+);
+const defaultRuntimeArtifactDir = fileURLToPath(
+  new URL("../../web/node/runtime", import.meta.url)
 );
 
 export class SingBoxInstaller {
@@ -28,6 +31,8 @@ export class SingBoxInstaller {
     systemdUnit = "sing-box.service",
     preferMeteredRuntime = false,
     meteredRuntimeBuilder = defaultMeteredRuntimeBuilder,
+    runtimeArtifactDir = defaultRuntimeArtifactDir,
+    runtimeArch = currentArch(),
     clock = () => new Date(),
     healthCheckDelayMs = 2_000
   } = {}) {
@@ -41,6 +46,8 @@ export class SingBoxInstaller {
     this.systemdUnit = systemdUnit;
     this.preferMeteredRuntime = this.platform === "linux" || Boolean(preferMeteredRuntime);
     this.meteredRuntimeBuilder = meteredRuntimeBuilder;
+    this.runtimeArtifactDir = runtimeArtifactDir;
+    this.runtimeArch = runtimeArch;
     this.clock = clock;
     this.healthCheckDelayMs = Math.max(0, Number(healthCheckDelayMs) || 0);
     this.installing = false;
@@ -406,6 +413,7 @@ export class SingBoxInstaller {
   }
 
   async installMeteredVersion(version, outputPath) {
+    if (await this.installReleaseArtifact(version, outputPath)) return;
     await this.runner("sh", [
       this.meteredRuntimeBuilder,
       version,
@@ -414,6 +422,37 @@ export class SingBoxInstaller {
       timeout: 20 * 60 * 1000,
       maxBuffer: 8 * 1024 * 1024
     });
+  }
+
+  async installReleaseArtifact(version, outputPath) {
+    const runtimeArch = this.runtimeArch === "x64"
+      ? "amd64"
+      : this.runtimeArch === "arm64"
+        ? "arm64"
+        : "";
+    if (!runtimeArch) return false;
+    const artifactName = `raylink-sing-box-${version}-linux-${runtimeArch}`;
+    const artifactPath = join(this.runtimeArtifactDir, artifactName);
+    const checksumPath = `${artifactPath}.sha256`;
+    if (!await pathExists(artifactPath) || !await pathExists(checksumPath)) return false;
+    const expectedChecksum = String(await readFile(checksumPath, "utf8")).trim().split(/\s+/)[0];
+    if (!/^[a-f0-9]{64}$/.test(expectedChecksum)) {
+      throw new Error("预编译 Runtime 校验文件格式错误");
+    }
+    const artifact = await readFile(artifactPath);
+    const actualChecksum = createHash("sha256").update(artifact).digest("hex");
+    if (actualChecksum !== expectedChecksum) {
+      throw new Error("预编译 Runtime SHA-256 校验失败");
+    }
+    const candidatePath = `${outputPath}.release-${process.pid}-${Date.now()}`;
+    try {
+      await copyFile(artifactPath, candidatePath);
+      await chmod(candidatePath, 0o755);
+      await rename(candidatePath, outputPath);
+    } finally {
+      await rm(candidatePath, { force: true });
+    }
+    return true;
   }
 
   async inspectConflictingSystemdService() {

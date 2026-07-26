@@ -1120,7 +1120,7 @@ function portalLoginMarkup() {
         <span class="brand-mark">R/</span>
         <div><strong>登录 RayLink 用户中心</strong><small>使用管理员为你创建的账号</small></div>
       </div>
-      <label class="field"><span>登录邮箱</span><input name="portalEmail" type="email" value="priya@vantage-bioworks.in" required><small class="field-error"></small></label>
+      <label class="field"><span>登录邮箱</span><input name="portalEmail" type="email" placeholder="user@example.com" required><small class="field-error"></small></label>
       <label class="field"><span>密码</span><input name="portalPassword" type="password" autocomplete="current-password" required><small class="field-error"></small></label>
       <div class="portal-login-help"><svg><use href="#i-shield"/></svg><span><strong>账号由管理员开通</strong><small>首次登录邀请和密码重置邮件发送到用户邮箱。</small></span></div>
     </form>`;
