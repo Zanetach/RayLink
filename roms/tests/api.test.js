@@ -104,6 +104,74 @@ test("authenticated bootstrap returns users with independent entitlements", asyn
   assert.equal("runtimeCredential" in body.users[0], false);
 });
 
+test("admin can log out the current control-plane session", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+
+  const firstCookie = await login(testApp.baseUrl);
+  const secondCookie = await login(testApp.baseUrl);
+
+  const rejectedOrigin = await api(
+    testApp.baseUrl,
+    firstCookie,
+    "/api/auth/logout",
+    {
+      method: "POST",
+      headers: { origin: "https://attacker.example" }
+    }
+  );
+  assert.equal(rejectedOrigin.status, 403);
+  assert.equal(
+    (await api(testApp.baseUrl, firstCookie, "/api/bootstrap")).status,
+    200
+  );
+
+  const logout = await api(testApp.baseUrl, firstCookie, "/api/auth/logout", {
+    method: "POST"
+  });
+  assert.equal(logout.status, 200);
+  assert.deepEqual(await logout.json(), { loggedOut: true });
+  const clearedCookie = logout.headers.getSetCookie()[0];
+  assert.match(clearedCookie, /raylink_session=;/);
+  assert.match(clearedCookie, /Path=\//);
+  assert.match(clearedCookie, /HttpOnly/);
+  assert.match(clearedCookie, /SameSite=Strict/);
+  assert.match(clearedCookie, /Expires=Thu, 01 Jan 1970 00:00:00 GMT/);
+  assert.match(clearedCookie, /Max-Age=0/);
+
+  assert.equal(
+    (await api(testApp.baseUrl, firstCookie, "/api/bootstrap")).status,
+    401
+  );
+  assert.equal(
+    (await api(testApp.baseUrl, secondCookie, "/api/bootstrap")).status,
+    200
+  );
+
+  const staleLogout = await api(
+    testApp.baseUrl,
+    "raylink_session=already-expired",
+    "/api/auth/logout",
+    { method: "POST" }
+  );
+  assert.equal(staleLogout.status, 200);
+  assert.match(staleLogout.headers.getSetCookie()[0], /Max-Age=0/);
+
+  const secureApp = await startTestApp({
+    publicOrigin: "https://control.example.com"
+  });
+  t.after(() => secureApp.close());
+  const secureCookie = await login(secureApp.baseUrl);
+  const secureLogout = await api(
+    secureApp.baseUrl,
+    secureCookie,
+    "/api/auth/logout",
+    { method: "POST" }
+  );
+  assert.equal(secureLogout.status, 200);
+  assert.match(secureLogout.headers.getSetCookie()[0], /Secure/);
+});
+
 test("production initialization can start without known demo users", async (t) => {
   const testApp = await startTestApp({ seedDemoData: false });
   t.after(() => testApp.close());
@@ -1772,6 +1840,11 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.doesNotMatch(indexHtml, /按启用账号数量缩放趋势样例/);
   assert.match(indexHtml, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
   assert.doesNotMatch(indexHtml, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
+  assert.match(indexHtml, /id="profile-menu"/);
+  assert.match(indexHtml, /data-logout/);
+  assert.match(indexHtml, /aria-controls="profile-menu"/);
+  assert.doesNotMatch(indexHtml, /role="menu(item)?"/);
+  assert.match(indexHtml, /class="mobile-nav"[^>]*hidden/);
 
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);
@@ -1780,6 +1853,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.doesNotMatch(appScript, /priya@vantage-bioworks\.in/);
   assert.match(appScript, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
   assert.doesNotMatch(appScript, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
+  assert.match(appScript, /api\("\/api\/auth\/logout"/);
 
   const logoResponse = await fetch(
     `${testApp.baseUrl}/assets/brand/raylink-mark.svg`

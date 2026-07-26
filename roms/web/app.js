@@ -49,7 +49,10 @@ const elements = {
   authError: document.querySelector("#admin-auth-error"),
   appShell: document.querySelector("#app-shell"),
   rail: document.querySelector("#rail"),
+  profileMenu: document.querySelector("#profile-menu"),
+  profileMenuTrigger: document.querySelector("#profile-menu-trigger"),
   menuToggle: document.querySelector("#menu-toggle"),
+  mobileNav: document.querySelector(".mobile-nav"),
   indicator: document.querySelector(".nav-indicator"),
   userBody: document.querySelector("#user-table-body"),
   userCount: document.querySelector("#user-result-count"),
@@ -810,6 +813,50 @@ function showToast(title, message) {
   toastTimer = setTimeout(() => elements.toast.classList.remove("visible"), 3200);
 }
 
+function setProfileMenu(open) {
+  elements.profileMenu.hidden = !open;
+  elements.profileMenuTrigger.setAttribute("aria-expanded", String(open));
+}
+
+function showAdminLogin() {
+  if (bootstrapRefreshTimer) {
+    clearInterval(bootstrapRefreshTimer);
+    bootstrapRefreshTimer = null;
+  }
+  setProfileMenu(false);
+  closeDrawer({ restoreFocus: false, clearContent: true });
+  controlPlane.currentAdmin = null;
+  elements.authError.textContent = "";
+  elements.authForm.elements.password.value = "";
+  elements.authScreen.hidden = false;
+  elements.appShell.hidden = true;
+  elements.mobileNav.hidden = true;
+  elements.toast.classList.remove("visible");
+  history.replaceState({}, "", location.pathname);
+  elements.authForm.elements.username.focus();
+}
+
+async function logoutControlPlane(button) {
+  button.disabled = true;
+  const previousMarkup = button.innerHTML;
+  button.textContent = "正在退出…";
+  let sessionEnded = false;
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+    sessionEnded = true;
+  } catch (error) {
+    if (error.status === 401) {
+      sessionEnded = true;
+    } else {
+      showToast("退出失败", error.message);
+    }
+  } finally {
+    button.disabled = false;
+    button.innerHTML = previousMarkup;
+  }
+  if (sessionEnded) showAdminLogin();
+}
+
 function openDrawer({ title, eyebrow, content, saveLabel = "保存更改" }) {
   lastFocusedElement = document.activeElement;
   elements.drawerTitle.textContent = title;
@@ -824,13 +871,16 @@ function openDrawer({ title, eyebrow, content, saveLabel = "保存更改" }) {
   setTimeout(() => elements.drawerClose.focus(), 50);
 }
 
-function closeDrawer() {
+function closeDrawer({ restoreFocus = true, clearContent = false } = {}) {
   elements.drawer.classList.remove("open");
   elements.drawerScrim.classList.remove("open");
   elements.drawer.setAttribute("aria-hidden", "true");
   elements.drawer.setAttribute("inert", "");
   document.body.style.overflow = "";
-  lastFocusedElement?.focus();
+  const focusTarget = lastFocusedElement;
+  lastFocusedElement = null;
+  if (clearContent) elements.drawerContent.replaceChildren();
+  if (restoreFocus) focusTarget?.focus();
 }
 
 function userDrawerMarkup(user = {}) {
@@ -1662,6 +1712,20 @@ function openAdvancedConfig() {
 }
 
 document.addEventListener("click", async (event) => {
+  const logoutButton = event.target.closest("[data-logout]");
+  if (logoutButton) {
+    await logoutControlPlane(logoutButton);
+    return;
+  }
+
+  if (event.target.closest("#profile-menu-trigger")) {
+    setProfileMenu(elements.profileMenu.hidden);
+    if (!elements.profileMenu.hidden) elements.profileMenu.querySelector("[data-logout]").focus();
+    return;
+  }
+
+  if (!event.target.closest(".profile-menu-wrap")) setProfileMenu(false);
+
   if (event.target.closest("[data-open-runtime-updates]")) {
     navigate("system");
     selectWorkspaceTab("system", "maintenance");
@@ -1863,7 +1927,10 @@ document.addEventListener("keydown", (event) => {
     setTimeout(() => elements.userSearch.focus(), 120);
   }
   if (event.key === "Escape") {
-    if (elements.drawer.classList.contains("open")) closeDrawer();
+    if (!elements.profileMenu.hidden) {
+      setProfileMenu(false);
+      elements.profileMenuTrigger.focus();
+    } else if (elements.drawer.classList.contains("open")) closeDrawer();
     else {
       elements.rail.classList.remove("open");
       elements.rail.toggleAttribute("inert", window.innerWidth <= 920);
@@ -1902,6 +1969,7 @@ async function enterControlPlane() {
   await loadBootstrap();
   elements.authScreen.hidden = true;
   elements.appShell.hidden = false;
+  elements.mobileNav.hidden = false;
   syncResponsiveNavigation();
   const initialRoute = location.hash.replace(/^#\//, "") || "dashboard";
   navigate(initialRoute, false);
@@ -1912,10 +1980,7 @@ async function enterControlPlane() {
       try {
         await loadBootstrap();
       } catch (error) {
-        if (error.status === 401) {
-          clearInterval(bootstrapRefreshTimer);
-          bootstrapRefreshTimer = null;
-        }
+        if (error.status === 401) showAdminLogin();
       } finally {
         bootstrapRefreshInFlight = false;
       }

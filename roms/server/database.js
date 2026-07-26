@@ -846,6 +846,14 @@ export class RayLinkStore {
     `).get(hashSessionSecret(secret), nowIso()) || null;
   }
 
+  revokeAdminSession(secret) {
+    if (!secret) return false;
+    const result = this.db.prepare(
+      "DELETE FROM sessions WHERE secret_hash = ?"
+    ).run(hashSessionSecret(secret));
+    return result.changes > 0;
+  }
+
   async authenticateUser(email, password) {
     const user = this.db.prepare("SELECT * FROM users WHERE email = ?").get(String(email || "").trim().toLowerCase());
     const valid = await verifyPassword(password, user?.password_hash || DUMMY_PASSWORD_HASH);

@@ -261,6 +261,18 @@ function sessionCookie(name, secret, expiresAt, secure) {
   ].filter(Boolean).join("; ");
 }
 
+function clearedSessionCookie(name, secure) {
+  return [
+    `${name}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    secure ? "Secure" : "",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+    "Max-Age=0"
+  ].filter(Boolean).join("; ");
+}
+
 export async function createRayLinkApp(options) {
   const dbPath = options.dbPath || join(options.dataDir, "raylink.db");
   const publicOrigin = new URL(options.publicOrigin);
@@ -281,6 +293,13 @@ export async function createRayLinkApp(options) {
   const currentPublicOrigin = () => {
     const configured = store.setupStatus().access?.canonicalOrigin;
     return configured ? new URL(configured) : publicOrigin;
+  };
+  const requestOriginIsAllowed = (request) => {
+    const requestOrigin = request.headers.origin;
+    if (!requestOrigin) return true;
+    const allowedOrigins = store.setupStatus().access?.allowedOrigins
+      || [currentPublicOrigin().origin];
+    return allowedOrigins.includes(requestOrigin);
   };
   const webDir = resolve(options.webDir || defaultWebDir);
   const runtimeAdapter = options.runtimeAdapter || new LocalSingBoxAdapter({
@@ -911,6 +930,29 @@ export async function createRayLinkApp(options) {
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/api/auth/logout") {
+        if (!requestOriginIsAllowed(request)) {
+          sendJson(response, 403, {
+            error: { code: "ORIGIN_REJECTED", message: "请求来源不受信任" }
+          });
+          return;
+        }
+        const sessionSecret = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+        store.revokeAdminSession(sessionSecret);
+        sendJson(
+          response,
+          200,
+          { loggedOut: true },
+          {
+            "set-cookie": clearedSessionCookie(
+              SESSION_COOKIE,
+              currentPublicOrigin().protocol === "https:"
+            )
+          }
+        );
+        return;
+      }
+
       if (url.pathname.startsWith("/api/")) {
         const sessionSecret = parseCookies(request.headers.cookie)[SESSION_COOKIE];
         const admin = store.adminForSession(sessionSecret);
@@ -919,14 +961,14 @@ export async function createRayLinkApp(options) {
           return;
         }
 
-        if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
-          const requestOrigin = request.headers.origin;
-          const allowedOrigins = store.setupStatus().access?.allowedOrigins
-            || [currentPublicOrigin().origin];
-          if (requestOrigin && !allowedOrigins.includes(requestOrigin)) {
-            sendJson(response, 403, { error: { code: "ORIGIN_REJECTED", message: "请求来源不受信任" } });
-            return;
-          }
+        if (
+          ["POST", "PUT", "PATCH", "DELETE"].includes(request.method)
+          && !requestOriginIsAllowed(request)
+        ) {
+          sendJson(response, 403, {
+            error: { code: "ORIGIN_REJECTED", message: "请求来源不受信任" }
+          });
+          return;
         }
 
         if (request.method === "GET" && url.pathname === "/api/bootstrap") {

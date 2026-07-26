@@ -6,7 +6,7 @@
   <meta name="description" content="RayLink sing-box 多用户控制台前端原型">
   <title>RayLink · sing-box control plane</title>
   <link rel="icon" href="/assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=0.1.0-20260726g">
+  <link rel="stylesheet" href="./styles.css?v=0.1.0-20260726h">
 </head>
 <body>
   <section class="auth-screen" id="admin-auth" aria-labelledby="admin-auth-title">
@@ -46,6 +46,7 @@
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
     <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 18h.01"/></symbol>
     <symbol id="i-rollback" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M5.5 16a8 8 0 1 0 .5-9l-3 3"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/></symbol>
   </svg>
 
   <div class="app-shell" id="app-shell" hidden>
@@ -80,11 +81,18 @@
       </div>
 
       <div class="rail-footer">
-        <button class="profile-button" data-open-drawer="profile">
-          <span class="avatar">ZH</span>
-          <span><strong>周航</strong><small>所有者</small></span>
-          <svg><use href="#i-more"/></svg>
-        </button>
+        <div class="profile-menu-wrap">
+          <div class="profile-menu" id="profile-menu" hidden>
+            <button type="button" data-logout>
+              <svg><use href="#i-logout"/></svg><span>退出登录</span>
+            </button>
+          </div>
+          <button class="profile-button" id="profile-menu-trigger" type="button" aria-controls="profile-menu" aria-expanded="false">
+            <span class="avatar">ZH</span>
+            <span><strong>周航</strong><small>所有者</small></span>
+            <svg><use href="#i-more"/></svg>
+          </button>
+        </div>
         <div class="legal"><a href="#privacy">隐私</a><a href="#terms">条款</a></div>
       </div>
     </aside>
@@ -413,7 +421,7 @@
     </div>
   </div>
 
-  <nav class="mobile-nav" aria-label="移动端主导航">
+  <nav class="mobile-nav" aria-label="移动端主导航" hidden>
     <button class="active" data-view-target="dashboard"><svg><use href="#i-grid"/></svg><span>总览</span></button>
     <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户</span></button>
     <button data-view-target="system"><svg><use href="#i-server"/></svg><span>主机</span></button>
@@ -431,6 +439,6 @@
     <div class="toast" id="toast"><span><svg><use href="#i-check"/></svg></span><div><strong id="toast-title">已保存</strong><p id="toast-message">设置已经更新。</p></div></div>
   </div>
 
-  <script src="./app.js?v=0.1.0-20260726g"></script>
+  <script src="./app.js?v=0.1.0-20260726h"></script>
 </body>
 </html>

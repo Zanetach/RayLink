@@ -294,6 +294,38 @@ svg {
 }
 
 .rail-footer { padding: 12px 3px 0; }
+.profile-menu-wrap { position: relative; }
+.profile-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 5;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.34);
+}
+.profile-menu[hidden] { display: none; }
+.profile-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border-radius: var(--r-xs);
+  color: var(--text-soft);
+  font-size: 12px;
+  text-align: left;
+}
+.profile-menu button:hover, .profile-menu button:focus-visible {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.profile-menu button:disabled { opacity: 0.5; }
+.profile-menu svg { width: 16px; height: 16px; color: var(--muted); }
 .profile-button {
   display: grid;
   width: 100%;
