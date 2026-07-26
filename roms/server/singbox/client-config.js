@@ -4,17 +4,26 @@ import {
   defaultProtocolConfigs
 } from "./protocol-catalog.js";
 
-export function buildUserClientConfig({ credential, server, hosts, port, protocols }) {
+export function buildUserClientConfig({
+  credential,
+  server,
+  hosts,
+  port,
+  protocols,
+  ruleSetBaseUrl = null
+}) {
   if (hosts?.length) {
     return buildMultiHostProtocolClientConfig({
       profiles: protocols || defaultProtocolConfigs(port),
       credential,
-      hosts
+      hosts,
+      ruleSetBaseUrl
     });
   }
   return buildProtocolClientConfig({
     profiles: protocols || defaultProtocolConfigs(port),
     credential,
-    server
+    server,
+    ruleSetBaseUrl
   });
 }

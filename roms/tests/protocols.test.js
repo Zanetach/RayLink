@@ -113,8 +113,10 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.equal(config.route.rules[1].action, "hijack-dns");
   assert.deepEqual(
     config.route.rule_set.map((ruleSet) => ruleSet.tag),
-    ["geosite-geolocation-cn", "geosite-geolocation-!cn", "geoip-cn"]
+    ["geosite-geolocation-cn", "geoip-cn"]
   );
+  assert.ok(config.route.rule_set.every((ruleSet) => ruleSet.type === "inline"));
+  assert.ok(config.route.rule_set.every((ruleSet) => !Object.hasOwn(ruleSet, "url")));
   assert.equal(config.experimental.cache_file.enabled, true);
 });
 

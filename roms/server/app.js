@@ -8,6 +8,7 @@ import { RayLinkStore } from "./database.js";
 import { buildUserClientConfig } from "./singbox/client-config.js";
 import { SingBoxInstaller } from "./singbox/installer.js";
 import { LocalSingBoxAdapter } from "./singbox/local-adapter.js";
+import { ManagedRuleSetCache } from "./singbox/rule-set-cache.js";
 import {
   normalizeProtocolConfig,
   protocolAvailability,
@@ -18,6 +19,7 @@ import { LocalTelemetryCollector } from "./telemetry.js";
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
+const REQUIRED_NODE_AGENT_VERSION = "0.3.0";
 const defaultWebDir = fileURLToPath(new URL("../web", import.meta.url));
 
 const contentTypes = {
@@ -152,7 +154,8 @@ export async function createRayLinkApp(options) {
     adminPassword: options.adminPassword,
     initialHostAddress: proxyHost,
     initialListenPort: listenPort,
-    seedDemoData: options.seedDemoData
+    seedDemoData: options.seedDemoData,
+    nodeTaskRetryBaseMs: options.nodeTaskRetryBaseMs
   });
   const webDir = resolve(options.webDir || defaultWebDir);
   const runtimeAdapter = options.runtimeAdapter || new LocalSingBoxAdapter({
@@ -166,6 +169,14 @@ export async function createRayLinkApp(options) {
     adapter: runtimeAdapter,
     listenPort
   });
+  const ruleSetCache = options.ruleSetCache || new ManagedRuleSetCache({
+    dataDir: options.dataDir,
+    fetchImpl: options.ruleSetFetch
+  });
+  const refreshRuleSets = () => ruleSetCache.prepare().catch((error) => {
+    console.warn(`[RayLink] Managed rule-set refresh failed: ${error.message}`);
+  });
+  refreshRuleSets();
   const localTelemetryCollector = new LocalTelemetryCollector();
   const telemetryProvider = options.telemetryProvider
     || ((runtime) => localTelemetryCollector.collect(runtime));
@@ -177,6 +188,7 @@ export async function createRayLinkApp(options) {
   let telemetryTimer = null;
   let telemetrySamplePromise = null;
   let entitlementReconcileTimer = null;
+  let ruleSetRefreshTimer = null;
   const sampleLocalTelemetry = () => {
     if (telemetrySamplePromise) return telemetrySamplePromise;
     telemetrySamplePromise = (async () => {
@@ -230,7 +242,10 @@ export async function createRayLinkApp(options) {
       credential,
       hosts: eligibleHosts,
       port: listenPort,
-      protocols: store.listProtocolConfigs()
+      protocols: store.listProtocolConfigs(),
+      ruleSetBaseUrl: ruleSetCache.available()
+        ? new URL("/rule-sets/", publicOrigin).toString()
+        : null
     });
   };
   const reconcileUserEntitlements = async (publisherAdminId) => {
@@ -284,6 +299,35 @@ export async function createRayLinkApp(options) {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, publicOrigin);
+
+      const ruleSetMatch = url.pathname.match(
+        /^\/rule-sets\/(geosite-geolocation-cn\.srs|geoip-cn\.srs)$/
+      );
+      if (request.method === "GET" && ruleSetMatch) {
+        const payload = await ruleSetCache.get(ruleSetMatch[1]);
+        if (!payload) {
+          sendJson(response, 404, {
+            error: { code: "RULE_SET_NOT_READY", message: "完整规则集尚未准备完成" }
+          });
+          return;
+        }
+        const etag = `"${createHash("sha256").update(payload).digest("hex")}"`;
+        const headers = {
+          "cache-control": "public, max-age=3600, must-revalidate",
+          "content-type": "application/octet-stream",
+          "content-length": payload.length,
+          etag,
+          "x-content-type-options": "nosniff"
+        };
+        if (request.headers["if-none-match"] === etag) {
+          response.writeHead(304, headers);
+          response.end();
+          return;
+        }
+        response.writeHead(200, headers);
+        response.end(payload);
+        return;
+      }
 
       const subscriptionMatch = url.pathname.match(
         /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})\/sing-box\.json$/
@@ -440,6 +484,16 @@ export async function createRayLinkApp(options) {
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/node/tasks/next") {
+          if (node.agentVersion !== REQUIRED_NODE_AGENT_VERSION) {
+            sendJson(response, 426, {
+              error: {
+                code: "NODE_UPGRADE_REQUIRED",
+                message: `RayLink Node 必须升级到 ${REQUIRED_NODE_AGENT_VERSION} 后才能接收配置任务`
+              },
+              requiredVersion: REQUIRED_NODE_AGENT_VERSION
+            });
+            return;
+          }
           const task = store.nextNodeTask(node.id);
           if (!task) {
             response.writeHead(204, { "cache-control": "no-store" });
@@ -687,8 +741,14 @@ export async function createRayLinkApp(options) {
         });
       }, entitlementReconcileIntervalMs);
       entitlementReconcileTimer.unref?.();
+      ruleSetRefreshTimer = setInterval(refreshRuleSets, 60 * 60 * 1000);
+      ruleSetRefreshTimer.unref?.();
     },
     async close() {
+      if (ruleSetRefreshTimer) {
+        clearInterval(ruleSetRefreshTimer);
+        ruleSetRefreshTimer = null;
+      }
       if (entitlementReconcileTimer) {
         clearInterval(entitlementReconcileTimer);
         entitlementReconcileTimer = null;

@@ -21,6 +21,21 @@ function compile(store, listenPort, hostId = "local") {
   };
 }
 
+function runtimeCredentialNames(config) {
+  return new Set(
+    config?.inbounds?.flatMap((inbound) => inbound.users?.map(
+      (user) => user.name || user.username
+    ) || []) || []
+  );
+}
+
+function removesRuntimeCredentials(previousConfig, nextConfig) {
+  if (!previousConfig) return false;
+  const previous = runtimeCredentialNames(previousConfig);
+  const next = runtimeCredentialNames(nextConfig);
+  return [...previous].some((credential) => !next.has(credential));
+}
+
 export class RuntimeManager {
   constructor({ store, adapter, listenPort = 8388 }) {
     this.store = store;
@@ -40,7 +55,7 @@ export class RuntimeManager {
     };
   }
 
-  async publish(publisherAdminId = null) {
+  async publish(publisherAdminId = null, options = {}) {
     const compiled = compile(this.store, this.listenPort);
     const deployment = await this.publishCompiled({
       ...compiled,
@@ -50,10 +65,19 @@ export class RuntimeManager {
     const remoteHosts = this.store.listHosts().filter((host) => host.kind === "remote" && host.enrolledAt);
     for (const host of remoteHosts) {
       const remote = compile(this.store, this.listenPort, host.id);
+      const revokesCredentials = options.detectRevocation === true
+        && removesRuntimeCredentials(
+          this.store.latestAppliedNodeConfig(host.id),
+          remote.config
+        );
       this.store.queueNodeTask(host.id, "publish-config", {
         version: deployment.version,
         checksum: remote.checksum,
-        configText: remote.configText
+        configText: remote.configText,
+        reason: options.reason || "deployment"
+      }, {
+        priority: revokesCredentials ? "critical" : "normal",
+        maxAttempts: revokesCredentials ? 0 : 5
       });
     }
     return { ...deployment, remoteQueued: remoteHosts.length };
@@ -70,7 +94,10 @@ export class RuntimeManager {
     }
     return {
       changed: true,
-      deployment: await this.publish(publisherAdminId)
+      deployment: await this.publish(publisherAdminId, {
+        reason: "entitlement-reconciliation",
+        detectRevocation: true
+      })
     };
   }
 

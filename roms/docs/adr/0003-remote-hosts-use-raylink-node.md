@@ -8,4 +8,10 @@ RayLink Node initiates all control traffic over HTTP(S): it sends heartbeats, po
 
 Deployments compile a separate configuration for each Host so User Entitlement node scope is enforced before credentials reach that Host. User Center configurations contain every connected Host allowed by the User's node scope.
 
-The first implementation queues a publication for every enrolled remote Host at once. Batched rollout, maintenance windows, remote historical rollback, certificate distribution, and traffic telemetry remain separate decisions.
+The first implementation queues a publication for every enrolled remote Host at once. User Entitlement
+revocation publications have critical priority, supersede older pending configuration tasks, and retry with
+persistent exponential backoff until the Host confirms success. The control plane exposes the pending state;
+an offline Host cannot be made safe instantaneously, but it applies the latest revocation before normal queued work
+as soon as RayLink Node reconnects.
+
+Batched rollout, maintenance windows, remote historical rollback, certificate distribution, and traffic telemetry remain separate decisions.

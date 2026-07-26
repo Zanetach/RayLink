@@ -18,7 +18,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const AGENT_VERSION = "0.2.0";
+const AGENT_VERSION = "0.3.0";
 
 async function pathExists(path) {
   try {
@@ -288,10 +288,10 @@ export class RayLinkNode {
     });
   }
 
-  async completeTask(taskId, status, result) {
+  async completeTask(taskId, attempt, status, result) {
     return this.authenticatedRequest(`/api/node/tasks/${encodeURIComponent(taskId)}/complete`, {
       method: "POST",
-      body: JSON.stringify({ status, result })
+      body: JSON.stringify({ attempt, status, result })
     });
   }
 
@@ -306,9 +306,9 @@ export class RayLinkNode {
     try {
       if (task.kind !== "publish-config") throw new Error(`不支持的节点任务：${task.kind}`);
       const result = await this.runtimeAdapter.publish(task.payload);
-      await this.completeTask(task.id, "succeeded", result);
+      await this.completeTask(task.id, task.attempt, "succeeded", result);
     } catch (error) {
-      await this.completeTask(task.id, "failed", { error: error.message });
+      await this.completeTask(task.id, task.attempt, "failed", { error: error.message });
     }
     return true;
   }

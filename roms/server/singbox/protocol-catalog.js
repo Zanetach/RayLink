@@ -287,13 +287,18 @@ export function buildProtocolInbounds({ profiles, users, masterPassword }) {
   });
 }
 
-export function buildProtocolClientConfig({ profiles, credential, server }) {
+export function buildProtocolClientConfig({ profiles, credential, server, ruleSetBaseUrl = null }) {
   const managed = profiles.filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
   const protocolOutbounds = managed.map((profile) => buildClientOutbound(profile, credential, server));
-  return clientConfigForOutbounds(protocolOutbounds);
+  return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl });
 }
 
-export function buildMultiHostProtocolClientConfig({ profiles, credential, hosts }) {
+export function buildMultiHostProtocolClientConfig({
+  profiles,
+  credential,
+  hosts,
+  ruleSetBaseUrl = null
+}) {
   const managed = profiles.filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
   const protocolOutbounds = hosts.flatMap((host) => {
     const hostTag = String(host.id || host.name || "node")
@@ -307,12 +312,72 @@ export function buildMultiHostProtocolClientConfig({ profiles, credential, hosts
       `raylink-${hostTag}-${profile.type}`
     ));
   });
-  return clientConfigForOutbounds(protocolOutbounds);
+  return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl });
 }
 
-function clientConfigForOutbounds(protocolOutbounds) {
+function clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl = null } = {}) {
   if (!protocolOutbounds.length) throw protocolError("NO_CLIENT_PROTOCOL", "当前没有可下发的用户协议", 409);
   const tags = protocolOutbounds.map((outbound) => outbound.tag);
+  const ruleSets = ruleSetBaseUrl
+    ? [
+        {
+          type: "remote",
+          tag: "geosite-geolocation-cn",
+          format: "binary",
+          url: new URL("geosite-geolocation-cn.srs", ruleSetBaseUrl).toString(),
+          download_detour: "direct",
+          update_interval: "1d"
+        },
+        {
+          type: "remote",
+          tag: "geoip-cn",
+          format: "binary",
+          url: new URL("geoip-cn.srs", ruleSetBaseUrl).toString(),
+          download_detour: "direct",
+          update_interval: "1d"
+        }
+      ]
+    : [
+        {
+          type: "inline",
+          tag: "geosite-geolocation-cn",
+          rules: [{
+            domain_suffix: [
+              ".cn",
+              "126.com",
+              "163.com",
+              "alipay.com",
+              "aliyun.com",
+              "baidu.com",
+              "bilibili.com",
+              "bytedance.com",
+              "douyin.com",
+              "huawei.com",
+              "jd.com",
+              "mi.com",
+              "qq.com",
+              "taobao.com",
+              "tmall.com",
+              "toutiao.com",
+              "weibo.com",
+              "xiaomi.com",
+              "zhihu.com"
+            ]
+          }]
+        },
+        {
+          type: "inline",
+          tag: "geoip-cn",
+          rules: [{
+            ip_cidr: [
+              "119.29.29.29/32",
+              "180.76.76.76/32",
+              "223.5.5.5/32",
+              "223.6.6.6/32"
+            ]
+          }]
+        }
+      ];
   return {
     log: { level: "info", timestamp: true },
     dns: {
@@ -333,21 +398,6 @@ function clientConfigForOutbounds(protocolOutbounds) {
       rules: [
         {
           rule_set: "geosite-geolocation-cn",
-          action: "route",
-          server: "dns-local"
-        },
-        {
-          type: "logical",
-          mode: "and",
-          rules: [
-            {
-              rule_set: "geosite-geolocation-!cn",
-              invert: true
-            },
-            {
-              rule_set: "geoip-cn"
-            }
-          ],
           action: "route",
           server: "dns-local"
         }
@@ -413,45 +463,12 @@ function clientConfigForOutbounds(protocolOutbounds) {
           outbound: "direct"
         },
         {
-          type: "logical",
-          mode: "and",
-          rules: [
-            { rule_set: "geoip-cn" },
-            {
-              rule_set: "geosite-geolocation-!cn",
-              invert: true
-            }
-          ],
+          rule_set: "geoip-cn",
           action: "route",
           outbound: "direct"
         }
       ],
-      rule_set: [
-        {
-          type: "remote",
-          tag: "geosite-geolocation-cn",
-          format: "binary",
-          url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
-          download_detour: "raylink-auto",
-          update_interval: "1d"
-        },
-        {
-          type: "remote",
-          tag: "geosite-geolocation-!cn",
-          format: "binary",
-          url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
-          download_detour: "raylink-auto",
-          update_interval: "1d"
-        },
-        {
-          type: "remote",
-          tag: "geoip-cn",
-          format: "binary",
-          url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-          download_detour: "raylink-auto",
-          update_interval: "1d"
-        }
-      ],
+      rule_set: ruleSets,
       final: "raylink-auto",
       default_domain_resolver: "dns-local",
       auto_detect_interface: true

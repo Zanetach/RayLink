@@ -175,6 +175,13 @@ function hostFromRow(row) {
       networkTxBps: row.network_tx_bps ?? null,
       serviceStatus: row.service_status || "unknown",
       updatedAt: row.metrics_updated_at || null
+    },
+    deploymentSync: {
+      pendingTaskCount: Number(row.pending_task_count || 0),
+      critical: Boolean(row.critical_pending),
+      status: Number(row.pending_task_count || 0) > 0
+        ? row.critical_pending ? "revocation-pending" : "pending"
+        : "current"
     }
   };
 }
@@ -202,12 +209,14 @@ export class RayLinkStore {
     adminPassword,
     initialHostAddress = "127.0.0.1",
     initialListenPort = 8388,
-    seedDemoData = true
+    seedDemoData = true,
+    nodeTaskRetryBaseMs = 60_000
   }) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.lastTelemetryPruneAt = 0;
+    this.nodeTaskRetryBaseMs = Math.max(0, Number(nodeTaskRetryBaseMs) || 0);
     this.migrate();
     this.seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData });
   }
@@ -317,6 +326,10 @@ export class RayLinkStore {
         payload_json TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('pending', 'claimed', 'succeeded', 'failed')),
         result_json TEXT,
+        priority INTEGER NOT NULL DEFAULT 0,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 5,
+        next_attempt_at TEXT,
         created_at TEXT NOT NULL,
         claimed_at TEXT,
         finished_at TEXT
@@ -344,6 +357,18 @@ export class RayLinkStore {
     const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
       this.db.exec("ALTER TABLE deployments ADD COLUMN publisher_admin_id TEXT");
+    }
+    const nodeTaskColumns = this.db.prepare("PRAGMA table_info(node_tasks)").all();
+    const nodeTaskMigrations = [
+      ["priority", "INTEGER NOT NULL DEFAULT 0"],
+      ["attempt_count", "INTEGER NOT NULL DEFAULT 0"],
+      ["max_attempts", "INTEGER NOT NULL DEFAULT 5"],
+      ["next_attempt_at", "TEXT"]
+    ];
+    for (const [column, definition] of nodeTaskMigrations) {
+      if (!nodeTaskColumns.some((candidate) => candidate.name === column)) {
+        this.db.exec(`ALTER TABLE node_tasks ADD COLUMN ${column} ${definition}`);
+      }
     }
     const userColumns = this.db.prepare("PRAGMA table_info(users)").all();
     if (!userColumns.some((column) => column.name === "quota_gb")) {
@@ -642,7 +667,19 @@ export class RayLinkStore {
   }
 
   listHosts() {
-    return this.db.prepare("SELECT * FROM hosts ORDER BY created_at").all().map(hostFromRow);
+    return this.db.prepare(`
+      SELECT hosts.*,
+             SUM(CASE WHEN node_tasks.status IN ('pending', 'claimed') THEN 1 ELSE 0 END)
+               AS pending_task_count,
+             MAX(CASE
+               WHEN node_tasks.status IN ('pending', 'claimed') AND node_tasks.priority >= 100
+               THEN 1 ELSE 0
+             END) AS critical_pending
+      FROM hosts
+      LEFT JOIN node_tasks ON node_tasks.host_id = hosts.id
+      GROUP BY hosts.id
+      ORDER BY hosts.created_at
+    `).all().map(hostFromRow);
   }
 
   listClientHosts() {
@@ -750,7 +787,7 @@ export class RayLinkStore {
   authenticateNode(hostId, secret) {
     if (!hostId || !secret) return null;
     const row = this.db.prepare(`
-      SELECT id FROM hosts
+      SELECT id, agent_version AS agentVersion FROM hosts
       WHERE id = ? AND kind = 'remote' AND node_secret_hash = ?
     `).get(hostId, hashSessionSecret(secret));
     return row || null;
@@ -915,59 +952,142 @@ export class RayLinkStore {
     };
   }
 
-  queueNodeTask(hostId, kind, payload) {
+  queueNodeTask(hostId, kind, payload, options = {}) {
     const host = this.getHost(hostId);
     if (!host || host.kind !== "remote" || !host.enrolledAt) {
       throw domainError("NODE_NOT_ENROLLED", "远程节点尚未完成注册", 409);
     }
     const id = randomUUID();
-    this.db.prepare(`
-      INSERT INTO node_tasks (id, host_id, kind, payload_json, status, created_at)
-      VALUES (?, ?, ?, ?, 'pending', ?)
-    `).run(id, hostId, kind, JSON.stringify(payload), nowIso());
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      let priority = options.priority === "critical"
+        ? 100
+        : Math.max(0, Number(options.priority) || 0);
+      let maxAttempts = options.maxAttempts === 0
+        ? 0
+        : Math.max(1, Number(options.maxAttempts) || 5);
+      if (kind === "publish-config") {
+        const superseded = this.db.prepare(`
+          SELECT MAX(priority) AS priority,
+                 MIN(CASE WHEN max_attempts = 0 THEN 0 ELSE max_attempts END) AS max_attempts
+          FROM node_tasks
+          WHERE host_id = ? AND kind = 'publish-config' AND status = 'pending'
+        `).get(hostId);
+        priority = Math.max(priority, Number(superseded?.priority || 0));
+        if (Number(superseded?.max_attempts) === 0 && Number(superseded?.priority) >= 100) {
+          maxAttempts = 0;
+        }
+        this.db.prepare(`
+          DELETE FROM node_tasks
+          WHERE host_id = ? AND kind = 'publish-config' AND status = 'pending'
+        `).run(hostId);
+      }
+      this.db.prepare(`
+        INSERT INTO node_tasks (
+          id, host_id, kind, payload_json, status, priority, max_attempts, created_at
+        )
+        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+      `).run(id, hostId, kind, JSON.stringify(payload), priority, maxAttempts, nowIso());
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
     return id;
   }
 
+  latestAppliedNodeConfig(hostId) {
+    const row = this.db.prepare(`
+      SELECT payload_json
+      FROM node_tasks
+      WHERE host_id = ? AND kind = 'publish-config' AND status = 'succeeded'
+      ORDER BY finished_at DESC
+      LIMIT 1
+    `).get(hostId);
+    const payload = parseJson(row?.payload_json, {});
+    if (!payload.configText) return null;
+    return parseJson(payload.configText, null);
+  }
+
   nextNodeTask(hostId) {
+    const now = nowIso();
     const retryBefore = new Date(Date.now() - 60_000).toISOString();
     const task = this.db.prepare(`
-      SELECT id, kind, payload_json
+      SELECT id, kind, payload_json, priority, attempt_count
       FROM node_tasks
       WHERE host_id = ?
-        AND (status = 'pending' OR (status = 'claimed' AND claimed_at < ?))
-      ORDER BY created_at
+        AND (
+          (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+          OR (status = 'claimed' AND claimed_at < ?)
+        )
+      ORDER BY priority DESC, created_at DESC
       LIMIT 1
-    `).get(hostId, retryBefore);
+    `).get(hostId, now, retryBefore);
     if (!task) return null;
     this.db.prepare(`
-      UPDATE node_tasks SET status = 'claimed', claimed_at = ? WHERE id = ?
-    `).run(nowIso(), task.id);
+      UPDATE node_tasks
+      SET status = 'claimed', claimed_at = ?, attempt_count = attempt_count + 1
+      WHERE id = ?
+    `).run(now, task.id);
     return {
       id: task.id,
       kind: task.kind,
-      payload: parseJson(task.payload_json, {})
+      payload: parseJson(task.payload_json, {}),
+      priority: Number(task.priority) >= 100 ? "critical" : "normal",
+      attempt: Number(task.attempt_count) + 1
     };
   }
 
   completeNodeTask(hostId, taskId, input = {}) {
     const task = this.db.prepare(`
-      SELECT id FROM node_tasks WHERE id = ? AND host_id = ?
+      SELECT id, kind, status, attempt_count, max_attempts
+      FROM node_tasks
+      WHERE id = ? AND host_id = ?
     `).get(taskId, hostId);
     if (!task) throw domainError("NODE_TASK_NOT_FOUND", "节点任务不存在", 404);
-    const status = input.status === "succeeded" ? "succeeded" : "failed";
+    const attempt = Number(input.attempt);
+    if (
+      task.status !== "claimed"
+      || !Number.isInteger(attempt)
+      || attempt !== Number(task.attempt_count)
+    ) {
+      return { id: taskId, status: task.status, ignored: true };
+    }
+    const succeeded = input.status === "succeeded";
+    const retryable = !succeeded
+      && task.kind === "publish-config"
+      && (Number(task.max_attempts) === 0 || Number(task.attempt_count) < Number(task.max_attempts));
+    const status = succeeded ? "succeeded" : retryable ? "pending" : "failed";
     const timestamp = nowIso();
+    const retryDelayMs = this.nodeTaskRetryBaseMs * Math.min(
+      16,
+      2 ** Math.max(0, Number(task.attempt_count) - 1)
+    );
+    const retryAt = retryable
+      ? new Date(Date.now() + retryDelayMs).toISOString()
+      : null;
     this.db.prepare(`
       UPDATE node_tasks
-      SET status = ?, result_json = ?, finished_at = ?
-      WHERE id = ? AND host_id = ?
-    `).run(status, JSON.stringify(input), timestamp, taskId, hostId);
+      SET status = ?, result_json = ?, finished_at = ?,
+          claimed_at = ?, next_attempt_at = ?
+      WHERE id = ? AND host_id = ? AND status = 'claimed' AND attempt_count = ?
+    `).run(
+      status,
+      JSON.stringify(input),
+      retryable ? null : timestamp,
+      retryable ? null : timestamp,
+      retryAt,
+      taskId,
+      hostId,
+      attempt
+    );
     this.db.prepare(`
       UPDATE hosts
       SET status = ?, runtime_version = COALESCE(?, runtime_version),
           last_seen_at = ?, updated_at = ?
       WHERE id = ?
     `).run(
-      status === "succeeded" ? "online" : "degraded",
+      succeeded ? "online" : "degraded",
       input.result?.runtimeVersion
         ? String(input.result.runtimeVersion).slice(0, 64)
         : input.runtimeVersion
@@ -977,7 +1097,11 @@ export class RayLinkStore {
       timestamp,
       hostId
     );
-    return { id: taskId, status };
+    return {
+      id: taskId,
+      status,
+      ...(retryAt ? { retryAt } : {})
+    };
   }
 
   bootstrap(admin) {

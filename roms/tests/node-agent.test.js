@@ -65,6 +65,7 @@ test("RayLink Node heartbeats, applies the next config and reports success", asy
     jsonResponse({
       id: "task-1",
       kind: "publish-config",
+      attempt: 1,
       payload: {
         version: 4,
         checksum: "sha256:config",
@@ -106,6 +107,7 @@ test("RayLink Node heartbeats, applies the next config and reports success", asy
   assert.equal(heartbeat.init.headers["x-raylink-host-id"], "host-fra");
   const completion = calls.find((call) => call.url.endsWith("/api/node/tasks/task-1/complete"));
   assert.deepEqual(JSON.parse(completion.init.body), {
+    attempt: 1,
     status: "succeeded",
     result: {
       runtimeVersion: "1.13.12",
@@ -123,6 +125,7 @@ test("RayLink Node reports a failed task without swallowing the next poll cycle"
     jsonResponse({
       id: "task-2",
       kind: "publish-config",
+      attempt: 3,
       payload: { version: 5, checksum: "sha256:bad", configText: "{}" }
     }),
     jsonResponse({ ok: true })
@@ -147,6 +150,7 @@ test("RayLink Node reports a failed task without swallowing the next poll cycle"
 
   const completion = calls.find((call) => call.url.endsWith("/api/node/tasks/task-2/complete"));
   assert.deepEqual(JSON.parse(completion.init.body), {
+    attempt: 3,
     status: "failed",
     result: { error: "sing-box check failed" }
   });

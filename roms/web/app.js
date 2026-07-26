@@ -1,7 +1,7 @@
 const users = [];
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
-const requiredNodeAgentVersion = "0.2.0";
+const requiredNodeAgentVersion = "0.3.0";
 
 const clientCatalog = {
   "mihomo": { name: "Mihomo", platforms: "macOS / Windows / Android", action: "一键导入" },
@@ -277,6 +277,12 @@ function hostStatusView(host, runtime, localReady) {
         ? { label: "已暂存", className: "neutral" }
         : { label: runtime.state === "not-configured" ? "待发布" : "异常", className: "warning" };
   }
+  if (host.deploymentSync?.status === "revocation-pending") {
+    return { label: "撤权待同步", className: "danger" };
+  }
+  if (host.deploymentSync?.status === "pending") {
+    return { label: "配置待同步", className: "warning" };
+  }
   if (host.status === "offline") return { label: "离线", className: "danger" };
   if (host.status === "pending") return { label: "等待接入", className: "neutral" };
   if (host.agentVersion !== requiredNodeAgentVersion) {
@@ -451,10 +457,16 @@ function renderHosts() {
         && host.telemetry?.serviceStatus === "running";
     const status = isLocal
       ? (healthy ? "运行中" : runtime.state === "staged" ? "已暂存" : "待配置")
+      : host.deploymentSync?.status === "revocation-pending"
+        ? "撤权待同步"
+        : host.deploymentSync?.status === "pending"
+          ? "配置待同步"
       : host.agentVersion && host.agentVersion !== requiredNodeAgentVersion
         ? "Node 待升级"
         : ({ pending: "等待接入", online: "在线", degraded: "发布失败" }[host.status] || "离线");
-    const statusClass = healthy ? "good" : host.status === "degraded" ? "warning" : "neutral";
+    const statusClass = host.deploymentSync?.status === "revocation-pending"
+      ? "danger"
+      : healthy ? "good" : host.status === "degraded" || host.deploymentSync?.status === "pending" ? "warning" : "neutral";
     const lastSeen = host.lastSeenAt
       ? new Intl.DateTimeFormat("zh-CN", {
           month: "2-digit",
@@ -861,6 +873,11 @@ function hostDrawerMarkup(hostId) {
   const runtimeCopy = isRemote
     ? `${host.status === "online" ? "在线" : host.status === "pending" ? "等待接入" : "需要检查"} · ${host.runtimeVersion || host.agentVersion || "尚未上报版本"}`
     : `${controlPlane.runtime?.mode || "dry-run"} · ${controlPlane.runtime?.configPath || "尚未生成配置"}`;
+  const deploymentSyncCopy = host.deploymentSync?.status === "revocation-pending"
+    ? `撤权配置正在等待节点确认，队列中 ${host.deploymentSync.pendingTaskCount} 项；节点恢复后会优先、持续重试。`
+    : host.deploymentSync?.status === "pending"
+      ? `有 ${host.deploymentSync.pendingTaskCount} 项配置等待节点应用。`
+      : "节点配置已与控制面同步。";
   return `
     <form class="drawer-form" id="host-drawer-form" data-host-id="${escapeHtml(host.id)}">
       <div class="drawer-profile"><span class="avatar">${escapeHtml(host.name.slice(0, 1))}</span><div><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></div></div>
@@ -871,11 +888,12 @@ function hostDrawerMarkup(hostId) {
       <p class="drawer-section-label">sing-box 入口</p>
       <div class="switch-row"><div><strong>Shadowsocks 2022</strong><small>端口由服务端环境变量统一设置；保存后用户配置立即使用新地址</small></div><span class="status-badge good"><i></i>已启用</span></div>
       <div class="switch-row"><div><strong>${isRemote ? "RayLink Node" : "Runtime 模式"}</strong><small>${escapeHtml(runtimeCopy)}</small></div><span class="status-badge neutral"><i></i>${escapeHtml(isRemote ? host.status : controlPlane.runtime?.state || "unknown")}</span></div>
+      ${isRemote ? `<div class="switch-row"><div><strong>配置同步</strong><small>${escapeHtml(deploymentSyncCopy)}</small></div><span class="status-badge ${host.deploymentSync?.critical ? "danger" : host.deploymentSync?.pendingTaskCount ? "warning" : "good"}"><i></i>${escapeHtml(host.deploymentSync?.status === "revocation-pending" ? "撤权待同步" : host.deploymentSync?.status === "pending" ? "待同步" : "已同步")}</span></div>` : ""}
       ${isRemote && !host.enrolledAt
         ? `<button type="button" class="button secondary" data-reissue-host="${escapeHtml(host.id)}">${icon("refresh")}重新生成接入命令</button><p class="field-hint">新的接入令牌会立即替换之前的令牌。</p>`
         : ""}
       ${nodeNeedsUpgrade
-        ? `<p class="drawer-section-label">Node 升级</p><p class="field-hint">当前 ${escapeHtml(host.agentVersion || "旧版")} 不会上报正式版所需服务遥测，升级前不会进入用户配置。</p><pre class="advanced-preview"><code id="node-upgrade-command">${escapeHtml(nodeUpgradeCommand)}</code></pre><button type="button" class="button secondary" data-copy-target="node-upgrade-command">${icon("copy")}复制升级命令</button>`
+        ? `<p class="drawer-section-label">Node 升级</p><p class="field-hint">当前 ${escapeHtml(host.agentVersion || "旧版")} 不支持正式版任务租约和服务遥测。控制面会暂停向该节点派发配置，升级后自动恢复。</p><pre class="advanced-preview"><code id="node-upgrade-command">${escapeHtml(nodeUpgradeCommand)}</code></pre><button type="button" class="button secondary" data-copy-target="node-upgrade-command">${icon("copy")}复制升级命令</button>`
         : ""}
     </form>`;
 }

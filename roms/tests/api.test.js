@@ -15,6 +15,11 @@ async function startTestApp(overrides = {}) {
     publicOrigin: "http://127.0.0.1",
     runtimeMode: "dry-run",
     nodeHeartbeatMinIntervalMs: 0,
+    ruleSetCache: {
+      prepare: async () => {},
+      available: () => false,
+      get: async () => null
+    },
     ...overrides
   });
   await app.listen({ host: "127.0.0.1", port: 0 });
@@ -532,6 +537,73 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   assert.equal((await fetch(`${testApp.baseUrl}${secondSubscriptionPath}`)).status, 200);
 });
 
+test("subscription uses control-plane managed official rule sets when cached", async (t) => {
+  const ruleSetFiles = new Map([
+    ["geosite-geolocation-cn.srs", Buffer.from("managed-geosite")],
+    ["geoip-cn.srs", Buffer.from("managed-geoip")]
+  ]);
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    ruleSetCache: {
+      prepare: async () => {},
+      available: () => true,
+      get: async (filename) => ruleSetFiles.get(filename) || null
+    }
+  });
+  t.after(() => testApp.close());
+  const loginResponse = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = loginResponse.headers.getSetCookie()[0].split(";")[0];
+  const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  });
+  const config = await configResponse.json();
+  assert.ok(config.route.rule_set.every((ruleSet) => ruleSet.type === "remote"));
+  assert.deepEqual(
+    config.route.rule_set.map((ruleSet) => new URL(ruleSet.url).pathname),
+    ["/rule-sets/geosite-geolocation-cn.srs", "/rule-sets/geoip-cn.srs"]
+  );
+
+  const ruleSetResponse = await fetch(`${testApp.baseUrl}/rule-sets/geosite-geolocation-cn.srs`);
+  assert.equal(ruleSetResponse.status, 200);
+  assert.equal(ruleSetResponse.headers.get("content-type"), "application/octet-stream");
+  assert.equal(await ruleSetResponse.text(), "managed-geosite");
+});
+
+test("subscription falls back to inline routing when managed rule-set validation fails", async (t) => {
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    ruleSetCache: undefined,
+    ruleSetFetch: async () => new Response("not-a-binary-rule-set", { status: 200 })
+  });
+  t.after(() => testApp.close());
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const loginResponse = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = loginResponse.headers.getSetCookie()[0].split(";")[0];
+  const config = await (await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  })).json();
+  assert.ok(config.route.rule_set.every((ruleSet) => ruleSet.type === "inline"));
+  assert.ok(config.route.rule_set.every((ruleSet) => !Object.hasOwn(ruleSet, "url")));
+  assert.equal(
+    (await fetch(`${testApp.baseUrl}/rule-sets/geosite-geolocation-cn.srs`)).status,
+    404
+  );
+});
+
 test("invited user cannot log in before activation", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -862,6 +934,7 @@ test("user subscription includes every online host allowed by the user node scop
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "x64",
+      agentVersion: "0.3.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -901,7 +974,11 @@ test("user subscription includes every online host allowed by the user node scop
     {
       method: "POST",
       headers: { ...nodeHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ status: "succeeded", result: { runtimeVersion: "1.13.12" } })
+      body: JSON.stringify({
+        attempt: task.attempt,
+        status: "succeeded",
+        result: { runtimeVersion: "1.13.12" }
+      })
     }
   );
   assert.equal(completionResponse.status, 200);
@@ -936,6 +1013,64 @@ test("user subscription includes every online host allowed by the user node scop
   assert.deepEqual(servers, ["tokyo.example.com", "fra.example.com"]);
 });
 
+test("old RayLink Nodes cannot claim tasks until their heartbeat reports the required version", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "升级验证节点",
+      address: "upgrade.example.com",
+      region: "singapore"
+    })
+  })).json();
+  const enrolled = await (await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "upgrade-node",
+      agentVersion: "0.2.0",
+      runtimeVersion: "1.13.12"
+    })
+  })).json();
+  const nodeHeaders = {
+    authorization: `Bearer ${enrolled.nodeSecret}`,
+    "x-raylink-host-id": enrolled.hostId
+  };
+
+  await api(testApp.baseUrl, cookie, "/api/deployments", { method: "POST" });
+  const blockedResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  });
+  assert.equal(blockedResponse.status, 426);
+  const blocked = await blockedResponse.json();
+  assert.equal(blocked.error.code, "NODE_UPGRADE_REQUIRED");
+  assert.equal(blocked.requiredVersion, "0.3.0");
+
+  const beforeUpgrade = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  const waitingHost = beforeUpgrade.hosts.find((host) => host.id === enrolled.hostId);
+  assert.equal(waitingHost.deploymentSync.pendingTaskCount, 1);
+
+  const heartbeatResponse = await fetch(`${testApp.baseUrl}/api/node/heartbeat`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      agentVersion: "0.3.0",
+      runtimeVersion: "1.13.12",
+      telemetry: { serviceStatus: "running" }
+    })
+  });
+  assert.equal(heartbeatResponse.status, 200);
+
+  const taskResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  });
+  assert.equal(taskResponse.status, 200);
+  assert.equal((await taskResponse.json()).attempt, 1);
+});
+
 test("publishing queues a host-specific sing-box configuration for an enrolled RayLink Node", async (t) => {
   const runtimeAdapter = {
     async publish() {
@@ -966,7 +1101,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.1.0",
+      agentVersion: "0.3.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -997,6 +1132,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
     method: "POST",
     headers: { ...nodeHeaders, "content-type": "application/json" },
     body: JSON.stringify({
+      attempt: task.attempt,
       status: "succeeded",
       runtimeVersion: "1.13.12",
       validation: "sing-box"
@@ -1008,6 +1144,147 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
     headers: nodeHeaders
   });
   assert.equal(emptyResponse.status, 204);
+});
+
+test("remote entitlement revocation is critical, retryable and visible until applied", async (t) => {
+  const runtimeAdapter = {
+    async publish() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    },
+    async status() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    }
+  };
+  const testApp = await startTestApp({ runtimeAdapter, nodeTaskRetryBaseMs: 0 });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "撤权验证节点",
+      address: "revoke.example.com",
+      region: "tokyo"
+    })
+  })).json();
+  const enrolled = await (await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "revoke-node",
+      platform: "linux",
+      architecture: "amd64",
+      agentVersion: "0.3.0",
+      runtimeVersion: "1.13.12"
+    })
+  })).json();
+  const nodeHeaders = {
+    authorization: `Bearer ${enrolled.nodeSecret}`,
+    "x-raylink-host-id": enrolled.hostId
+  };
+
+  await api(testApp.baseUrl, cookie, "/api/deployments", { method: "POST" });
+  const initialTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  await fetch(`${testApp.baseUrl}/api/node/tasks/${initialTask.id}/complete`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      attempt: initialTask.attempt,
+      status: "succeeded",
+      runtimeVersion: "1.13.12"
+    })
+  });
+
+  const beforeDisable = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  const priya = beforeDisable.users.find((user) => user.email === "priya@vantage-bioworks.in");
+  const disableResponse = await api(testApp.baseUrl, cookie, `/api/users/${priya.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state: "disabled" })
+  });
+  assert.equal(disableResponse.status, 200);
+
+  const revocationTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  assert.equal(revocationTask.priority, "critical");
+  assert.equal(revocationTask.attempt, 1);
+  assert.doesNotMatch(revocationTask.payload.configText, /priya@vantage-bioworks\.in/);
+
+  const failedCompletion = await fetch(
+    `${testApp.baseUrl}/api/node/tasks/${revocationTask.id}/complete`,
+    {
+      method: "POST",
+      headers: { ...nodeHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        attempt: revocationTask.attempt,
+        status: "failed",
+        error: "temporary systemd failure"
+      })
+    }
+  );
+  assert.equal(failedCompletion.status, 200);
+  assert.equal((await failedCompletion.json()).status, "pending");
+
+  const retryTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  assert.equal(retryTask.id, revocationTask.id);
+  assert.equal(retryTask.attempt, 2);
+  await fetch(`${testApp.baseUrl}/api/node/tasks/${retryTask.id}/complete`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      attempt: retryTask.attempt,
+      status: "failed",
+      error: "still unavailable"
+    })
+  });
+
+  await api(testApp.baseUrl, cookie, "/api/deployments", { method: "POST" });
+  const replacementTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  assert.notEqual(replacementTask.id, retryTask.id);
+  assert.equal(replacementTask.priority, "critical");
+  assert.doesNotMatch(replacementTask.payload.configText, /priya@vantage-bioworks\.in/);
+  await fetch(`${testApp.baseUrl}/api/node/tasks/${replacementTask.id}/complete`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      attempt: replacementTask.attempt,
+      status: "succeeded",
+      runtimeVersion: "1.13.12"
+    })
+  });
+  const staleCompletion = await fetch(
+    `${testApp.baseUrl}/api/node/tasks/${replacementTask.id}/complete`,
+    {
+      method: "POST",
+      headers: { ...nodeHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        attempt: replacementTask.attempt - 1,
+        status: "failed",
+        error: "late callback from an older lease"
+      })
+    }
+  );
+  assert.equal((await staleCompletion.json()).ignored, true);
+
+  const afterRetry = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  const remoteHost = afterRetry.hosts.find((host) => host.id === enrolled.hostId);
+  assert.equal(remoteHost.deploymentSync.pendingTaskCount, 0);
+
+  await api(testApp.baseUrl, cookie, `/api/users/${priya.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state: "active" })
+  });
+  const expansionTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  assert.equal(expansionTask.priority, "normal");
+  assert.match(expansionTask.payload.configText, /priya@vantage-bioworks\.in/);
 });
 
 test("revoking portal access invalidates an existing user session", async (t) => {
@@ -1141,7 +1418,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);
   const nodeRuntime = await nodeRuntimeResponse.text();
   assert.match(nodeRuntime, /class RayLinkNode/);
-  assert.match(nodeRuntime, /AGENT_VERSION = "0\.2\.0"/);
+  assert.match(nodeRuntime, /AGENT_VERSION = "0\.3\.0"/);
 
   const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);
   assert.equal(portalResponse.status, 200);
