@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -127,6 +128,8 @@ function sendSubscriptionJson(request, response, body) {
 async function sendStatic(response, webDir, pathname) {
   const relativePath = pathname === "/"
     ? "index.html"
+    : ["/setup", "/setup/"].includes(pathname)
+      ? "setup.html"
     : ["/portal", "/portal/"].includes(pathname)
       ? "portal.html"
       : decodeURIComponent(pathname).replace(/^\/+/, "");
@@ -152,6 +155,97 @@ async function sendStatic(response, webDir, pathname) {
   }
 }
 
+function normalizedOrigin(value, fieldName) {
+  let url;
+  try {
+    url = new URL(String(value || "").trim());
+  } catch {
+    throw httpError("INVALID_SETUP_INPUT", `${fieldName}不是有效地址`, 422);
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw httpError("INVALID_SETUP_INPUT", `${fieldName}必须是仅包含协议、域名或 IP 和端口的地址`, 422);
+  }
+  if (
+    url.protocol !== "https:"
+    && !["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+  ) {
+    throw httpError("HTTPS_REQUIRED", `${fieldName}在非本机环境必须使用 HTTPS`, 422);
+  }
+  return url.origin;
+}
+
+function normalizeSetupInput(body) {
+  const accessMode = String(body.access?.mode || "");
+  if (!["domain", "ip"].includes(accessMode)) {
+    throw httpError("INVALID_SETUP_INPUT", "请选择域名或 IP 访问模式", 422);
+  }
+  const canonicalOrigin = normalizedOrigin(body.access?.canonicalOrigin, "主访问地址");
+  const canonicalHost = new URL(canonicalOrigin).hostname;
+  if (accessMode === "domain" && isIP(canonicalHost)) {
+    throw httpError("INVALID_SETUP_INPUT", "域名访问模式不能填写 IP 地址", 422);
+  }
+  if (accessMode === "ip" && !isIP(canonicalHost) && canonicalHost !== "localhost") {
+    throw httpError("INVALID_SETUP_INPUT", "IP 访问模式必须填写 IP 地址", 422);
+  }
+  const allowedOrigins = [
+    canonicalOrigin,
+    ...(Array.isArray(body.access?.allowedOrigins) ? body.access.allowedOrigins : [])
+  ].map((origin) => normalizedOrigin(origin, "允许的管理端地址"));
+  const uniqueAllowedOrigins = [...new Set(allowedOrigins)];
+  if (uniqueAllowedOrigins.length > 8) {
+    throw httpError("INVALID_SETUP_INPUT", "最多允许配置 8 个管理端地址", 422);
+  }
+
+  const certificateMode = String(body.certificate?.mode || "");
+  const certificateModes = accessMode === "domain"
+    ? ["managed", "external"]
+    : ["external", "ip-self-signed"];
+  if (!certificateModes.includes(certificateMode)) {
+    throw httpError("INVALID_SETUP_INPUT", "证书模式与当前访问方式不匹配", 422);
+  }
+
+  const username = String(body.admin?.username || "").trim();
+  const password = String(body.admin?.password || "");
+  if (!/^[A-Za-z0-9_.-]{3,64}$/.test(username)) {
+    throw httpError("INVALID_SETUP_INPUT", "管理员用户名需为 3–64 位字母、数字或 ._-", 422);
+  }
+  const passwordClasses = [
+    /[a-z]/.test(password),
+    /[A-Z]/.test(password),
+    /\d/.test(password),
+    /[^A-Za-z0-9]/.test(password)
+  ].filter(Boolean).length;
+  if (password.length < 12 || passwordClasses < 3) {
+    throw httpError("INVALID_SETUP_INPUT", "管理员密码至少 12 位，并包含至少三类字符", 422);
+  }
+
+  const runtime = {
+    name: String(body.runtime?.name || "").trim(),
+    address: String(body.runtime?.address || "").trim(),
+    region: String(body.runtime?.region || "").trim()
+  };
+  if (!runtime.name || runtime.name.length > 80) {
+    throw httpError("INVALID_SETUP_INPUT", "Runtime 名称不能为空且不能超过 80 个字符", 422);
+  }
+  if (!/^(?:[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:]+\])$/i.test(runtime.address)) {
+    throw httpError("INVALID_SETUP_INPUT", "Runtime 地址格式不正确", 422);
+  }
+  if (!/^[a-z0-9-]{2,32}$/i.test(runtime.region)) {
+    throw httpError("INVALID_SETUP_INPUT", "区域标识格式不正确", 422);
+  }
+
+  return {
+    access: {
+      mode: accessMode,
+      canonicalOrigin,
+      allowedOrigins: uniqueAllowedOrigins
+    },
+    certificate: { mode: certificateMode },
+    admin: { username, password },
+    runtime
+  };
+}
+
 function sessionCookie(name, secret, expiresAt, secure) {
   return [
     `${name}=${encodeURIComponent(secret)}`,
@@ -175,8 +269,15 @@ export async function createRayLinkApp(options) {
     initialHostAddress: proxyHost,
     initialListenPort: listenPort,
     seedDemoData: options.seedDemoData,
-    nodeTaskRetryBaseMs: options.nodeTaskRetryBaseMs
+    nodeTaskRetryBaseMs: options.nodeTaskRetryBaseMs,
+    setupRequired: options.setupRequired,
+    setupTokenHash: options.setupTokenHash,
+    setupTokenExpiresAt: options.setupTokenExpiresAt
   });
+  const currentPublicOrigin = () => {
+    const configured = store.setupStatus().access?.canonicalOrigin;
+    return configured ? new URL(configured) : publicOrigin;
+  };
   const webDir = resolve(options.webDir || defaultWebDir);
   const runtimeAdapter = options.runtimeAdapter || new LocalSingBoxAdapter({
     dataDir: options.dataDir,
@@ -343,7 +444,7 @@ export async function createRayLinkApp(options) {
       port: listenPort,
       protocols: store.listProtocolConfigs(),
       ruleSetBaseUrl: ruleSetCache.available()
-        ? new URL("/rule-sets/", publicOrigin).toString()
+        ? new URL("/rule-sets/", currentPublicOrigin()).toString()
         : null
     });
   };
@@ -400,7 +501,80 @@ export async function createRayLinkApp(options) {
 
   const server = createServer(async (request, response) => {
     try {
-      const url = new URL(request.url, publicOrigin);
+      const url = new URL(request.url, currentPublicOrigin());
+      const setup = store.setupStatus();
+
+      if (request.method === "GET" && url.pathname === "/api/setup/status") {
+        sendJson(response, 200, {
+          state: setup.state,
+          ...(setup.state === "SETUP_PENDING" ? { expiresAt: setup.expiresAt } : {}),
+          version: 1
+        });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/setup/complete") {
+        if (setup.state !== "SETUP_PENDING") {
+          throw httpError("SETUP_ALREADY_COMPLETE", "RayLink 已完成初始化", 409);
+        }
+        const attemptKey = authKey(request, "setup");
+        if (!authAllowed(attemptKey)) {
+          throw httpError("RATE_LIMITED", "初始化令牌尝试过多，请稍后再试", 429);
+        }
+        const body = await readJson(request);
+        if (!store.verifySetupToken(body.token)) {
+          recordAuthFailure(attemptKey);
+          throw httpError("SETUP_TOKEN_INVALID", "初始化令牌无效或已经过期", 401);
+        }
+        const input = normalizeSetupInput(body);
+        const admin = store.completeSetup(input);
+        authAttempts.delete(attemptKey);
+        const session = store.createAdminSession(admin.id);
+        const finalOrigin = currentPublicOrigin();
+        const forwardedProtocol = options.trustProxy
+          ? String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim()
+          : "";
+        const requestProtocol = forwardedProtocol || (request.socket.encrypted ? "https" : "http");
+        const requestOrigin = request.headers.host
+          ? `${requestProtocol}://${request.headers.host}`
+          : "";
+        sendJson(response, 201, {
+          state: "READY",
+          currentAdmin: admin,
+          redirectTo: requestOrigin === finalOrigin.origin ? "/" : `${finalOrigin.origin}/`
+        }, {
+          "set-cookie": sessionCookie(
+            SESSION_COOKIE,
+            session.secret,
+            session.expiresAt,
+            finalOrigin.protocol === "https:"
+          )
+        });
+        return;
+      }
+
+      if (setup.state === "SETUP_PENDING") {
+        if (request.method === "GET" && ["/", "/index.html"].includes(url.pathname)) {
+          response.writeHead(302, { location: "/setup", "cache-control": "no-store" });
+          response.end();
+          return;
+        }
+        if (
+          request.method === "GET"
+          && ["/setup", "/setup/", "/setup.js", "/setup.css", "/styles.css"].includes(url.pathname)
+          && await sendStatic(response, webDir, url.pathname)
+        ) return;
+        sendJson(response, 423, {
+          error: { code: "SETUP_REQUIRED", message: "请先完成 RayLink 首次初始化" }
+        });
+        return;
+      }
+
+      if (request.method === "GET" && ["/setup", "/setup/"].includes(url.pathname)) {
+        response.writeHead(302, { location: "/", "cache-control": "no-store" });
+        response.end();
+        return;
+      }
 
       const ruleSetMatch = url.pathname.match(
         /^\/rule-sets\/(geosite-geolocation-cn\.srs|geoip-cn\.srs)$/
@@ -469,7 +643,7 @@ export async function createRayLinkApp(options) {
           response,
           200,
           { currentAdmin: admin },
-          { "set-cookie": sessionCookie(SESSION_COOKIE, session.secret, session.expiresAt, publicOrigin.protocol === "https:") }
+          { "set-cookie": sessionCookie(SESSION_COOKIE, session.secret, session.expiresAt, currentPublicOrigin().protocol === "https:") }
         );
         return;
       }
@@ -502,7 +676,7 @@ export async function createRayLinkApp(options) {
           response,
           200,
           profile,
-          { "set-cookie": sessionCookie(PORTAL_SESSION_COOKIE, session.secret, session.expiresAt, publicOrigin.protocol === "https:") }
+          { "set-cookie": sessionCookie(PORTAL_SESSION_COOKIE, session.secret, session.expiresAt, currentPublicOrigin().protocol === "https:") }
         );
         return;
       }
@@ -532,7 +706,7 @@ export async function createRayLinkApp(options) {
           sendJson(response, 201, {
             subscriptionUrl: new URL(
               `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
-              publicOrigin
+              currentPublicOrigin()
             ).toString()
           });
           return;
@@ -667,7 +841,9 @@ export async function createRayLinkApp(options) {
 
         if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
           const requestOrigin = request.headers.origin;
-          if (requestOrigin && requestOrigin !== publicOrigin.origin) {
+          const allowedOrigins = store.setupStatus().access?.allowedOrigins
+            || [currentPublicOrigin().origin];
+          if (requestOrigin && !allowedOrigins.includes(requestOrigin)) {
             sendJson(response, 403, { error: { code: "ORIGIN_REJECTED", message: "请求来源不受信任" } });
             return;
           }
@@ -847,7 +1023,7 @@ export async function createRayLinkApp(options) {
           sendJson(response, 201, {
             subscriptionUrl: new URL(
               `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
-              publicOrigin
+              currentPublicOrigin()
             ).toString()
           });
           return;

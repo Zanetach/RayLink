@@ -259,7 +259,10 @@ export class RayLinkStore {
     initialHostAddress = "127.0.0.1",
     initialListenPort = 8388,
     seedDemoData = true,
-    nodeTaskRetryBaseMs = 60_000
+    nodeTaskRetryBaseMs = 60_000,
+    setupRequired = false,
+    setupTokenHash = "",
+    setupTokenExpiresAt = ""
   }) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
@@ -268,6 +271,7 @@ export class RayLinkStore {
     this.nodeTaskRetryBaseMs = Math.max(0, Number(nodeTaskRetryBaseMs) || 0);
     this.migrate();
     this.seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData });
+    this.initializeSetup({ setupRequired, setupTokenHash, setupTokenExpiresAt });
   }
 
   migrate() {
@@ -624,6 +628,127 @@ export class RayLinkStore {
     const valid = await verifyPassword(password, admin?.password_hash || DUMMY_PASSWORD_HASH);
     if (!admin || !valid) return null;
     return { id: admin.id, username: admin.username };
+  }
+
+  initializeSetup({ setupRequired, setupTokenHash, setupTokenExpiresAt }) {
+    const existing = this.db.prepare(
+      "SELECT value FROM settings WHERE key = 'setup_state'"
+    ).get();
+    if (existing) {
+      if (
+        existing.value === "SETUP_PENDING"
+        && setupRequired
+        && setupTokenHash
+        && setupTokenExpiresAt
+      ) {
+        const timestamp = nowIso();
+        const upsert = this.db.prepare(`
+          INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        `);
+        upsert.run("setup_token_hash", setupTokenHash, timestamp);
+        upsert.run("setup_token_expires_at", setupTokenExpiresAt, timestamp);
+      }
+      return;
+    }
+
+    const timestamp = nowIso();
+    const state = setupRequired ? "SETUP_PENDING" : "READY";
+    if (setupRequired && (!setupTokenHash || !setupTokenExpiresAt)) {
+      throw domainError(
+        "SETUP_TOKEN_REQUIRED",
+        "首次初始化必须提供带有效期的一次性令牌",
+        500
+      );
+    }
+    const insert = this.db.prepare(`
+      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+    `);
+    insert.run("setup_state", state, timestamp);
+    if (setupRequired) {
+      insert.run("setup_token_hash", setupTokenHash, timestamp);
+      insert.run("setup_token_expires_at", setupTokenExpiresAt, timestamp);
+    }
+  }
+
+  setupStatus() {
+    const rows = this.db.prepare(`
+      SELECT key, value FROM settings
+      WHERE key IN (
+        'setup_state', 'setup_token_expires_at', 'canonical_origin',
+        'allowed_origins', 'access_mode', 'certificate_mode'
+      )
+    `).all();
+    const settings = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+    const state = settings.setup_state || "READY";
+    return {
+      state,
+      ...(state === "SETUP_PENDING"
+        ? { expiresAt: settings.setup_token_expires_at || null }
+        : {}),
+      access: settings.canonical_origin
+        ? {
+            mode: settings.access_mode,
+            canonicalOrigin: settings.canonical_origin,
+            allowedOrigins: parseJson(settings.allowed_origins, []),
+            certificateMode: settings.certificate_mode
+          }
+        : null
+    };
+  }
+
+  verifySetupToken(token) {
+    const status = this.setupStatus();
+    if (status.state !== "SETUP_PENDING") return false;
+    if (!status.expiresAt || Date.parse(status.expiresAt) <= Date.now()) return false;
+    const stored = this.db.prepare(
+      "SELECT value FROM settings WHERE key = 'setup_token_hash'"
+    ).get()?.value;
+    return Boolean(stored) && hashSessionSecret(String(token || "")) === stored;
+  }
+
+  completeSetup({ access, certificate, admin, runtime }) {
+    if (this.setupStatus().state !== "SETUP_PENDING") {
+      throw domainError("SETUP_ALREADY_COMPLETE", "RayLink 已完成初始化", 409);
+    }
+    const currentAdmin = this.db.prepare(
+      "SELECT id FROM admins ORDER BY created_at LIMIT 1"
+    ).get();
+    if (!currentAdmin) {
+      throw domainError("ADMIN_NOT_FOUND", "初始化管理员不存在", 500);
+    }
+
+    const timestamp = nowIso();
+    try {
+      this.db.exec("BEGIN IMMEDIATE");
+      this.db.prepare(`
+        UPDATE admins SET username = ?, password_hash = ? WHERE id = ?
+      `).run(admin.username, hashPassword(admin.password), currentAdmin.id);
+      this.db.prepare("DELETE FROM sessions").run();
+
+      const upsert = this.db.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `);
+      upsert.run("setup_state", "READY", timestamp);
+      upsert.run("canonical_origin", access.canonicalOrigin, timestamp);
+      upsert.run("allowed_origins", JSON.stringify(access.allowedOrigins), timestamp);
+      upsert.run("access_mode", access.mode, timestamp);
+      upsert.run("certificate_mode", certificate.mode, timestamp);
+      this.db.prepare(
+        "DELETE FROM settings WHERE key IN ('setup_token_hash', 'setup_token_expires_at')"
+      ).run();
+
+      this.db.prepare(`
+        UPDATE hosts SET name = ?, address = ?, region = ?, updated_at = ?
+        WHERE id = 'local'
+      `).run(runtime.name, runtime.address, runtime.region, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { id: currentAdmin.id, username: admin.username };
   }
 
   createAdminSession(adminId, ttlSeconds = 43_200) {

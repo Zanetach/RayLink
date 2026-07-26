@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/sing-box run -c /var/lib/raylink/sing-box/config.json
+ExecStart=/usr/local/bin/raylink-sing-box run -c /var/lib/raylink/sing-box/config.json
 Restart=on-failure
 RestartSec=3
 User=root

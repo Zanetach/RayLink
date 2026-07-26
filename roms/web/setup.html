@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="RayLink 首次初始化">
+  <title>初始化 RayLink</title>
+  <link rel="stylesheet" href="/styles.css?v=0.1.0-20260726e">
+  <link rel="stylesheet" href="/setup.css?v=0.1.0-20260726e">
+</head>
+<body class="setup-page">
+  <main class="setup-shell">
+    <header class="setup-brand">
+      <span class="brand-mark">R/</span>
+      <span><strong>RayLink</strong><small>First-run setup</small></span>
+    </header>
+
+    <section class="setup-card" aria-labelledby="setup-title">
+      <aside class="setup-sidebar">
+        <p class="eyebrow">安全初始化</p>
+        <h1 id="setup-title">首次初始化 RayLink</h1>
+        <p>完成访问入口、管理员和本机 Runtime 配置。一次性令牌只在本次初始化中使用。</p>
+        <ol class="setup-progress" aria-label="初始化进度">
+          <li class="active" data-progress="0"><span>1</span>验证安装</li>
+          <li data-progress="1"><span>2</span>访问入口</li>
+          <li data-progress="2"><span>3</span>管理员</li>
+          <li data-progress="3"><span>4</span>本机 Runtime</li>
+          <li data-progress="4"><span>5</span>检查并完成</li>
+        </ol>
+      </aside>
+
+      <form class="setup-form" id="setup-form">
+        <section class="setup-step active" data-step="0">
+          <p class="eyebrow">Step 1 / 5</p>
+          <h2>验证这次安装</h2>
+          <p class="setup-intro">安装脚本会输出一次性初始化链接。令牌位于链接的 <code>#token</code> 片段中，不会进入服务器访问日志。</p>
+          <label class="field">
+            <span>一次性初始化令牌</span>
+            <input name="token" type="password" autocomplete="off" required>
+          </label>
+          <div class="setup-callout">
+            <strong id="setup-state-label">正在检查服务状态…</strong>
+            <span id="setup-expiry"></span>
+          </div>
+        </section>
+
+        <section class="setup-step" data-step="1" hidden>
+          <p class="eyebrow">Step 2 / 5</p>
+          <h2>访问入口与 HTTPS</h2>
+          <p class="setup-intro">域名和 IP 均可作为管理入口。公网环境必须使用 HTTPS；可由 RayLink 管理域名证书，也可接入已有反向代理。</p>
+          <div class="setup-choice-grid">
+            <label class="setup-choice">
+              <input type="radio" name="accessMode" value="domain" checked>
+              <span><strong>域名访问</strong><small>推荐，适合正式使用和自动证书</small></span>
+            </label>
+            <label class="setup-choice">
+              <input type="radio" name="accessMode" value="ip">
+              <span><strong>IP 访问</strong><small>适合暂时没有域名的环境</small></span>
+            </label>
+          </div>
+          <label class="field">
+            <span>主访问地址</span>
+            <input name="canonicalOrigin" type="url" placeholder="https://panel.example.com" required>
+            <small>只填写协议、域名或 IP 和可选端口，不要包含路径。</small>
+          </label>
+          <label class="field">
+            <span>其他允许的管理端地址（可选）</span>
+            <textarea name="allowedOrigins" rows="3" placeholder="每行一个，例如 https://10.0.0.8"></textarea>
+          </label>
+          <label class="field">
+            <span>证书方式</span>
+            <select name="certificateMode">
+              <option value="external">已有 HTTPS / 反向代理</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="setup-step" data-step="2" hidden>
+          <p class="eyebrow">Step 3 / 5</p>
+          <h2>创建控制台管理员</h2>
+          <p class="setup-intro">初始化完成后，引导账号会被替换，所有旧会话同时失效。</p>
+          <label class="field">
+            <span>管理员用户名</span>
+            <input name="username" value="admin" autocomplete="username" minlength="3" maxlength="64" required>
+          </label>
+          <label class="field">
+            <span>管理员密码</span>
+            <input name="password" type="password" autocomplete="new-password" minlength="12" required>
+            <small>至少 12 位，并包含大小写字母、数字、符号中的三类。</small>
+          </label>
+          <label class="field">
+            <span>确认密码</span>
+            <input name="passwordConfirm" type="password" autocomplete="new-password" minlength="12" required>
+          </label>
+        </section>
+
+        <section class="setup-step" data-step="3" hidden>
+          <p class="eyebrow">Step 4 / 5</p>
+          <h2>配置本机 Runtime</h2>
+          <p class="setup-intro">这台控制面主机同时作为第一台 sing-box Runtime。以后可从“系统 → 主机”继续添加 VPS。</p>
+          <label class="field">
+            <span>主机名称</span>
+            <input name="runtimeName" value="RayLink Runtime" maxlength="80" required>
+          </label>
+          <label class="field">
+            <span>节点地址</span>
+            <input name="runtimeAddress" placeholder="node.example.com 或服务器 IP" required>
+          </label>
+          <label class="field">
+            <span>区域标识</span>
+            <input name="runtimeRegion" value="tokyo" pattern="[A-Za-z0-9-]{2,32}" required>
+            <small>用于节点范围和智能路由，例如 tokyo、singapore、us-west。</small>
+          </label>
+        </section>
+
+        <section class="setup-step" data-step="4" hidden>
+          <p class="eyebrow">Step 5 / 5</p>
+          <h2>检查并完成</h2>
+          <p class="setup-intro">完成后一次性令牌立即失效。若主访问地址发生变化，浏览器会跳转到新的入口。</p>
+          <dl class="setup-summary" id="setup-summary"></dl>
+          <label class="setup-confirm">
+            <input name="confirmed" type="checkbox" required>
+            <span>我已确认管理入口可达，并已安全保存管理员凭据。</span>
+          </label>
+        </section>
+
+        <p class="auth-error setup-error" id="setup-error" role="alert"></p>
+        <footer class="setup-actions">
+          <button class="button secondary" id="setup-back" type="button" hidden>上一步</button>
+          <button class="button primary" id="setup-next" type="button">下一步</button>
+          <button class="button primary" id="setup-submit" type="submit" hidden>完成初始化</button>
+        </footer>
+      </form>
+    </section>
+  </main>
+  <script type="module" src="/setup.js?v=0.1.0-20260726e"></script>
+</body>
+</html>

@@ -12,8 +12,16 @@ export function loadConfig(env = process.env) {
   const host = env.RAYLINK_HOST || "127.0.0.1";
   const port = positiveInteger(env.RAYLINK_PORT, 4173, "RAYLINK_PORT");
   const publicOrigin = env.RAYLINK_PUBLIC_ORIGIN || `http://${host}:${port}`;
-  if (env.NODE_ENV === "production" && new URL(publicOrigin).protocol !== "https:") {
+  const setupRequired = env.RAYLINK_SETUP_REQUIRED === "true";
+  if (
+    env.NODE_ENV === "production"
+    && !setupRequired
+    && new URL(publicOrigin).protocol !== "https:"
+  ) {
     throw new Error("RAYLINK_PUBLIC_ORIGIN must use HTTPS in production");
+  }
+  if (setupRequired && (!env.RAYLINK_SETUP_TOKEN_HASH || !env.RAYLINK_SETUP_TOKEN_EXPIRES_AT)) {
+    throw new Error("RAYLINK_SETUP_TOKEN_HASH and RAYLINK_SETUP_TOKEN_EXPIRES_AT are required");
   }
   const runtimeMode = env.RAYLINK_RUNTIME_MODE || "dry-run";
   if (!["dry-run", "systemd"].includes(runtimeMode)) {
@@ -38,6 +46,9 @@ export function loadConfig(env = process.env) {
     preferMeteredRuntime: env.RAYLINK_USER_METERING !== "false",
     singBoxBinary: env.SING_BOX_BIN || "sing-box",
     systemdUnit: env.SING_BOX_SYSTEMD_UNIT || "sing-box.service",
-    listenPort: positiveInteger(env.RAYLINK_PROXY_PORT, 8388, "RAYLINK_PROXY_PORT")
+    listenPort: positiveInteger(env.RAYLINK_PROXY_PORT, 8388, "RAYLINK_PROXY_PORT"),
+    setupRequired,
+    setupTokenHash: env.RAYLINK_SETUP_TOKEN_HASH || "",
+    setupTokenExpiresAt: env.RAYLINK_SETUP_TOKEN_EXPIRES_AT || ""
   };
 }
