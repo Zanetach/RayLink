@@ -263,7 +263,7 @@ export async function createRayLinkApp(options) {
             return;
           }
           if (!credential.clientFormats.includes("sing-box")) {
-            sendJson(response, 403, { error: { code: "FORMAT_NOT_ALLOWED", message: "当前方案未启用 sing-box 配置" } });
+            sendJson(response, 403, { error: { code: "FORMAT_NOT_ALLOWED", message: "当前用户未启用 sing-box 配置" } });
             return;
           }
           sendJson(
@@ -405,21 +405,6 @@ export async function createRayLinkApp(options) {
             response,
             201,
             await runtimeManager.rollback(decodeURIComponent(rollbackMatch[1]), admin.id)
-          );
-          return;
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/plans") {
-          sendJson(response, 201, store.createPlan(await readJson(request)));
-          return;
-        }
-
-        const planMatch = url.pathname.match(/^\/api\/plans\/([^/]+)$/);
-        if (request.method === "PATCH" && planMatch) {
-          sendJson(
-            response,
-            200,
-            store.updatePlan(decodeURIComponent(planMatch[1]), await readJson(request))
           );
           return;
         }

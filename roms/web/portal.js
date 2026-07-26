@@ -24,16 +24,15 @@ function scopeLabel(scope) {
 }
 
 function renderAccount(profile) {
-  const { user, plan } = profile;
+  const { user, entitlement } = profile;
   document.querySelector("#portal-user-initials").textContent = user.initials;
   document.querySelector("#portal-user-name").textContent = user.name;
   document.querySelector("#portal-user-email").textContent = user.email;
-  document.querySelector("#portal-account-title").textContent = plan.name;
-  document.querySelector("#portal-plan-description").textContent = plan.description;
-  document.querySelector("#portal-remaining-quota").textContent = `${Math.max(0, plan.quotaGb - user.usedGb).toFixed(1)} GB`;
-  document.querySelector("#portal-device-limit").textContent = `${plan.deviceLimit} 台`;
-  document.querySelector("#portal-node-scope").textContent = scopeLabel(plan.nodeScope);
-  downloadButton.hidden = !plan.clientFormats.includes("sing-box");
+  document.querySelector("#portal-account-title").textContent = `${user.name} 的访问权益`;
+  document.querySelector("#portal-remaining-quota").textContent = `${Math.max(0, entitlement.quotaGb - user.usedGb).toFixed(1)} GB`;
+  document.querySelector("#portal-device-limit").textContent = `${entitlement.deviceLimit} 台`;
+  document.querySelector("#portal-node-scope").textContent = scopeLabel(entitlement.nodeScope);
+  downloadButton.hidden = !entitlement.clientFormats.includes("sing-box");
   loginPanel.hidden = true;
   accountPanel.hidden = false;
 }

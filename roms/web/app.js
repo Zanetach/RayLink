@@ -1,5 +1,4 @@
 const users = [];
-const plans = {};
 
 const clientCatalog = {
   "mihomo": { name: "Mihomo", platforms: "macOS / Windows / Android", action: "一键导入" },
@@ -7,7 +6,7 @@ const clientCatalog = {
   "download": { name: "其他客户端", platforms: "下载兼容配置文件", action: "下载配置" }
 };
 
-const accountSummary = { totalUsers: 0, planAssignments: {} };
+const accountSummary = { totalUsers: 0 };
 
 const estimatedTrafficShape = {
   download: [1.4, 1.1, 0.9, 0.8, 1.7, 3.2, 4.9, 6.6, 5.4, 7.1, 8.4, 7.6, 6.3],
@@ -34,11 +33,6 @@ const scopeLabels = {
   losangeles: "洛杉矶"
 };
 
-const accountTabs = {
-  "users": { route: "users", title: "用户管理", aliases: [] },
-  "plans": { route: "users/plans", title: "方案管理", aliases: ["subscriptions"] }
-};
-
 const stateLabels = {
   active: { label: "启用", className: "good" },
   warning: { label: "临近配额", className: "warning" },
@@ -63,9 +57,7 @@ const elements = {
   userBody: document.querySelector("#user-table-body"),
   userCount: document.querySelector("#user-result-count"),
   userSearch: document.querySelector("#user-search"),
-  planList: document.querySelector("#plan-list"),
   hostBody: document.querySelector("#host-table-body"),
-  clientEntryList: document.querySelector("#client-entry-list"),
   drawer: document.querySelector("#detail-drawer"),
   drawerTitle: document.querySelector("#drawer-title"),
   drawerEyebrow: document.querySelector("#drawer-eyebrow"),
@@ -80,7 +72,6 @@ const elements = {
 };
 
 let activeUserFilter = "all";
-let activeAccountTab = "users";
 let toastTimer;
 let lastFocusedElement;
 let publishInProgress = false;
@@ -138,23 +129,12 @@ function applyBootstrap(data) {
     portalStatus: user.portalStatus,
     state: user.state,
     used: user.usedGb,
-    planId: user.planId,
+    quota: user.quotaGb,
+    devices: user.deviceLimit,
+    nodeScope: user.nodeScope,
+    clients: user.clientFormats,
     expires: user.expiresAt
   })));
-  Object.keys(plans).forEach((planId) => delete plans[planId]);
-  Object.keys(accountSummary.planAssignments).forEach((planId) => delete accountSummary.planAssignments[planId]);
-  data.plans.forEach((plan) => {
-    plans[plan.id] = {
-      name: plan.name,
-      quota: plan.quotaGb,
-      devices: plan.deviceLimit,
-      nodeGroup: scopeToLabel(plan.nodeScope),
-      clients: plan.clientFormats,
-      description: plan.description,
-      tone: plan.tone
-    };
-    accountSummary.planAssignments[plan.id] = plan.assignedUsers;
-  });
   accountSummary.totalUsers = users.length;
   controlPlane.currentAdmin = data.currentAdmin;
   controlPlane.hosts = data.hosts;
@@ -171,13 +151,6 @@ function applyBootstrap(data) {
     rollbackButton.dataset.deploymentId = rollbackTarget?.id || "";
     rollbackButton.title = rollbackTarget ? `回滚到 ${rollbackTarget.version}` : "没有可回滚的历史版本";
   }
-  const portalUrl = document.querySelector("#portal-url");
-  if (portalUrl) portalUrl.textContent = `${location.origin}/portal`;
-  const newUserButton = document.querySelector("[data-new-user]");
-  if (newUserButton) {
-    newUserButton.disabled = data.plans.length === 0;
-    newUserButton.title = data.plans.length === 0 ? "请先创建至少一个方案" : "";
-  }
   const profileButton = document.querySelector(".profile-button");
   if (profileButton) {
     profileButton.querySelector(".avatar").textContent = data.currentAdmin.username.slice(0, 2).toUpperCase();
@@ -185,7 +158,6 @@ function applyBootstrap(data) {
     profileButton.querySelector("small").textContent = "管理员";
   }
   renderUsers();
-  renderPlans();
   renderRuntime();
 }
 
@@ -264,9 +236,7 @@ function renderDashboard() {
     ? `${activeDeployment.publisherUsername || "管理员"} · ${new Date(activeDeployment.publishedAt).toLocaleString("zh-CN")}`
     : "修改后需要重新发布配置";
   setText("#user-policy-status", policyStatus);
-  setText("#plan-policy-status", policyStatus);
   setText("#user-policy-meta", policyMeta);
-  setText("#plan-policy-meta", policyMeta);
 }
 
 function renderNetworkTrend({ activeUsers, ready }) {
@@ -476,14 +446,13 @@ function renderUsers() {
   const query = elements.userSearch.value.trim().toLocaleLowerCase();
   const filtered = users.filter((user) => {
     const matchesFilter = activeUserFilter === "all" || user.state === activeUserFilter;
-    const haystack = `${user.name} ${user.email} ${plans[user.planId].name}`.toLocaleLowerCase();
+    const haystack = `${user.name} ${user.email} ${scopeToLabel(user.nodeScope)}`.toLocaleLowerCase();
     return matchesFilter && haystack.includes(query);
   });
 
   elements.userBody.innerHTML = filtered.map((user) => {
     const status = stateLabels[user.state];
-    const userPlan = plans[user.planId];
-    const ratio = Math.min(100, (user.used / userPlan.quota) * 100);
+    const ratio = Math.min(100, (user.used / user.quota) * 100);
     const progressClass = ratio >= 80 ? "warning" : "";
     return `
       <tr>
@@ -495,17 +464,16 @@ function renderUsers() {
         </td>
         <td><span class="status-badge ${status.className}"><i></i>${status.label}</span></td>
         <td class="usage-cell">
-          <div class="usage-copy"><span>${user.used.toFixed(1)} GB</span><span>${userPlan.quota} GB</span></div>
+          <div class="usage-copy"><span>${user.used.toFixed(1)} GB</span><span>${user.quota} GB</span></div>
           <div class="progress ${progressClass}"><i style="width:${ratio.toFixed(1)}%"></i></div>
         </td>
-        <td><span class="plan-cell"><strong>${escapeHtml(userPlan.name)}</strong><small>${userPlan.devices} 台设备</small></span></td>
+        <td><span class="entitlement-cell"><strong>${user.devices} 台设备</strong><small>${escapeHtml(scopeToLabel(user.nodeScope))}</small></span></td>
         <td class="numeric">${formatDate(user.expires)}</td>
         <td><button class="icon-button small" aria-label="编辑 ${escapeHtml(user.name)}" data-user="${escapeHtml(user.email)}">${icon("more")}</button></td>
       </tr>`;
   }).join("");
 
   elements.userCount.textContent = `显示 ${filtered.length} / ${accountSummary.totalUsers} 位用户`;
-  document.querySelector("#account-tab-users small").textContent = `${accountSummary.totalUsers} 位用户`;
   document.querySelectorAll('.nav-item[data-view-target="users"] .nav-count').forEach((count) => {
     count.textContent = accountSummary.totalUsers;
   });
@@ -520,76 +488,11 @@ function renderUsers() {
   }
 }
 
-function renderPlans() {
-  if (!elements.planList) return;
-  elements.planList.innerHTML = Object.entries(plans).map(([planId, plan]) => {
-    const assignedUsers = accountSummary.planAssignments[planId] || 0;
-    const scopeTags = plan.nodeGroup.split(" + ").map((scope) => `<span class="tag">${escapeHtml(scope === "全部节点" ? "全节点" : scope)}</span>`).join("");
-    const groupCount = plan.nodeGroup === "全部节点" ? controlPlane.hosts.length : plan.nodeGroup.split(" + ").length;
-    return `
-      <article class="plan-row">
-        <div class="plan-identity"><i class="plan-dot ${plan.tone === "standard" ? "" : escapeHtml(plan.tone)}"></i><span><strong>${escapeHtml(plan.name)}</strong><small>${escapeHtml(plan.description)}</small></span></div>
-        <div class="plan-metric"><strong>${plan.quota} GB</strong><small>${plan.devices} 台设备</small></div>
-        <div class="plan-scope">${scopeTags}<small>${groupCount} 个区域范围</small></div>
-        <div class="plan-users"><strong>${assignedUsers}</strong><small>位用户</small></div>
-        <button class="icon-button small" aria-label="编辑${escapeHtml(plan.name)}方案" data-plan="${escapeHtml(planId)}">${icon("more")}</button>
-      </article>`;
-  }).join("");
-
-  const totalUsage = users.reduce((sum, user) => sum + (user.used / plans[user.planId].quota), 0);
-  document.querySelector("#plan-count").textContent = Object.keys(plans).length;
-  document.querySelector("#assigned-user-count").textContent = accountSummary.totalUsers;
-  document.querySelector("#average-plan-usage").textContent = users.length ? `${((totalUsage / users.length) * 100).toFixed(1)}%` : "0.0%";
-  document.querySelector("#account-tab-plans small").textContent = `${Object.keys(plans).length} 个方案`;
-}
-
-function renderClientEntries() {
-  if (!elements.clientEntryList) return;
-  elements.clientEntryList.innerHTML = Object.entries(clientCatalog).map(([clientId, client]) => {
-    const available = clientId === "sing-box";
-    return `
-      <button ${available ? "data-open-portal" : "disabled"}><span><strong>${client.name}</strong><small>${client.platforms}${available ? "" : " · 即将支持"}</small></span>${available ? icon("arrow") : ""}</button>`;
-  }).join("");
-}
-
-function accountTabForRoute(routeName) {
-  return Object.entries(accountTabs).find(([, tab]) => tab.route === routeName || tab.aliases.includes(routeName))?.[0] || null;
-}
-
-function setAccountTab(tabName, updateHash = false) {
-  activeAccountTab = accountTabs[tabName] ? tabName : "users";
-  const activeTabConfig = accountTabs[activeAccountTab];
-
-  document.querySelectorAll("[data-account-tab]").forEach((button) => {
-    const active = button.dataset.accountTab === activeAccountTab;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-    button.tabIndex = active ? 0 : -1;
-  });
-
-  document.querySelectorAll("[data-account-panel]").forEach((panel) => {
-    const active = panel.dataset.accountPanel === activeAccountTab;
-    panel.classList.toggle("active", active);
-    panel.hidden = !active;
-  });
-
-  document.querySelectorAll("[data-account-action]").forEach((button) => {
-    button.hidden = button.dataset.accountAction !== activeAccountTab;
-  });
-
-  document.title = `${activeTabConfig.title} · RayLink`;
-  if (updateHash) {
-    history.pushState({ view: "users", accountTab: activeAccountTab }, "", `#/${activeTabConfig.route}`);
-  }
-}
-
 function navigate(viewName, updateHash = true) {
-  const requestedAccountTab = accountTabForRoute(viewName);
-  const normalizedView = requestedAccountTab ? "users" : viewName;
+  const normalizedView = ["users/plans", "subscriptions"].includes(viewName) ? "users" : viewName;
   const target = document.querySelector(`[data-view="${normalizedView}"]`) || document.querySelector('[data-view="not-found"]');
   const resolvedView = target.dataset.view;
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view === target));
-  if (resolvedView === "users") setAccountTab(requestedAccountTab || activeAccountTab);
 
   document.querySelectorAll("[data-view-target]").forEach((button) => {
     const active = button.dataset.viewTarget === resolvedView;
@@ -606,13 +509,12 @@ function navigate(viewName, updateHash = true) {
     elements.indicator.style.transform = `translateY(${index * 48}px)`;
   }
 
-  const headings = { dashboard: "仪表盘", users: accountTabs[activeAccountTab].title, hosts: "主机", deploy: "配置发布", "not-found": "未找到" };
+  const headings = { dashboard: "仪表盘", users: "用户管理", hosts: "主机", deploy: "配置发布", "not-found": "未找到" };
   document.title = `${headings[resolvedView]} · RayLink`;
   if (updateHash) {
-    const route = resolvedView === "users" ? accountTabs[activeAccountTab].route : resolvedView;
-    history.pushState({ view: resolvedView, accountTab: activeAccountTab }, "", `#/${route}`);
-  } else if (requestedAccountTab && viewName !== accountTabs[requestedAccountTab].route) {
-    history.replaceState({ view: "users", accountTab: requestedAccountTab }, "", `#/${accountTabs[requestedAccountTab].route}`);
+    history.pushState({ view: resolvedView }, "", `#/${resolvedView}`);
+  } else if (normalizedView !== viewName) {
+    history.replaceState({ view: "users" }, "", "#/users");
   }
   elements.rail.classList.remove("open");
   elements.rail.toggleAttribute("inert", window.innerWidth <= 920);
@@ -653,14 +555,28 @@ function closeDrawer() {
 
 function userDrawerMarkup(user = {}) {
   const isNew = !user.id;
-  const selectedPlanId = user.planId || Object.keys(plans)[0];
-  const selectedPlan = plans[selectedPlanId] || { quota: 0, devices: 0, nodeGroup: "未分配" };
-  const planOptions = Object.entries(plans).map(([planId, plan]) => `<option value="${escapeHtml(planId)}" ${planId === selectedPlanId ? "selected" : ""}>${escapeHtml(plan.name)}</option>`).join("");
+  const selectedNodeGroup = user.nodeScope?.length ? scopeToLabel(user.nodeScope) : "全部节点";
+  const currentHostRegion = controlPlane.hosts[0]?.region;
+  const standardNodeGroups = [
+    selectedNodeGroup,
+    "全部节点",
+    currentHostRegion ? scopeToLabel([currentHostRegion]) : null,
+    "东京 + 新加坡"
+  ].filter(Boolean);
+  const nodeGroupOptions = [...new Set(standardNodeGroups)]
+    .map((nodeGroup) => `<option ${nodeGroup === selectedNodeGroup ? "selected" : ""}>${escapeHtml(nodeGroup)}</option>`)
+    .join("");
+  const capabilityRows = Object.entries(clientCatalog).map(([capabilityId, client]) => {
+    const available = capabilityId === "sing-box";
+    const selected = user.clients?.includes(capabilityId) || (isNew && available);
+    return `
+      <div class="switch-row"><div><strong>${client.name}</strong><small>${available ? client.platforms : `${client.platforms} · 即将支持`}</small></div><button type="button" class="switch ${selected ? "on" : ""}" data-capability="${capabilityId}" role="switch" aria-checked="${selected}" ${available ? "" : "disabled"}></button></div>`;
+  }).join("");
   return `
     <form class="drawer-form" id="user-drawer-form" data-user-id="${escapeHtml(user.id || "")}">
       <div class="drawer-profile">
         <span class="avatar">${escapeHtml(user.initials || "新")}</span>
-        <div><strong>${escapeHtml(user.name || "新用户")}</strong><small>${isNew ? "尚未分配方案" : escapeHtml(user.email)}</small></div>
+        <div><strong>${escapeHtml(user.name || "新用户")}</strong><small>${isNew ? "一次完成账号与权益设置" : escapeHtml(user.email)}</small></div>
       </div>
       <p class="drawer-section-label">基本信息</p>
       <label class="field"><span>显示名称</span><input name="name" value="${escapeHtml(user.name || "")}" placeholder="例如：徐清扬" required><small class="field-error"></small></label>
@@ -669,11 +585,16 @@ function userDrawerMarkup(user = {}) {
       ${isNew ? "" : '<label class="field"><span>重置密码（可选）</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="留空则保持不变"><small class="field-error"></small></label>'}
       <label class="field"><span>到期时间</span><input name="expires" type="date" value="${escapeHtml(user.expires || "2026-12-31")}" required><small class="field-error"></small></label>
       <label class="field"><span>已用流量</span><input name="usedGb" type="number" min="0" step="0.1" value="${Number(user.used || 0).toFixed(1)}" required><small class="field-error"></small><small class="field-hint">可由管理员或外部采集器通过用户更新 API 写回</small></label>
-      <p class="drawer-section-label">订阅方案</p>
-      <label class="field"><span>分配方案</span><select name="plan">${planOptions}</select><small class="field-hint">流量、设备数、节点和客户端能力跟随方案</small></label>
-      <div class="assigned-plan-preview"><span><small>每月流量</small><strong data-plan-quota>${selectedPlan.quota} GB</strong></span><span><small>设备上限</small><strong data-plan-devices>${selectedPlan.devices} 台</strong></span><span><small>节点范围</small><strong data-plan-nodes>${escapeHtml(selectedPlan.nodeGroup)}</strong></span></div>
+      <p class="drawer-section-label">用户权益</p>
+      <div class="quota-input">
+        <label class="field"><span>流量额度（GB）</span><input name="quota" type="number" min="1" step="1" value="${Number(user.quota || 120)}" required><small class="field-error"></small></label>
+        <label class="field"><span>设备上限（策略）</span><input name="devices" type="number" min="1" step="1" value="${Number(user.devices || 3)}" required><small class="field-error"></small><small class="field-hint">当前用于权益展示；设备指纹强制限制尚未启用</small></label>
+      </div>
+      <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select><small class="field-hint">该用户只能获取所选区域的客户端配置</small></label>
+      <p class="drawer-section-label">客户端能力</p>
+      ${capabilityRows}
       <p class="drawer-section-label">账号状态</p>
-      <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用已分配方案</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
+      <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用自己的流量、节点与客户端权益</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
     </form>`;
 }
@@ -685,60 +606,7 @@ function openUser(email) {
 }
 
 function openNewUser() {
-  if (!Object.keys(plans).length) {
-    setAccountTab("plans", true);
-    showToast("请先创建方案", "用户必须且只能分配一个服务方案。");
-    return;
-  }
-  openDrawer({ title: "新建用户", eyebrow: "访问控制", content: userDrawerMarkup(), saveLabel: "创建并分配方案" });
-}
-
-function planDrawerMarkup(planId) {
-  const plan = plans[planId];
-  const isNew = !plan;
-  const assignedUsers = accountSummary.planAssignments[planId] || 0;
-  const capabilityRows = Object.entries(clientCatalog).map(([capabilityId, client]) => {
-    const available = capabilityId === "sing-box";
-    const selected = plan?.clients.includes(capabilityId) || (isNew && available);
-    return `
-      <div class="switch-row"><div><strong>${client.name}</strong><small>${available ? client.platforms : `${client.platforms} · 即将支持`}</small></div><button type="button" class="switch ${selected ? "on" : ""}" data-capability="${capabilityId}" role="switch" aria-checked="${selected}" ${available ? "" : "disabled"}></button></div>`;
-  }).join("");
-  const currentHostRegion = controlPlane.hosts[0]?.region;
-  const standardNodeGroups = [
-    currentHostRegion ? scopeToLabel([currentHostRegion]) : null,
-    "全部节点",
-    "东京 + 新加坡",
-    "东京"
-  ].filter(Boolean);
-  const nodeGroupOptions = [...new Set([plan?.nodeGroup, ...standardNodeGroups].filter(Boolean))]
-    .map((nodeGroup) => `<option ${plan?.nodeGroup === nodeGroup ? "selected" : ""}>${escapeHtml(nodeGroup)}</option>`)
-    .join("");
-  return `
-    <form class="drawer-form" id="plan-drawer-form" data-plan-id="${escapeHtml(isNew ? "" : planId)}">
-      <p class="drawer-section-label">方案信息</p>
-      ${isNew ? '<label class="field"><span>方案 ID</span><input name="planId" pattern="[a-z0-9][a-z0-9-]{1,31}" placeholder="regional-office" required><small class="field-error"></small><small class="field-hint">2–32 位小写字母、数字或连字符，创建后不可更改</small></label>' : ""}
-      <label class="field"><span>方案名称</span><input name="planName" value="${escapeHtml(plan?.name || "")}" placeholder="例如：区域办公" required><small class="field-error"></small></label>
-      <label class="field"><span>适用场景</span><input name="description" value="${escapeHtml(plan?.description || "")}" placeholder="例如：适合区域办公室日常使用"></label>
-      <div class="quota-input">
-        <label class="field"><span>每月流量</span><input name="quota" type="number" min="1" value="${plan?.quota || 120}" required><small class="field-error"></small></label>
-        <label class="field"><span>设备上限（策略）</span><input name="devices" type="number" min="1" value="${plan?.devices || 3}" required><small class="field-error"></small><small class="field-hint">当前用于权益展示；设备指纹强制限制尚未启用</small></label>
-      </div>
-      <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select></label>
-      <p class="drawer-section-label">客户端能力</p>
-      ${capabilityRows}
-      ${isNew ? "" : `<p class="drawer-section-label">分配情况</p><div class="switch-row"><div><strong>${assignedUsers} 位用户</strong><small>修改后同步影响所有已分配用户</small></div><span class="status-badge good"><i></i>使用中</span></div>`}
-    </form>`;
-}
-
-function openPlan(planId) {
-  const isNew = planId === "new";
-  const plan = plans[planId];
-  openDrawer({
-    title: isNew ? "新建订阅方案" : plan.name,
-    eyebrow: "服务策略",
-    content: planDrawerMarkup(planId),
-    saveLabel: isNew ? "创建方案" : "保存方案"
-  });
+  openDrawer({ title: "新建用户", eyebrow: "访问控制", content: userDrawerMarkup(), saveLabel: "创建用户" });
 }
 
 function hostDrawerMarkup(hostId) {
@@ -861,8 +729,8 @@ function portalLoginMarkup() {
 function portalHomeMarkup() {
   const profile = controlPlane.portalProfile;
   const user = profile.user;
-  const plan = profile.plan;
-  const clientEntries = plan.clientFormats.map((clientId) => {
+  const entitlement = profile.entitlement;
+  const clientEntries = entitlement.clientFormats.map((clientId) => {
     const client = clientCatalog[clientId];
     if (!client) return "";
     const available = clientId === "sing-box";
@@ -876,16 +744,16 @@ function portalHomeMarkup() {
         <span class="status-badge good"><i></i>账号正常</span>
       </div>
       <div class="portal-entitlement">
-        <p class="drawer-section-label">当前订阅方案</p>
-        <h3>${escapeHtml(plan.name)}</h3>
-        <p>${escapeHtml(plan.description)}</p>
-        <div class="assigned-plan-preview"><span><small>剩余流量</small><strong>${Math.max(0, plan.quotaGb - user.usedGb).toFixed(1)} GB</strong></span><span><small>设备上限</small><strong>${plan.deviceLimit} 台</strong></span><span><small>节点范围</small><strong>${escapeHtml(scopeToLabel(plan.nodeScope))}</strong></span></div>
+        <p class="drawer-section-label">当前用户权益</p>
+        <h3>${escapeHtml(user.name)} 的访问权益</h3>
+        <p>流量、设备、节点和客户端能力由管理员为当前账号单独设置。</p>
+        <div class="entitlement-preview"><span><small>剩余流量</small><strong>${Math.max(0, entitlement.quotaGb - user.usedGb).toFixed(1)} GB</strong></span><span><small>设备上限</small><strong>${entitlement.deviceLimit} 台</strong></span><span><small>节点范围</small><strong>${escapeHtml(scopeToLabel(entitlement.nodeScope))}</strong></span></div>
       </div>
       <p class="drawer-section-label">选择客户端</p>
       <div class="portal-client-list">
         ${clientEntries}
       </div>
-      <p class="portal-note">用户中心根据当前方案准备客户端配置。用户无需查看或编辑底层协议参数。</p>
+      <p class="portal-note">用户中心根据当前账号权益准备客户端配置。用户无需查看或编辑底层协议参数。</p>
     </div>`;
 }
 
@@ -960,11 +828,15 @@ async function saveUserForm(form) {
   const userId = form.dataset.userId;
   const name = form.elements.name.value.trim();
   const email = form.elements.email.value.trim();
-  const planId = form.elements.plan.value;
+  const enabledClients = [...form.querySelectorAll(".switch[data-capability].on")]
+    .map((button) => button.dataset.capability);
   const payload = {
     name,
     email,
-    planId,
+    quotaGb: Number(form.elements.quota.value),
+    deviceLimit: Number(form.elements.devices.value),
+    nodeScope: labelToScope(form.elements.nodeGroup.value),
+    clientFormats: enabledClients,
     expiresAt: form.elements.expires.value,
     usedGb: Number(form.elements.usedGb.value),
     state: form.querySelector("[data-user-enabled]").classList.contains("on") ? "active" : "disabled",
@@ -973,33 +845,6 @@ async function saveUserForm(form) {
   if (form.elements.password.value) payload.password = form.elements.password.value;
   await api(userId ? `/api/users/${encodeURIComponent(userId)}` : "/api/users", {
     method: userId ? "PATCH" : "POST",
-    body: JSON.stringify(payload)
-  });
-  await loadBootstrap();
-}
-
-async function savePlanForm(form) {
-  const existingPlanId = form.dataset.planId;
-  const planId = existingPlanId || form.elements.planId.value.trim();
-  const name = form.elements.planName.value.trim();
-  const enabledClients = [...form.querySelectorAll(".switch[data-capability].on")].map((button) => button.dataset.capability);
-  if (!enabledClients.length) {
-    const error = new Error("至少启用一种客户端格式");
-    error.code = "INVALID_CLIENT_FORMATS";
-    throw error;
-  }
-  const payload = {
-    ...(existingPlanId ? {} : { id: planId }),
-    name,
-    quotaGb: Number(form.elements.quota.value),
-    deviceLimit: Number(form.elements.devices.value),
-    nodeScope: labelToScope(form.elements.nodeGroup.value),
-    clientFormats: enabledClients,
-    description: form.elements.description.value.trim() || "自定义服务方案",
-    tone: plans[planId]?.tone || "standard"
-  };
-  await api(existingPlanId ? `/api/plans/${encodeURIComponent(existingPlanId)}` : "/api/plans", {
-    method: existingPlanId ? "PATCH" : "POST",
     body: JSON.stringify(payload)
   });
   await loadBootstrap();
@@ -1105,7 +950,6 @@ async function saveDrawer() {
   elements.drawerSave.textContent = "保存中…";
   try {
     if (form.id === "user-drawer-form") await saveUserForm(form);
-    if (form.id === "plan-drawer-form") await savePlanForm(form);
     if (form.id === "host-drawer-form") await saveHostForm(form);
     if (form.id === "protocol-drawer-form") await saveProtocolForm(form);
   } catch (error) {
@@ -1115,14 +959,12 @@ async function saveDrawer() {
     return;
   }
 
-  const message = form?.id === "plan-drawer-form"
-    ? "方案设置已保存，关联用户将在下次同步时更新。"
-    : form?.id === "host-drawer-form"
+  const message = form?.id === "host-drawer-form"
       ? "Runtime 主机已更新，用户配置将使用新的公网地址。"
     : form?.id === "protocol-drawer-form"
       ? "协议草稿已保存，请在配置发布页校验并发布。"
     : form?.id === "user-drawer-form" && previousLabel.includes("创建")
-      ? "用户已创建并分配订阅方案。"
+      ? "用户已创建，独立权益已经保存。"
       : previousLabel.includes("添加")
         ? "主机连接信息已通过本地校验。"
         : "更改已经写入当前草稿。";
@@ -1245,12 +1087,6 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const accountTab = event.target.closest("[data-account-tab]");
-  if (accountTab) {
-    setAccountTab(accountTab.dataset.accountTab, true);
-    return;
-  }
-
   const userButton = event.target.closest("[data-user]");
   if (userButton) {
     openUser(userButton.dataset.user);
@@ -1280,19 +1116,8 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const planButton = event.target.closest("[data-plan]");
-  if (planButton) {
-    openPlan(planButton.dataset.plan);
-    return;
-  }
-
   if (event.target.closest("[data-new-user]")) {
     openNewUser();
-    return;
-  }
-
-  if (event.target.closest("[data-new-plan]")) {
-    openPlan("new");
     return;
   }
 
@@ -1341,15 +1166,6 @@ document.addEventListener("click", async (event) => {
 
 });
 
-document.addEventListener("change", (event) => {
-  if (!event.target.matches('#user-drawer-form select[name="plan"]')) return;
-  const selectedPlan = plans[event.target.value];
-  const form = event.target.closest("form");
-  form.querySelector("[data-plan-quota]").textContent = `${selectedPlan.quota} GB`;
-  form.querySelector("[data-plan-devices]").textContent = `${selectedPlan.devices} 台`;
-  form.querySelector("[data-plan-nodes]").textContent = selectedPlan.nodeGroup;
-});
-
 elements.userSearch.addEventListener("input", renderUsers);
 elements.menuToggle.addEventListener("click", () => {
   const isOpen = elements.rail.classList.toggle("open");
@@ -1395,12 +1211,6 @@ document.addEventListener("keydown", (event) => {
       first.focus();
     }
   }
-  if (["ArrowLeft", "ArrowRight"].includes(event.key) && event.target.matches("[data-account-tab]")) {
-    event.preventDefault();
-    const nextTab = activeAccountTab === "users" ? "plans" : "users";
-    setAccountTab(nextTab, true);
-    document.querySelector(`[data-account-tab="${nextTab}"]`).focus();
-  }
 });
 
 window.addEventListener("popstate", () => {
@@ -1421,7 +1231,6 @@ async function enterControlPlane() {
   await loadBootstrap();
   elements.authScreen.hidden = true;
   elements.appShell.hidden = false;
-  renderClientEntries();
   syncResponsiveNavigation();
   const initialRoute = location.hash.replace(/^#\//, "") || "dashboard";
   navigate(initialRoute, false);

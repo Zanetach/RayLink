@@ -3,7 +3,7 @@
 RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面。它把管理端、用户中心、SQLite 数据库和 sing-box Runtime 发布串成一条可运行链路：
 
 ```text
-管理员 → 用户/方案/主机配置 → SQLite → 配置编译 → sing-box check
+管理员 → 用户权益/主机配置 → SQLite → 配置编译 → sing-box check
       → 原子替换 → Runtime 重启
 
 用户 → 用户中心登录 → 权益校验 → 独立运行凭据 → sing-box 客户端配置
@@ -12,7 +12,7 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 ## 已实现
 
 - 管理员 Cookie 会话登录
-- 用户与订阅方案分离建模，一个用户只能分配一个方案
+- 每个用户独立拥有流量、到期、设备、节点范围和客户端能力
 - 用户启停、到期时间、用户中心激活与密码重置
 - 登录密码和 sing-box 运行凭据完全分离
 - 单机 Runtime 公网地址配置
@@ -27,14 +27,14 @@ RayLink 是一个面向单台服务器、多用户场景的 sing-box 控制面�
 - 过期、停用用户自动排除
 - `sing-box check` 校验、SHA-256 快照、发布人审计、`0600` 原子写入、失败恢复和历史版本一键回滚
 - dry-run 与 systemd 两种发布模式
-- 独立用户中心（`/portal/`）按当前方案生成专属 sing-box 客户端 JSON
+- 独立用户中心（`/portal/`）按当前用户权益生成专属 sing-box 客户端 JSON
 - 同源 Web 前端和 JSON API
 
 ## 当前边界
 
 这是完整的单机纵向闭环，不是多节点商业面板。以下能力尚未实现：
 
-- 实时流量采集和账单；当数据库中的已用量达到方案额度时，配置发布和下载会排除该用户，但用量仍需外部采集器更新
+- 实时流量采集和账单；当数据库中的已用量达到用户额度时，配置发布和下载会排除该用户，但用量仍需外部采集器更新
 - 设备指纹与设备数强制限制
 - 多 Runtime 节点编排和灰度发布
 - 完整的 outbound、endpoint、DNS 和路由规则图形化编辑器
@@ -129,4 +129,4 @@ sing-box 官方 `https://sing-box.app/install.sh` 安装固定的 1.13.14。生�
 - 用户只会收到自己的运行凭据。
 - Runtime 完整配置包含所有有效用户凭据，必须限制文件读取权限并保护备份。
 
-领域定义见 [CONTEXT.md](CONTEXT.md)，架构决策见 [docs/adr/0001-single-host-control-plane.md](docs/adr/0001-single-host-control-plane.md)。
+领域定义见 [CONTEXT.md](CONTEXT.md)，架构决策见 [docs/adr/](docs/adr/)。

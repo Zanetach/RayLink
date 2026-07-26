@@ -61,7 +61,7 @@
           <svg><use href="#i-grid"/></svg><span>仪表盘</span>
         </button>
         <button class="nav-item" data-view-target="users">
-          <svg><use href="#i-users"/></svg><span>用户与订阅</span><span class="nav-count">27</span>
+          <svg><use href="#i-users"/></svg><span>用户管理</span><span class="nav-count">27</span>
         </button>
         <button class="nav-item" data-view-target="hosts">
           <svg><use href="#i-server"/></svg><span>主机</span><span class="nav-count">4</span>
@@ -158,7 +158,7 @@
                 <span id="dashboard-deployment-validation">等待首次发布</span>
               </div>
               <div class="change-log">
-                <span>配置由当前用户、方案和主机状态实时编译</span>
+                <span>配置由当前用户权益和主机状态实时编译</span>
                 <span>发布前执行 sing-box check，并保留可审计快照</span>
               </div>
             </section>
@@ -203,29 +203,17 @@
 
         <section class="view" id="view-users" data-view="users">
           <div class="page-heading">
-            <div><p class="eyebrow">访问与服务</p><h1>用户与订阅</h1><p>先定义可复用的服务方案，再分配给用户账号。</p></div>
-            <div class="heading-actions">
-              <button class="button primary" data-account-action="users" data-new-user><svg><use href="#i-plus"/></svg>新建用户</button>
-              <button class="button primary" data-account-action="plans" data-new-plan hidden><svg><use href="#i-plus"/></svg>新建方案</button>
-            </div>
+            <div><p class="eyebrow">访问与服务</p><h1>用户管理</h1><p>新建用户时直接设置流量、到期时间、设备、节点和客户端能力。</p></div>
+            <button class="button primary" data-new-user><svg><use href="#i-plus"/></svg>新建用户</button>
           </div>
 
-          <div class="account-tabs" role="tablist" aria-label="用户与订阅管理">
-            <button class="active" id="account-tab-users" role="tab" aria-selected="true" aria-controls="account-panel-users" data-account-tab="users">
-              <span>用户管理</span><small>27 位用户</small>
-            </button>
-            <button id="account-tab-plans" role="tab" aria-selected="false" aria-controls="account-panel-plans" tabindex="-1" data-account-tab="plans">
-              <span>方案管理</span><small>3 个方案</small>
-            </button>
-          </div>
-
-          <div class="account-panel active" id="account-panel-users" role="tabpanel" aria-labelledby="account-tab-users" data-account-panel="users">
+          <div class="account-panel active">
             <div class="account-context">
               <span><i class="good-dot"></i><span id="user-policy-status">尚未发布账号策略</span></span>
-              <span id="user-policy-meta">修改后需要重新发布配置</span>
+              <span id="user-policy-meta">用户权益修改后需要重新发布配置</span>
             </div>
             <div class="toolbar">
-              <label class="search-field"><svg><use href="#i-search"/></svg><input id="user-search" type="search" placeholder="搜索姓名、邮箱或订阅方案"></label>
+              <label class="search-field"><svg><use href="#i-search"/></svg><input id="user-search" type="search" placeholder="搜索姓名、邮箱或节点范围"></label>
               <div class="filter-group" role="group" aria-label="用户状态筛选">
                 <button class="filter active" data-user-filter="all">全部 <span>27</span></button>
                 <button class="filter" data-user-filter="active">启用 <span>21</span></button>
@@ -236,49 +224,12 @@
             <section class="table-panel">
               <div class="table-scroll">
                 <table>
-                  <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>订阅方案</th><th>到期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
+                  <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>设备 / 节点</th><th>到期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
                   <tbody id="user-table-body"></tbody>
                 </table>
               </div>
               <div class="table-footer"><span id="user-result-count">显示 6 / 27 位用户</span><div class="pagination"><button disabled>上一页</button><span>1 / 5</span><button>下一页</button></div></div>
             </section>
-          </div>
-
-          <div class="account-panel" id="account-panel-plans" role="tabpanel" aria-labelledby="account-tab-plans" data-account-panel="plans" hidden>
-            <div class="view-context"><span><i class="good-dot"></i><span id="plan-policy-status">尚未发布方案策略</span></span><span id="plan-policy-meta">修改后需要重新发布配置</span></div>
-            <div class="subscription-layout">
-              <section class="plan-panel">
-                <div class="plan-summary">
-                  <span><small>有效方案</small><strong id="plan-count">3</strong></span>
-                  <span><small>已分配用户</small><strong id="assigned-user-count">27</strong></span>
-                  <span><small>平均使用率</small><strong id="average-plan-usage">51.8%</strong></span>
-                </div>
-                <div class="plan-list-heading">
-                  <span>方案与权益</span><span>流量 / 设备</span><span>节点范围</span><span>用户</span><span></span>
-                </div>
-                <div id="plan-list"></div>
-                <div class="plan-policy-note">
-                  <svg><use href="#i-shield"/></svg>
-                  <div><strong>方案是权益的唯一来源</strong><p>流量、设备、节点和客户端能力由方案统一管理。修改方案后，所属用户在下次同步时自动获得新配置。</p></div>
-                </div>
-              </section>
-              <aside class="onboarding-panel">
-                <div class="preview-heading"><span>用户如何使用</span><span class="status-badge good"><i></i>用户中心在线</span></div>
-                <div class="portal-profile">
-                  <span class="brand-mark small">R/</span>
-                  <div><p>RayLink 用户中心</p><strong>独立账号登录</strong><small>只显示当前用户被分配的方案权益</small></div>
-                </div>
-                <ol class="usage-steps">
-                  <li><span>1</span><div><strong>管理员分配方案</strong><small>在用户详情中选择订阅方案</small></div></li>
-                  <li><span>2</span><div><strong>用户登录用户中心</strong><small>使用账号和密码查看可用服务</small></div></li>
-                  <li><span>3</span><div><strong>下载客户端配置</strong><small>导入 sing-box 桌面或移动客户端</small></div></li>
-                  <li><span>4</span><div><strong>更新使用量</strong><small>管理员或外部采集器写回已用流量</small></div></li>
-                </ol>
-                <label class="preview-url"><span>用户中心入口</span><div><code id="portal-url">/portal</code><button type="button" class="icon-button copy-button" aria-label="复制用户中心入口" data-copy-target="portal-url"><svg><use href="#i-copy"/></svg></button></div></label>
-                <div class="client-entry-list" id="client-entry-list"></div>
-                <p class="portal-note">用户只需要管理自己的账号和客户端，技术配置由 RayLink 根据所分配方案生成。</p>
-              </aside>
-            </div>
           </div>
         </section>
 
@@ -330,7 +281,7 @@
           </div>
           <section class="release-header">
             <div><span class="release-version">v2026.07.25-05</span><span class="status-badge neutral"><i></i>草稿</span></div>
-            <p>根据当前用户、方案和 Runtime 主机生成受管配置</p>
+            <p>根据当前用户权益和 Runtime 主机生成受管配置</p>
           </section>
           <ol class="deploy-trail full" id="publish-trail">
             <li class="current"><span>1</span><strong>草稿</strong><small>3 项变更</small></li>
@@ -390,7 +341,7 @@
 
   <nav class="mobile-nav" aria-label="移动端主导航">
     <button class="active" data-view-target="dashboard"><svg><use href="#i-grid"/></svg><span>总览</span></button>
-    <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户与订阅</span></button>
+    <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户管理</span></button>
     <button data-view-target="hosts"><svg><use href="#i-server"/></svg><span>主机</span></button>
     <button data-view-target="deploy"><svg><use href="#i-code"/></svg><span>发布</span></button>
   </nav>

@@ -52,6 +52,8 @@ const seedPlans = [
   }
 ];
 
+const LEGACY_ENTITLEMENT_PLAN_ID = "user-entitlement";
+
 const seedUsers = [
   ["林知夏", "LZ", "lin.zhixia@meridian-log.cn", "active", "active", 74.3, "standard", "2026-10-18"],
   ["岡本和也", "OK", "k.okamoto@hokkaido-ceramics.jp", "active", "warning", 104.8, "standard", "2026-08-04"],
@@ -80,7 +82,13 @@ function domainError(code, message, statusCode = 422) {
   return error;
 }
 
-function validatePlanCapabilities(nodeScope, clientFormats) {
+function validateUserEntitlement({ quotaGb, deviceLimit, nodeScope, clientFormats }) {
+  if (!Number.isFinite(quotaGb) || quotaGb <= 0) {
+    throw domainError("INVALID_QUOTA", "流量额度必须大于 0");
+  }
+  if (!Number.isInteger(deviceLimit) || deviceLimit <= 0) {
+    throw domainError("INVALID_DEVICE_LIMIT", "设备上限必须为正整数");
+  }
   if (
     !Array.isArray(nodeScope)
     || nodeScope.length === 0
@@ -94,7 +102,7 @@ function validatePlanCapabilities(nodeScope, clientFormats) {
     || !clientFormats.includes("sing-box")
     || clientFormats.some((format) => !supportedFormats.has(format))
   ) {
-    throw domainError("INVALID_CLIENT_FORMATS", "当前方案必须包含 sing-box 客户端格式");
+    throw domainError("INVALID_CLIENT_FORMATS", "用户权益必须包含 sing-box 客户端格式");
   }
 }
 
@@ -107,7 +115,10 @@ function userFromRow(row) {
     portalStatus: row.portal_status,
     state: row.state,
     usedGb: row.used_gb,
-    planId: row.plan_id,
+    quotaGb: row.quota_gb,
+    deviceLimit: row.device_limit,
+    nodeScope: parseJson(row.node_scope_json, []),
+    clientFormats: parseJson(row.client_formats_json, []),
     expiresAt: row.expires_at
   };
 }
@@ -170,6 +181,10 @@ export class RayLinkStore {
         state TEXT NOT NULL CHECK (state IN ('active', 'warning', 'disabled')),
         used_gb REAL NOT NULL DEFAULT 0 CHECK (used_gb >= 0),
         plan_id TEXT NOT NULL REFERENCES plans(id),
+        quota_gb REAL NOT NULL CHECK (quota_gb > 0),
+        device_limit INTEGER NOT NULL CHECK (device_limit > 0),
+        node_scope_json TEXT NOT NULL,
+        client_formats_json TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         runtime_uuid TEXT NOT NULL UNIQUE,
         runtime_password TEXT NOT NULL,
@@ -205,6 +220,26 @@ export class RayLinkStore {
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
       this.db.exec("ALTER TABLE deployments ADD COLUMN publisher_admin_id TEXT");
     }
+    const userColumns = this.db.prepare("PRAGMA table_info(users)").all();
+    if (!userColumns.some((column) => column.name === "quota_gb")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN quota_gb REAL");
+    }
+    if (!userColumns.some((column) => column.name === "device_limit")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN device_limit INTEGER");
+    }
+    if (!userColumns.some((column) => column.name === "node_scope_json")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN node_scope_json TEXT");
+    }
+    if (!userColumns.some((column) => column.name === "client_formats_json")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN client_formats_json TEXT");
+    }
+    this.db.exec(`
+      UPDATE users
+      SET quota_gb = COALESCE(quota_gb, (SELECT quota_gb FROM plans WHERE plans.id = users.plan_id), 120),
+          device_limit = COALESCE(device_limit, (SELECT device_limit FROM plans WHERE plans.id = users.plan_id), 3),
+          node_scope_json = COALESCE(node_scope_json, (SELECT node_scope_json FROM plans WHERE plans.id = users.plan_id), '["all"]'),
+          client_formats_json = COALESCE(client_formats_json, (SELECT client_formats_json FROM plans WHERE plans.id = users.plan_id), '["sing-box"]')
+    `);
   }
 
   seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData }) {
@@ -214,6 +249,13 @@ export class RayLinkStore {
       VALUES (?, ?, ?, ?)
     `);
     insertAdmin.run(randomUUID(), adminUsername, hashPassword(adminPassword), createdAt);
+
+    this.db.prepare(`
+      INSERT OR IGNORE INTO plans (
+        id, name, quota_gb, device_limit, node_scope_json, client_formats_json,
+        description, tone, created_at, updated_at
+      ) VALUES (?, '用户独立权益兼容记录', 1, 1, '["all"]', '["sing-box"]', '仅用于旧数据库外键兼容', 'standard', ?, ?)
+    `).run(LEGACY_ENTITLEMENT_PLAN_ID, createdAt, createdAt);
 
     if (seedDemoData) {
       const insertPlan = this.db.prepare(`
@@ -240,10 +282,12 @@ export class RayLinkStore {
       const insertUser = this.db.prepare(`
       INSERT OR IGNORE INTO users (
         id, name, initials, email, password_hash, portal_status, state, used_gb,
-        plan_id, expires_at, runtime_uuid, runtime_password, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        plan_id, quota_gb, device_limit, node_scope_json, client_formats_json,
+        expires_at, runtime_uuid, runtime_password, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
       for (const [name, initials, email, portalStatus, state, usedGb, planId, expiresAt] of seedUsers) {
+        const entitlement = seedPlans.find((plan) => plan.id === planId);
         insertUser.run(
           randomUUID(),
           name,
@@ -254,6 +298,10 @@ export class RayLinkStore {
           state,
           usedGb,
           planId,
+          entitlement.quotaGb,
+          entitlement.deviceLimit,
+          JSON.stringify(entitlement.nodeScope),
+          JSON.stringify(entitlement.clientFormats),
           expiresAt,
           randomUUID(),
           createShadowsocksKey(),
@@ -338,24 +386,19 @@ export class RayLinkStore {
   portalProfile(userId) {
     const row = this.db.prepare(`
       SELECT users.id, users.name, users.initials, users.email, users.portal_status,
-             users.state, users.used_gb, users.plan_id, users.expires_at,
-             plans.name AS plan_name, plans.quota_gb, plans.device_limit,
-             plans.node_scope_json, plans.client_formats_json, plans.description
+             users.state, users.used_gb, users.quota_gb, users.device_limit,
+             users.node_scope_json, users.client_formats_json, users.expires_at
       FROM users
-      JOIN plans ON plans.id = users.plan_id
       WHERE users.id = ?
     `).get(userId);
     if (!row) return null;
     return {
       user: userFromRow(row),
-      plan: {
-        id: row.plan_id,
-        name: row.plan_name,
+      entitlement: {
         quotaGb: row.quota_gb,
         deviceLimit: row.device_limit,
         nodeScope: parseJson(row.node_scope_json, []),
-        clientFormats: parseJson(row.client_formats_json, []),
-        description: row.description
+        clientFormats: parseJson(row.client_formats_json, [])
       }
     };
   }
@@ -363,12 +406,11 @@ export class RayLinkStore {
   clientCredential(userId) {
     const row = this.db.prepare(`
       SELECT users.email, users.runtime_uuid, users.runtime_password, users.state, users.portal_status,
-             users.expires_at, users.used_gb, plans.quota_gb, plans.node_scope_json,
-             plans.client_formats_json,
+             users.expires_at, users.used_gb, users.quota_gb, users.node_scope_json,
+             users.client_formats_json,
              (SELECT region FROM hosts WHERE id = 'local') AS host_region,
              (SELECT value FROM settings WHERE key = 'shadowsocks_master_password') AS server_password
       FROM users
-      JOIN plans ON plans.id = users.plan_id
       WHERE users.id = ?
     `).get(userId);
     if (!row) return null;
@@ -388,29 +430,10 @@ export class RayLinkStore {
     };
   }
 
-  listPlans() {
-    return this.db.prepare(`
-      SELECT plans.*, COUNT(users.id) AS assigned_users
-      FROM plans
-      LEFT JOIN users ON users.plan_id = plans.id
-      GROUP BY plans.id
-      ORDER BY plans.created_at, plans.id
-    `).all().map((row) => ({
-      id: row.id,
-      name: row.name,
-      quotaGb: row.quota_gb,
-      deviceLimit: row.device_limit,
-      nodeScope: parseJson(row.node_scope_json, []),
-      clientFormats: parseJson(row.client_formats_json, []),
-      assignedUsers: Number(row.assigned_users),
-      description: row.description,
-      tone: row.tone
-    }));
-  }
-
   listUsers() {
     return this.db.prepare(`
-      SELECT id, name, initials, email, portal_status, state, used_gb, plan_id, expires_at
+      SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
+             device_limit, node_scope_json, client_formats_json, expires_at
       FROM users
       ORDER BY created_at, name
     `).all().map(userFromRow);
@@ -449,110 +472,38 @@ export class RayLinkStore {
     return {
       currentAdmin: { id: admin.id, username: admin.username },
       users: this.listUsers(),
-      plans: this.listPlans(),
       hosts: this.listHosts()
     };
-  }
-
-  createPlan(input) {
-    const id = String(input.id || "").trim();
-    const name = String(input.name || "").trim();
-    if (!/^[a-z0-9][a-z0-9-]{1,31}$/.test(id)) {
-      throw domainError("INVALID_PLAN_ID", "方案 ID 必须为 2 到 32 位小写字母、数字或连字符");
-    }
-    if (!name) throw domainError("INVALID_PLAN_NAME", "方案名称不能为空");
-    if (!Number.isFinite(input.quotaGb) || input.quotaGb <= 0) {
-      throw domainError("INVALID_QUOTA", "流量额度必须大于 0");
-    }
-    if (!Number.isInteger(input.deviceLimit) || input.deviceLimit <= 0) {
-      throw domainError("INVALID_DEVICE_LIMIT", "设备上限必须为正整数");
-    }
-    validatePlanCapabilities(input.nodeScope, input.clientFormats);
-
-    const timestamp = nowIso();
-    try {
-      this.db.prepare(`
-        INSERT INTO plans (
-          id, name, quota_gb, device_limit, node_scope_json, client_formats_json,
-          description, tone, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        id,
-        name,
-        input.quotaGb,
-        input.deviceLimit,
-        JSON.stringify(input.nodeScope),
-        JSON.stringify(input.clientFormats),
-        String(input.description || "自定义服务方案").trim(),
-        String(input.tone || "standard"),
-        timestamp,
-        timestamp
-      );
-    } catch (error) {
-      if (String(error.message).includes("UNIQUE")) {
-        throw domainError("PLAN_EXISTS", "方案 ID 已存在", 409);
-      }
-      throw error;
-    }
-    return this.listPlans().find((plan) => plan.id === id);
-  }
-
-  updatePlan(id, input) {
-    const current = this.listPlans().find((plan) => plan.id === id);
-    if (!current) throw domainError("PLAN_NOT_FOUND", "方案不存在", 404);
-    const next = {
-      name: input.name === undefined ? current.name : String(input.name).trim(),
-      quotaGb: input.quotaGb === undefined ? current.quotaGb : input.quotaGb,
-      deviceLimit: input.deviceLimit === undefined ? current.deviceLimit : input.deviceLimit,
-      nodeScope: input.nodeScope === undefined ? current.nodeScope : input.nodeScope,
-      clientFormats: input.clientFormats === undefined ? current.clientFormats : input.clientFormats,
-      description: input.description === undefined ? current.description : String(input.description).trim(),
-      tone: input.tone === undefined ? current.tone : String(input.tone)
-    };
-    if (!next.name) throw domainError("INVALID_PLAN_NAME", "方案名称不能为空");
-    if (!Number.isFinite(next.quotaGb) || next.quotaGb <= 0) {
-      throw domainError("INVALID_QUOTA", "流量额度必须大于 0");
-    }
-    if (!Number.isInteger(next.deviceLimit) || next.deviceLimit <= 0) {
-      throw domainError("INVALID_DEVICE_LIMIT", "设备上限必须为正整数");
-    }
-    validatePlanCapabilities(next.nodeScope, next.clientFormats);
-    this.db.prepare(`
-      UPDATE plans
-      SET name = ?, quota_gb = ?, device_limit = ?, node_scope_json = ?,
-          client_formats_json = ?, description = ?, tone = ?, updated_at = ?
-      WHERE id = ?
-    `).run(
-      next.name,
-      next.quotaGb,
-      next.deviceLimit,
-      JSON.stringify(next.nodeScope),
-      JSON.stringify(next.clientFormats),
-      next.description,
-      next.tone,
-      nowIso(),
-      id
-    );
-    return this.listPlans().find((plan) => plan.id === id);
   }
 
   createUser(input) {
     const name = String(input.name || "").trim();
     const email = String(input.email || "").trim().toLowerCase();
-    const planId = String(input.planId || "");
+    const entitlement = {
+      quotaGb: Number(input.quotaGb),
+      deviceLimit: Number(input.deviceLimit),
+      nodeScope: input.nodeScope,
+      clientFormats: input.clientFormats
+    };
     if (!name) throw domainError("INVALID_USER_NAME", "用户名称不能为空");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw domainError("INVALID_EMAIL", "邮箱地址格式不正确");
     }
-    if (!this.db.prepare("SELECT 1 FROM plans WHERE id = ?").get(planId)) {
-      throw domainError("PLAN_NOT_FOUND", "分配的方案不存在");
-    }
+    validateUserEntitlement(entitlement);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.expiresAt || ""))) {
       throw domainError("INVALID_EXPIRY", "到期时间格式必须为 YYYY-MM-DD");
     }
     const portalStatus = input.portalStatus === undefined ? "invited" : String(input.portalStatus);
     if (!["active", "invited"].includes(portalStatus)) {
       throw domainError("INVALID_PORTAL_STATUS", "用户中心状态不正确");
+    }
+    const state = input.state === undefined ? "active" : String(input.state);
+    if (!["active", "warning", "disabled"].includes(state)) {
+      throw domainError("INVALID_USER_STATE", "用户状态不正确");
+    }
+    const usedGb = input.usedGb === undefined ? 0 : Number(input.usedGb);
+    if (!Number.isFinite(usedGb) || usedGb < 0) {
+      throw domainError("INVALID_USAGE", "已用流量必须是大于或等于 0 的数值");
     }
     if (input.password !== undefined && String(input.password).length < 8) {
       throw domainError("INVALID_PASSWORD", "用户中心密码至少需要 8 位");
@@ -565,8 +516,9 @@ export class RayLinkStore {
       this.db.prepare(`
         INSERT INTO users (
           id, name, initials, email, password_hash, portal_status, state, used_gb,
-          plan_id, expires_at, runtime_uuid, runtime_password, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, ?, ?)
+          plan_id, quota_gb, device_limit, node_scope_json, client_formats_json,
+          expires_at, runtime_uuid, runtime_password, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         name,
@@ -574,7 +526,13 @@ export class RayLinkStore {
         email,
         hashPassword(input.password || createRuntimePassword(12)),
         portalStatus,
-        planId,
+        state,
+        usedGb,
+        LEGACY_ENTITLEMENT_PLAN_ID,
+        entitlement.quotaGb,
+        entitlement.deviceLimit,
+        JSON.stringify(entitlement.nodeScope),
+        JSON.stringify(entitlement.clientFormats),
         input.expiresAt,
         randomUUID(),
         createShadowsocksKey(),
@@ -592,7 +550,8 @@ export class RayLinkStore {
 
   getUser(id) {
     const row = this.db.prepare(`
-      SELECT id, name, initials, email, portal_status, state, used_gb, plan_id, expires_at
+      SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
+             device_limit, node_scope_json, client_formats_json, expires_at
       FROM users WHERE id = ?
     `).get(id);
     return row ? userFromRow(row) : null;
@@ -604,7 +563,10 @@ export class RayLinkStore {
     const next = {
       name: input.name === undefined ? current.name : String(input.name).trim(),
       email: input.email === undefined ? current.email : String(input.email).trim().toLowerCase(),
-      planId: input.planId === undefined ? current.planId : String(input.planId),
+      quotaGb: input.quotaGb === undefined ? current.quotaGb : Number(input.quotaGb),
+      deviceLimit: input.deviceLimit === undefined ? current.deviceLimit : Number(input.deviceLimit),
+      nodeScope: input.nodeScope === undefined ? current.nodeScope : input.nodeScope,
+      clientFormats: input.clientFormats === undefined ? current.clientFormats : input.clientFormats,
       expiresAt: input.expiresAt === undefined ? current.expiresAt : String(input.expiresAt),
       state: input.state === undefined ? current.state : String(input.state),
       portalStatus: input.portalStatus === undefined ? current.portalStatus : String(input.portalStatus),
@@ -614,8 +576,9 @@ export class RayLinkStore {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) {
       throw domainError("INVALID_EMAIL", "邮箱地址格式不正确");
     }
-    if (!this.db.prepare("SELECT 1 FROM plans WHERE id = ?").get(next.planId)) {
-      throw domainError("PLAN_NOT_FOUND", "分配的方案不存在");
+    validateUserEntitlement(next);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(next.expiresAt)) {
+      throw domainError("INVALID_EXPIRY", "到期时间格式必须为 YYYY-MM-DD");
     }
     if (!["active", "warning", "disabled"].includes(next.state)) {
       throw domainError("INVALID_USER_STATE", "用户状态不正确");
@@ -633,14 +596,18 @@ export class RayLinkStore {
     try {
       this.db.prepare(`
         UPDATE users
-        SET name = ?, initials = ?, email = ?, plan_id = ?, expires_at = ?,
+        SET name = ?, initials = ?, email = ?, quota_gb = ?, device_limit = ?,
+            node_scope_json = ?, client_formats_json = ?, expires_at = ?,
             state = ?, portal_status = ?, used_gb = ?, updated_at = ?
         WHERE id = ?
       `).run(
         next.name,
         initials,
         next.email,
-        next.planId,
+        next.quotaGb,
+        next.deviceLimit,
+        JSON.stringify(next.nodeScope),
+        JSON.stringify(next.clientFormats),
         next.expiresAt,
         next.state,
         next.portalStatus,
@@ -666,9 +633,8 @@ export class RayLinkStore {
     const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'shadowsocks_master_password'").get();
     const users = this.db.prepare(`
       SELECT users.email, users.state, users.portal_status, users.used_gb, users.expires_at,
-             users.runtime_uuid, users.runtime_password, plans.quota_gb, plans.node_scope_json
+             users.runtime_uuid, users.runtime_password, users.quota_gb, users.node_scope_json
       FROM users
-      JOIN plans ON plans.id = users.plan_id
       ORDER BY users.email
     `).all().map((row) => ({
       email: row.email,

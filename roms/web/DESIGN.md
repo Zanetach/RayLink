@@ -6,7 +6,7 @@ RayLink is a precise, quiet operations console for teams running sing-box infras
 
 The primary signature is the deployment trail: every configuration change is shown as a traceable sequence from draft to validation, snapshot, rollout, and health confirmation.
 
-Users and subscriptions are separate business objects presented in one "Users & subscriptions" workspace. The user-management tab handles daily assignment work, while the plan-management tab defines reusable traffic, device, node-scope, and client entitlements.
+Each user owns an independent entitlement. The user workspace creates and edits identity, traffic allowance, expiry, device limit, node scope, and client capabilities in one flow.
 
 ## 2. Color palette and roles
 
@@ -45,7 +45,7 @@ The reflex choices Inter, Space Grotesk, and IBM Plex Sans are rejected. The int
 - Inputs use Surface 1, 8px radius, a 1px divider outline, and a two-pixel accent focus ring.
 - Tables are cardless operational surfaces with hairline row dividers, sticky headers, right-aligned numeric data, and compact 48px rows.
 - Navigation is a 232px rail with one sliding accent indicator and restrained active fill.
-- User and plan management share one rail destination, then use a two-tab underline switch inside the workspace.
+- User management has one rail destination and one primary create-user flow; entitlement fields live in the user drawer.
 - Drawers are fixed detail surfaces at the right edge. They retain page context and never behave like centered modals.
 
 ## 5. Layout principles

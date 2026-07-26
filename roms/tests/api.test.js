@@ -49,7 +49,7 @@ async function api(baseUrl, cookie, path, options = {}) {
   });
 }
 
-test("authenticated bootstrap returns separate users and plans", async (t) => {
+test("authenticated bootstrap returns users with independent entitlements", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
 
@@ -65,9 +65,13 @@ test("authenticated bootstrap returns separate users and plans", async (t) => {
   const body = await response.json();
   assert.equal(body.currentAdmin.username, "admin");
   assert.equal(body.users.length, 6);
-  assert.equal(body.plans.length, 3);
-  assert.equal(body.users.find((user) => user.email === "lin.zhixia@meridian-log.cn").planId, "standard");
-  assert.ok(body.plans.some((plan) => plan.id === "standard"));
+  assert.equal("plans" in body, false);
+  const user = body.users.find((candidate) => candidate.email === "lin.zhixia@meridian-log.cn");
+  assert.equal(user.quotaGb, 120);
+  assert.equal(user.deviceLimit, 3);
+  assert.deepEqual(user.nodeScope, ["tokyo", "singapore"]);
+  assert.deepEqual(user.clientFormats, ["mihomo", "sing-box"]);
+  assert.equal("planId" in user, false);
   assert.equal("passwordHash" in body.users[0], false);
   assert.equal("runtimeCredential" in body.users[0], false);
 });
@@ -79,66 +83,65 @@ test("production initialization can start without known demo users", async (t) =
   const response = await api(testApp.baseUrl, cookie, "/api/bootstrap");
   const body = await response.json();
   assert.deepEqual(body.users, []);
-  assert.deepEqual(body.plans, []);
+  assert.equal("plans" in body, false);
 });
 
-test("admin creates a reusable plan and assigns exactly one plan to a user", async (t) => {
+test("admin creates and updates a user-owned entitlement", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
   const cookie = await login(testApp.baseUrl);
-
-  const planResponse = await api(testApp.baseUrl, cookie, "/api/plans", {
-    method: "POST",
-    body: JSON.stringify({
-      id: "regional",
-      name: "区域办公",
-      quotaGb: 86,
-      deviceLimit: 2,
-      nodeScope: ["tokyo"],
-      clientFormats: ["sing-box"],
-      description: "适合区域办公室",
-      tone: "standard"
-    })
-  });
-  assert.equal(planResponse.status, 201);
-
-  const planUpdateResponse = await api(testApp.baseUrl, cookie, "/api/plans/regional", {
-    method: "PATCH",
-    body: JSON.stringify({ quotaGb: 92, deviceLimit: 3 })
-  });
-  assert.equal(planUpdateResponse.status, 200);
-  assert.equal((await planUpdateResponse.json()).quotaGb, 92);
 
   const userResponse = await api(testApp.baseUrl, cookie, "/api/users", {
     method: "POST",
     body: JSON.stringify({
       name: "徐清扬",
       email: "qingyang.xu@example.cn",
-      planId: "regional",
+      quotaGb: 86,
+      deviceLimit: 2,
+      nodeScope: ["tokyo"],
+      clientFormats: ["sing-box"],
+      state: "disabled",
       expiresAt: "2027-01-31"
     })
   });
   assert.equal(userResponse.status, 201);
   const user = await userResponse.json();
-  assert.equal(user.planId, "regional");
+  assert.equal(user.quotaGb, 86);
+  assert.equal(user.deviceLimit, 2);
+  assert.deepEqual(user.nodeScope, ["tokyo"]);
+  assert.deepEqual(user.clientFormats, ["sing-box"]);
+  assert.equal(user.state, "disabled");
+  assert.equal("planId" in user, false);
   assert.equal("runtimePassword" in user, false);
   assert.equal("runtimeUuid" in user, false);
 
   const updateResponse = await api(testApp.baseUrl, cookie, `/api/users/${user.id}`, {
     method: "PATCH",
-    body: JSON.stringify({ planId: "standard" })
+    body: JSON.stringify({
+      quotaGb: 92,
+      deviceLimit: 3,
+      nodeScope: ["all"]
+    })
   });
   assert.equal(updateResponse.status, 200);
-  assert.equal((await updateResponse.json()).planId, "standard");
+  const updatedUser = await updateResponse.json();
+  assert.equal(updatedUser.quotaGb, 92);
+  assert.equal(updatedUser.deviceLimit, 3);
+  assert.deepEqual(updatedUser.nodeScope, ["all"]);
 
   const bootstrap = await api(testApp.baseUrl, cookie, "/api/bootstrap");
   const snapshot = await bootstrap.json();
-  assert.equal(snapshot.users.find((item) => item.id === user.id).planId, "standard");
-  assert.equal(snapshot.plans.find((plan) => plan.id === "regional").assignedUsers, 0);
-  assert.equal(snapshot.plans.find((plan) => plan.id === "standard").assignedUsers, 5);
+  assert.equal(snapshot.users.find((item) => item.id === user.id).quotaGb, 92);
+  assert.equal("plans" in snapshot, false);
+
+  const retiredPlanEndpoint = await api(testApp.baseUrl, cookie, "/api/plans", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+  assert.equal(retiredPlanEndpoint.status, 404);
 });
 
-test("user creation rejects an unknown plan", async (t) => {
+test("user creation rejects invalid entitlement limits", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
   const cookie = await login(testApp.baseUrl);
@@ -146,14 +149,17 @@ test("user creation rejects an unknown plan", async (t) => {
   const response = await api(testApp.baseUrl, cookie, "/api/users", {
     method: "POST",
     body: JSON.stringify({
-      name: "无方案用户",
-      email: "missing-plan@example.cn",
-      planId: "missing",
+      name: "无效权益用户",
+      email: "invalid-entitlement@example.cn",
+      quotaGb: 0,
+      deviceLimit: 2,
+      nodeScope: ["tokyo"],
+      clientFormats: ["sing-box"],
       expiresAt: "2027-01-31"
     })
   });
   assert.equal(response.status, 422);
-  assert.equal((await response.json()).error.code, "PLAN_NOT_FOUND");
+  assert.equal((await response.json()).error.code, "INVALID_QUOTA");
 });
 
 test("admin previews and publishes the current database snapshot", async (t) => {
@@ -336,8 +342,9 @@ test("active user logs in and downloads a credential-scoped sing-box client conf
   });
   assert.equal(profileResponse.status, 200);
   const profile = await profileResponse.json();
-  assert.equal(profile.user.planId, "high-speed");
-  assert.equal(profile.plan.deviceLimit, 5);
+  assert.equal("planId" in profile.user, false);
+  assert.equal(profile.entitlement.deviceLimit, 5);
+  assert.equal(profile.entitlement.quotaGb, 320);
 
   const configResponse = await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
     headers: { cookie: portalCookie }
@@ -382,7 +389,10 @@ test("admin can activate a new portal user with a separate login password", asyn
       password: "PortalPass@2026",
       portalStatus: "active",
       state: "active",
-      planId: "standard",
+      quotaGb: 120,
+      deviceLimit: 3,
+      nodeScope: ["tokyo", "singapore"],
+      clientFormats: ["sing-box"],
       expiresAt: "2027-01-31"
     })
   });
@@ -457,11 +467,14 @@ test("revoking portal access invalidates an existing user session", async (t) =>
   assert.equal((await configResponse.json()).error.code, "ACCOUNT_NOT_ACTIVE");
 });
 
-test("portal refuses a client config when the assigned plan excludes the runtime region", async (t) => {
+test("portal refuses a client config when the user entitlement excludes the runtime region", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
   const adminCookie = await login(testApp.baseUrl);
-  await api(testApp.baseUrl, adminCookie, "/api/plans/high-speed", {
+  const bootstrapResponse = await api(testApp.baseUrl, adminCookie, "/api/bootstrap");
+  const bootstrap = await bootstrapResponse.json();
+  const user = bootstrap.users.find((candidate) => candidate.email === "priya@vantage-bioworks.in");
+  await api(testApp.baseUrl, adminCookie, `/api/users/${user.id}`, {
     method: "PATCH",
     body: JSON.stringify({ nodeScope: ["frankfurt"] })
   });
@@ -481,7 +494,7 @@ test("portal refuses a client config when the assigned plan excludes the runtime
   assert.equal((await configResponse.json()).error.code, "ENTITLEMENT_INACTIVE");
 });
 
-test("recorded usage at the plan quota removes the user from runtime and blocks config download", async (t) => {
+test("recorded usage at the user quota removes the user from runtime and blocks config download", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
   const adminCookie = await login(testApp.baseUrl);
@@ -525,7 +538,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.equal(indexResponse.status, 200);
   assert.match(indexResponse.headers.get("content-type"), /text\/html/);
   const indexHtml = await indexResponse.text();
-  assert.match(indexHtml, /用户与订阅/);
+  assert.match(indexHtml, /用户管理/);
+  assert.doesNotMatch(indexHtml, /方案管理/);
   assert.match(indexHtml, /网络流量趋势/);
   assert.match(indexHtml, /dashboard-network-trend/);
   assert.match(indexHtml, /按启用账号数量缩放趋势样例/);

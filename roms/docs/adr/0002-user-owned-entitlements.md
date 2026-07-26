@@ -1,0 +1,3 @@
+# Store entitlement settings on each user
+
+RayLink will model traffic allowance, expiry, device limit, node scope, and client capabilities as a User Entitlement owned by one User. The management UI and API configure these fields while creating or editing that User; there is no reusable Plan resource, assignment workflow, or Plan management page. Existing SQLite installations retain the old Plan table and foreign key only as an internal migration compatibility layer, while all runtime, portal, and API behavior reads the user-owned fields. This supersedes the Plan relationship assumed by ADR 0001; its single-host runtime-adapter decision remains unchanged.
