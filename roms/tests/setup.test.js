@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { createRayLinkApp } from "../server/app.js";
 import { hashSessionSecret } from "../server/security.js";
+
+const execFile = promisify(execFileCallback);
 
 async function requestJson(baseUrl, path, { method = "GET", headers = {}, body = "" } = {}) {
   const target = new URL(path, baseUrl);
@@ -355,6 +360,7 @@ test("the release package keeps every installer dependency executable", async ()
   for (const relativePath of [
     "../web/node/build-metered-runtime.sh",
     "../deploy/build-runtime-artifact.sh",
+    "../deploy/install.sh",
     "../deploy/package-release.sh"
   ]) {
     const dependency = await stat(new URL(relativePath, import.meta.url));
@@ -364,4 +370,174 @@ test("the release package keeps every installer dependency executable", async ()
       `${relativePath} must be executable in the release package`
     );
   }
+});
+
+test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const version = "0.2.1";
+  const architecture = process.arch === "arm64" ? "arm64" : "amd64";
+  const releaseDirectory = join(directory, `v${version}`);
+  const packageDirectory = join(directory, `raylink-${version}`);
+  const packageDeployDirectory = join(packageDirectory, "deploy");
+  const installRecordPath = join(directory, "install-record.txt");
+  const fakeBinDirectory = join(directory, "bin");
+  const armBinDirectory = join(directory, "arm-bin");
+  await mkdir(releaseDirectory, { recursive: true });
+  await mkdir(packageDeployDirectory, { recursive: true });
+  await mkdir(fakeBinDirectory, { recursive: true });
+  await mkdir(armBinDirectory, { recursive: true });
+  await writeFile(
+    join(packageDeployDirectory, "install-control-plane.sh"),
+    [
+      "#!/usr/bin/env bash",
+      "printf '%s' \"${RAYLINK_PUBLIC_IP:-}\" > \"${INSTALL_RECORD_PATH:?}\"",
+      "exit \"${INSTALL_EXIT_CODE:-0}\"",
+      ""
+    ].join("\n")
+  );
+  const archiveName = `raylink-${version}-linux-${architecture}.tar.gz`;
+  const archivePath = join(releaseDirectory, archiveName);
+  await execFile("tar", [
+    "-czf",
+    archivePath,
+    "-C",
+    directory,
+    `raylink-${version}`
+  ]);
+  const digest = createHash("sha256").update(await readFile(archivePath)).digest("hex");
+  await writeFile(
+    `${archivePath}.sha256`,
+    `${digest}  ${archiveName}\n`
+  );
+
+  const result = await execFile("bash", [
+    new URL("../deploy/install.sh", import.meta.url).pathname,
+    "--dry-run",
+    "--public-ip",
+    "203.0.113.10",
+    "--version",
+    version,
+    "--release-base-url",
+    `file://${directory}`
+  ]);
+
+  assert.match(result.stdout, /RayLink v0\.2\.1/);
+  assert.match(result.stdout, new RegExp(`linux-${architecture}`));
+  assert.match(result.stdout, /SHA-256 校验通过/);
+  assert.match(result.stdout, /RAYLINK_PUBLIC_IP=203\.0\.113\.10/);
+  assert.match(result.stdout, /deploy\/install-control-plane\.sh/);
+
+  await writeFile(
+    `${archivePath}.sha256`,
+    `${"0".repeat(64)}  ${archiveName}\n`
+  );
+  await assert.rejects(
+    () => execFile("bash", [
+      new URL("../deploy/install.sh", import.meta.url).pathname,
+      "--dry-run",
+      "--version",
+      version,
+      "--release-base-url",
+      `file://${directory}`
+    ]),
+    (error) => {
+      assert.match(error.stderr, /SHA-256 校验失败/);
+      return true;
+    }
+  );
+
+  await writeFile(
+    `${archivePath}.sha256`,
+    `${digest}  ${archiveName}\n`
+  );
+  await writeFile(
+    join(fakeBinDirectory, "uname"),
+    [
+      "#!/usr/bin/env bash",
+      "case \"${1:-}\" in",
+      "  -s) printf 'Linux\\n' ;;",
+      `  -m) printf '${architecture === "arm64" ? "aarch64" : "x86_64"}\\n' ;;`,
+      "  *) /usr/bin/uname \"$@\" ;;",
+      "esac",
+      ""
+    ].join("\n")
+  );
+  await writeFile(
+    join(fakeBinDirectory, "id"),
+    "#!/usr/bin/env bash\n[ \"${1:-}\" = '-u' ] && printf '0\\n' || /usr/bin/id \"$@\"\n"
+  );
+  await chmod(join(fakeBinDirectory, "uname"), 0o755);
+  await chmod(join(fakeBinDirectory, "id"), 0o755);
+
+  const installerEnvironment = {
+    ...process.env,
+    PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+    INSTALL_RECORD_PATH: installRecordPath
+  };
+  const installerArguments = [
+    new URL("../deploy/install.sh", import.meta.url).pathname,
+    "--public-ip",
+    "203.0.113.10",
+    "--version",
+    version,
+    "--release-base-url",
+    `file://${directory}`
+  ];
+  await execFile("bash", installerArguments, { env: installerEnvironment });
+  assert.equal(await readFile(installRecordPath, "utf8"), "203.0.113.10");
+
+  await assert.rejects(
+    () => execFile("bash", installerArguments, {
+      env: {
+        ...installerEnvironment,
+        INSTALL_EXIT_CODE: "23"
+      }
+    }),
+    (error) => {
+      assert.equal(error.code, 23);
+      return true;
+    }
+  );
+
+  await assert.rejects(
+    () => execFile("bash", [
+      new URL("../deploy/install.sh", import.meta.url).pathname,
+      "--public-ip",
+      "--dry-run"
+    ]),
+    (error) => {
+      assert.match(error.stderr, /--public-ip 缺少参数/);
+      return true;
+    }
+  );
+
+  await writeFile(
+    join(armBinDirectory, "uname"),
+    [
+      "#!/usr/bin/env bash",
+      "case \"${1:-}\" in",
+      "  -s) printf 'Linux\\n' ;;",
+      "  -m) printf 'aarch64\\n' ;;",
+      "  *) /usr/bin/uname \"$@\" ;;",
+      "esac",
+      ""
+    ].join("\n")
+  );
+  await chmod(join(armBinDirectory, "uname"), 0o755);
+  await assert.rejects(
+    () => execFile("bash", [
+      new URL("../deploy/install.sh", import.meta.url).pathname,
+      "--dry-run"
+    ], {
+      env: {
+        ...process.env,
+        PATH: `${armBinDirectory}:${process.env.PATH}`
+      }
+    }),
+    (error) => {
+      assert.match(error.stderr, /v0\.2\.0 发布包仅提供 linux-amd64/);
+      return true;
+    }
+  );
 });

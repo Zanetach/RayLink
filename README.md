@@ -85,18 +85,26 @@ flowchart LR
 - 控制台 HTTPS 端口 `443`
 - 你在界面启用的代理协议端口
 
-将下面的 `203.0.113.10` 替换为 VPS 公网 IP，然后整段执行：
+服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-cd /tmp
-curl -fLO https://github.com/Zanetach/RayLink/releases/download/v0.2.0/raylink-0.2.0-linux-amd64.tar.gz
-curl -fLO https://github.com/Zanetach/RayLink/releases/download/v0.2.0/raylink-0.2.0-linux-amd64.tar.gz.sha256
-sha256sum -c raylink-0.2.0-linux-amd64.tar.gz.sha256
-tar -xzf raylink-0.2.0-linux-amd64.tar.gz
-sudo env RAYLINK_PUBLIC_IP=203.0.113.10 bash raylink-0.2.0/deploy/install-control-plane.sh
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | bash'
 ```
 
-安装器会自动完成：
+普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | sudo bash'
+```
+
+脚本会检测公网 IP，下载固定的 AMD64 发布包及 SHA-256，校验后解压，再执行系统安装。
+若需要指定公网 IP：
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | bash -s -- --public-ip 203.0.113.10'
+```
+
+一键安装会自动完成：
 
 - 安装并校验 Node.js 22
 - 安装预编译的 sing-box 1.13.14 计量版 Runtime

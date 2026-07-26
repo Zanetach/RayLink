@@ -9,29 +9,40 @@
 
 ## 推荐：一键安装与首次初始化
 
-在正式发布包根目录执行：
+v0.2.0 Release 当前支持 AMD64（x86_64）。服务器需要预先具备 `curl`。
+使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash deploy/install-control-plane.sh
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | bash'
 ```
 
-云主机若有 NAT、多块网卡或只显示私网地址，必须显式提供实际访问地址：
+普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-RAYLINK_PUBLIC_IP=203.0.113.10 bash deploy/install-control-plane.sh
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | sudo bash'
 ```
 
-安装器不会把自动检测到的私网地址误当作公网入口；局域网部署使用私网 IP 时也应显式设置。
-
-从远程发布包安装时必须同时提供发布包地址和 SHA-256，安装器不会执行第三方动态脚本：
+脚本检测 CPU 架构和公网 IP，自动补齐 Debian/Ubuntu 上缺少的归档校验工具，
+下载固定版本发布包和 `.sha256`，校验通过后才会解压并执行控制面安装器。
+云主机若有 NAT、多块网卡，建议显式提供实际访问地址：
 
 ```bash
-RAYLINK_PACKAGE_URL=https://github.com/Zanetach/RayLink/releases/download/v0.2.0/raylink-0.2.0-linux-amd64.tar.gz \
-RAYLINK_PACKAGE_SHA256=<发布页提供的校验值> \
-bash install-control-plane.sh
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
-安装器会完成：
+安装指定版本：
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | bash -s -- --version 0.2.0'
+```
+
+只验证下载、校验和解压，不修改系统：
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | bash -s -- --dry-run'
+```
+
+一键安装会完成：
 
 - 从 Node.js 官方源安装并校验 Node.js 22；
 - 优先校验并安装发布包内预编译的 sing-box 1.13.14 计量版；
@@ -39,6 +50,12 @@ bash install-control-plane.sh
 - 安装 RayLink、systemd 和 Nginx；
 - 为服务器 IP 生成带 SAN 的首次访问证书；
 - 输出仅显示一次的 `https://服务器IP/setup#token=...` 初始化地址。
+
+已经下载发布包时，也可以在发布包根目录直接执行底层安装器：
+
+```bash
+sudo env RAYLINK_PUBLIC_IP=203.0.113.10 bash deploy/install-control-plane.sh
+```
 
 浏览器首次访问 IP 证书会提示证书由本机签发。继续前应核对安装器输出的
 SHA-256 证书指纹。初始化令牌只以哈希形式写入服务器，默认 30 分钟后失效；
