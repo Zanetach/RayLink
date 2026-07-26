@@ -115,7 +115,11 @@ function userFromRow(row) {
     quotaGb: row.quota_gb,
     nodeScope: parseJson(row.node_scope_json, []),
     clientFormats: parseJson(row.client_formats_json, []),
-    expiresAt: row.expires_at
+    expiresAt: row.expires_at,
+    subscription: {
+      publicId: row.subscription_public_id || null,
+      configured: Boolean(row.subscription_secret_hash)
+    }
   };
 }
 
@@ -257,6 +261,8 @@ export class RayLinkStore {
         expires_at TEXT NOT NULL,
         runtime_uuid TEXT NOT NULL UNIQUE,
         runtime_password TEXT NOT NULL,
+        subscription_public_id TEXT,
+        subscription_secret_hash TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -352,6 +358,21 @@ export class RayLinkStore {
     if (!userColumns.some((column) => column.name === "client_formats_json")) {
       this.db.exec("ALTER TABLE users ADD COLUMN client_formats_json TEXT");
     }
+    if (!userColumns.some((column) => column.name === "subscription_public_id")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN subscription_public_id TEXT");
+    }
+    if (!userColumns.some((column) => column.name === "subscription_secret_hash")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN subscription_secret_hash TEXT");
+    }
+    this.db.exec(`
+      UPDATE users
+      SET subscription_public_id = lower(hex(randomblob(16)))
+      WHERE subscription_public_id IS NULL
+    `);
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS users_subscription_public_id
+      ON users(subscription_public_id)
+    `);
     const hostColumns = this.db.prepare("PRAGMA table_info(hosts)").all();
     const hostMigrations = [
       ["kind", "TEXT NOT NULL DEFAULT 'local'"],
@@ -430,8 +451,9 @@ export class RayLinkStore {
       INSERT OR IGNORE INTO users (
         id, name, initials, email, password_hash, portal_status, state, used_gb,
         plan_id, quota_gb, device_limit, node_scope_json, client_formats_json,
-        expires_at, runtime_uuid, runtime_password, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        expires_at, runtime_uuid, runtime_password, subscription_public_id,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
       for (const [name, initials, email, portalStatus, state, usedGb, planId, expiresAt] of seedUsers) {
         const entitlement = seedPlans.find((plan) => plan.id === planId);
@@ -452,6 +474,7 @@ export class RayLinkStore {
           expiresAt,
           randomUUID(),
           createShadowsocksKey(),
+          createRuntimePassword(18),
           createdAt,
           createdAt
         );
@@ -538,7 +561,8 @@ export class RayLinkStore {
     const row = this.db.prepare(`
       SELECT users.id, users.name, users.initials, users.email, users.portal_status,
              users.state, users.used_gb, users.quota_gb,
-             users.node_scope_json, users.client_formats_json, users.expires_at
+             users.node_scope_json, users.client_formats_json, users.expires_at,
+             users.subscription_public_id, users.subscription_secret_hash
       FROM users
       WHERE users.id = ?
     `).get(userId);
@@ -580,10 +604,38 @@ export class RayLinkStore {
     };
   }
 
+  rotateUserSubscription(userId) {
+    const user = this.db.prepare(`
+      SELECT id, subscription_public_id
+      FROM users
+      WHERE id = ?
+    `).get(userId);
+    if (!user) throw domainError("USER_NOT_FOUND", "用户不存在", 404);
+    const publicId = user.subscription_public_id || createRuntimePassword(18);
+    const secret = createSessionSecret();
+    this.db.prepare(`
+      UPDATE users
+      SET subscription_public_id = ?, subscription_secret_hash = ?, updated_at = ?
+      WHERE id = ?
+    `).run(publicId, hashSessionSecret(secret), nowIso(), userId);
+    return { publicId, secret };
+  }
+
+  userForSubscription(publicId, secret) {
+    if (!publicId || !secret) return null;
+    return this.db.prepare(`
+      SELECT id
+      FROM users
+      WHERE subscription_public_id = ?
+        AND subscription_secret_hash = ?
+    `).get(publicId, hashSessionSecret(secret)) || null;
+  }
+
   listUsers() {
     return this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
-             node_scope_json, client_formats_json, expires_at
+             node_scope_json, client_formats_json, expires_at,
+             subscription_public_id, subscription_secret_hash
       FROM users
       ORDER BY created_at, name
     `).all().map(userFromRow);
@@ -976,8 +1028,9 @@ export class RayLinkStore {
         INSERT INTO users (
           id, name, initials, email, password_hash, portal_status, state, used_gb,
           plan_id, quota_gb, device_limit, node_scope_json, client_formats_json,
-          expires_at, runtime_uuid, runtime_password, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          expires_at, runtime_uuid, runtime_password, subscription_public_id,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         name,
@@ -995,6 +1048,7 @@ export class RayLinkStore {
         input.expiresAt,
         randomUUID(),
         createShadowsocksKey(),
+        createRuntimePassword(18),
         timestamp,
         timestamp
       );
@@ -1010,7 +1064,8 @@ export class RayLinkStore {
   getUser(id) {
     const row = this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, quota_gb,
-             node_scope_json, client_formats_json, expires_at
+             node_scope_json, client_formats_json, expires_at,
+             subscription_public_id, subscription_secret_hash
       FROM users WHERE id = ?
     `).get(id);
     return row ? userFromRow(row) : null;

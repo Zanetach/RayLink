@@ -51,6 +51,10 @@ RayLink 的 systemd 模式会重启 `sing-box-raylink.service`。示例为了让
 RAYLINK_PUBLIC_ORIGIN=https://panel.example.com
 ```
 
+生产 Nginx 配置应从 [nginx.conf.example](nginx.conf.example) 开始。该示例明确关闭
+`/sub/` 路径的 access log，因为 URL 中包含可直接取得用户配置的订阅密钥。不要使用会记录完整 URI
+的全局访问日志覆盖这条规则；部署后用测试订阅请求检查访问日志中不存在 `/sub/`。
+
 不要通过公网直接暴露 4173。
 
 ## 4. 检查

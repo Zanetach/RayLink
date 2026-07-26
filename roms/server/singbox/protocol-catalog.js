@@ -315,23 +315,153 @@ function clientConfigForOutbounds(protocolOutbounds) {
   const tags = protocolOutbounds.map((outbound) => outbound.tag);
   return {
     log: { level: "info", timestamp: true },
-    inbounds: [{
-      type: "mixed",
-      tag: "local-mixed",
-      listen: "127.0.0.1",
-      listen_port: 2080
-    }],
+    dns: {
+      servers: [
+        {
+          type: "udp",
+          tag: "dns-local",
+          server: "223.5.5.5",
+          detour: "direct"
+        },
+        {
+          type: "tls",
+          tag: "dns-remote",
+          server: "8.8.8.8",
+          detour: "raylink-auto"
+        }
+      ],
+      rules: [
+        {
+          rule_set: "geosite-geolocation-cn",
+          action: "route",
+          server: "dns-local"
+        },
+        {
+          type: "logical",
+          mode: "and",
+          rules: [
+            {
+              rule_set: "geosite-geolocation-!cn",
+              invert: true
+            },
+            {
+              rule_set: "geoip-cn"
+            }
+          ],
+          action: "route",
+          server: "dns-local"
+        }
+      ],
+      final: "dns-remote",
+      strategy: "prefer_ipv4"
+    },
+    inbounds: [
+      {
+        type: "tun",
+        tag: "local-tun",
+        address: ["172.19.0.1/30"],
+        auto_route: true,
+        strict_route: true,
+        stack: "system"
+      },
+      {
+        type: "mixed",
+        tag: "local-mixed",
+        listen: "127.0.0.1",
+        listen_port: 2080
+      }
+    ],
     outbounds: [
       ...protocolOutbounds,
       {
+        type: "urltest",
+        tag: "raylink-fastest",
+        outbounds: tags,
+        url: "https://www.gstatic.com/generate_204",
+        interval: "3m",
+        tolerance: 50
+      },
+      {
         type: "selector",
         tag: "raylink-auto",
-        outbounds: tags,
-        default: tags[0]
+        outbounds: ["raylink-fastest", ...tags],
+        default: "raylink-fastest",
+        interrupt_exist_connections: true
       },
       { type: "direct", tag: "direct" }
     ],
-    route: { final: "raylink-auto" }
+    route: {
+      rules: [
+        { action: "sniff" },
+        {
+          type: "logical",
+          mode: "or",
+          rules: [
+            { protocol: "dns" },
+            { port: 53 }
+          ],
+          action: "hijack-dns"
+        },
+        {
+          ip_is_private: true,
+          action: "route",
+          outbound: "direct"
+        },
+        {
+          rule_set: "geosite-geolocation-cn",
+          action: "route",
+          outbound: "direct"
+        },
+        {
+          type: "logical",
+          mode: "and",
+          rules: [
+            { rule_set: "geoip-cn" },
+            {
+              rule_set: "geosite-geolocation-!cn",
+              invert: true
+            }
+          ],
+          action: "route",
+          outbound: "direct"
+        }
+      ],
+      rule_set: [
+        {
+          type: "remote",
+          tag: "geosite-geolocation-cn",
+          format: "binary",
+          url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs",
+          download_detour: "raylink-auto",
+          update_interval: "1d"
+        },
+        {
+          type: "remote",
+          tag: "geosite-geolocation-!cn",
+          format: "binary",
+          url: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+          download_detour: "raylink-auto",
+          update_interval: "1d"
+        },
+        {
+          type: "remote",
+          tag: "geoip-cn",
+          format: "binary",
+          url: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+          download_detour: "raylink-auto",
+          update_interval: "1d"
+        }
+      ],
+      final: "raylink-auto",
+      default_domain_resolver: "dns-local",
+      auto_detect_interface: true
+    },
+    experimental: {
+      cache_file: {
+        enabled: true,
+        store_rdrc: true
+      }
+    }
   };
 }
 

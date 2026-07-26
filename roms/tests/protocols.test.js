@@ -102,8 +102,20 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.equal(config.route.final, "raylink-auto");
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.type === "selector").outbounds,
-    ["raylink-shadowsocks", "raylink-vless"]
+    ["raylink-fastest", "raylink-shadowsocks", "raylink-vless"]
   );
+  assert.deepEqual(config.inbounds.map((inbound) => inbound.type), ["tun", "mixed"]);
+  assert.equal(config.inbounds[0].auto_route, true);
+  assert.equal(config.inbounds[0].strict_route, true);
+  assert.deepEqual(config.dns.servers.map((server) => server.tag), ["dns-local", "dns-remote"]);
+  assert.equal(config.dns.final, "dns-remote");
+  assert.equal(config.route.rules[0].action, "sniff");
+  assert.equal(config.route.rules[1].action, "hijack-dns");
+  assert.deepEqual(
+    config.route.rule_set.map((ruleSet) => ruleSet.tag),
+    ["geosite-geolocation-cn", "geosite-geolocation-!cn", "geoip-cn"]
+  );
+  assert.equal(config.experimental.cache_file.enabled, true);
 });
 
 test("multi-host client configuration exposes every entitled node through one selector", () => {
@@ -128,6 +140,10 @@ test("multi-host client configuration exposes every entitled node through one se
   assert.deepEqual(servers, ["tokyo.example.com", "fra.example.com"]);
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.tag === "raylink-auto").outbounds,
+    ["raylink-fastest", "raylink-local-shadowsocks", "raylink-fra-02-shadowsocks"]
+  );
+  assert.deepEqual(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-fastest").outbounds,
     ["raylink-local-shadowsocks", "raylink-fra-02-shadowsocks"]
   );
 });

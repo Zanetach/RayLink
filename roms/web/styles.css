@@ -94,6 +94,17 @@ body {
 .portal-card > p:not(.eyebrow, .drawer-section-label, .portal-note) { margin: 0 0 24px; color: var(--muted); font-size: 12px; }
 .portal-account .drawer-profile { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
 .portal-download { width: 100%; justify-content: center; margin-top: 24px; }
+.portal-subscription { display: grid; gap: 14px; margin-top: 24px; padding: 20px; border: 1px solid var(--border); background: var(--canvas); }
+.portal-subscription h2 { margin: 5px 0 0; color: var(--text-soft); font-size: 15px; font-weight: 600; }
+.portal-subscription > div > p:not(.drawer-section-label) { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.portal-subscription > .button { width: 100%; justify-content: center; }
+.portal-subscription-value label { display: block; margin-bottom: 6px; color: var(--faint); font-size: 10px; }
+.portal-subscription-value > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.portal-subscription-value input { min-width: 0; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-soft); font-family: var(--font-mono); font-size: 10px; padding: 0 11px; }
+.portal-guide { margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
+.portal-guide summary { color: var(--text-soft); cursor: pointer; font-size: 11px; font-weight: 600; }
+.portal-guide ol { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.portal-guide code { color: var(--text-soft); font-family: var(--font-mono); }
 
 button, input, select, textarea { font: inherit; }
 

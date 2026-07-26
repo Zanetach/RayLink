@@ -59,6 +59,21 @@ export class RuntimeManager {
     return { ...deployment, remoteQueued: remoteHosts.length };
   }
 
+  async reconcile(publisherAdminId = null) {
+    if (this.publishing) return { changed: false, reason: "deployment-in-progress" };
+    const activeDeployment = this.store.listDeployments(100)
+      .find((deployment) => deployment.status === "active");
+    if (!activeDeployment) return { changed: false, reason: "initial-publication-required" };
+    const compiled = compile(this.store, this.listenPort);
+    if (compiled.checksum === activeDeployment.checksum) {
+      return { changed: false, reason: "configuration-current" };
+    }
+    return {
+      changed: true,
+      deployment: await this.publish(publisherAdminId)
+    };
+  }
+
   async rollback(sourceDeploymentId, publisherAdminId = null) {
     const snapshot = this.store.deploymentSnapshot(sourceDeploymentId);
     const configText = `${JSON.stringify(snapshot.config, null, 2)}\n`;

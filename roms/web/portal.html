@@ -39,8 +39,33 @@
         <span><small>剩余流量</small><strong id="portal-remaining-quota">—</strong></span>
         <span><small>节点范围</small><strong id="portal-node-scope">—</strong></span>
       </div>
+      <section class="portal-subscription" aria-labelledby="portal-subscription-title">
+        <div>
+          <p class="drawer-section-label">客户端订阅</p>
+          <h2 id="portal-subscription-title">一个地址，自动同步配置</h2>
+          <p id="portal-subscription-status">生成后粘贴到 sing-box 客户端；仅在重置时更换地址。</p>
+        </div>
+        <div class="portal-subscription-value" id="portal-subscription-value" hidden>
+          <label for="portal-subscription-url">订阅地址</label>
+          <div>
+            <input id="portal-subscription-url" type="url" readonly spellcheck="false">
+            <button class="button secondary" id="portal-copy-subscription" type="button">复制</button>
+          </div>
+        </div>
+        <button class="button primary" id="portal-subscription-action" type="button">生成订阅地址</button>
+      </section>
       <button class="button primary portal-download" id="portal-download-config">下载 sing-box 配置</button>
       <p class="portal-note" id="portal-download-note">配置只包含你的运行凭据。导入 sing-box 客户端后即可使用。</p>
+      <details class="portal-guide">
+        <summary>客户端导入与使用说明</summary>
+        <ol>
+          <li>在客户端添加远程配置并粘贴订阅地址；更新订阅会同步管理员分配的节点和协议。</li>
+          <li>TUN 需要系统 VPN 权限。首次启用时请允许客户端创建 VPN/TUN 接口。</li>
+          <li>如果当前平台无法启用 TUN，可使用本机 <code>127.0.0.1:2080</code> 的 mixed 回退，并手动设置系统代理。</li>
+          <li>国内域名和 IP 默认直连，其他流量与加密 DNS 默认走代理；局域网地址保持直连。</li>
+          <li>停止使用时先在客户端删除订阅和本地配置；如果地址泄露，再回到本页重置订阅。</li>
+        </ol>
+      </details>
     </section>
   </main>
   <script src="/portal.js"></script>

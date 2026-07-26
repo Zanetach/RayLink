@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
@@ -75,6 +76,32 @@ function sendJson(response, statusCode, body, headers = {}) {
   response.end(payload);
 }
 
+function httpError(code, message, statusCode) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function sendSubscriptionJson(request, response, body) {
+  const payload = JSON.stringify(body);
+  const etag = `"${createHash("sha256").update(payload).digest("hex")}"`;
+  const headers = {
+    "cache-control": "private, no-cache",
+    "content-disposition": 'attachment; filename="raylink-sing-box.json"',
+    etag,
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-robots-tag": "noindex, nofollow"
+  };
+  if (request.headers["if-none-match"] === etag) {
+    response.writeHead(304, headers);
+    response.end();
+    return;
+  }
+  sendJson(response, 200, body, headers);
+}
+
 async function sendStatic(response, webDir, pathname) {
   const relativePath = pathname === "/"
     ? "index.html"
@@ -143,8 +170,13 @@ export async function createRayLinkApp(options) {
   const telemetryProvider = options.telemetryProvider
     || ((runtime) => localTelemetryCollector.collect(runtime));
   const telemetryIntervalMs = Math.max(10, Number(options.telemetryIntervalMs || 10_000));
+  const entitlementReconcileIntervalMs = Math.max(
+    1_000,
+    Number(options.entitlementReconcileIntervalMs || 60_000)
+  );
   let telemetryTimer = null;
   let telemetrySamplePromise = null;
+  let entitlementReconcileTimer = null;
   const sampleLocalTelemetry = () => {
     if (telemetrySamplePromise) return telemetrySamplePromise;
     telemetrySamplePromise = (async () => {
@@ -162,6 +194,60 @@ export async function createRayLinkApp(options) {
   const installer = options.installer || new SingBoxInstaller({
     binaryPath: options.singBoxBinary || "sing-box"
   });
+  const buildClientConfigForUser = async (userId) => {
+    const credential = store.clientCredential(userId);
+    if (!credential) throw httpError("USER_NOT_FOUND", "用户不存在", 404);
+    const expiresAt = new Date(`${credential.expiresAt}T23:59:59.999Z`);
+    const runtime = await runtimeManager.status();
+    const allowStagedClientConfigs = options.allowStagedClientConfigs
+      ?? process.env.NODE_ENV !== "production";
+    const eligibleHosts = store.listClientHosts().filter((host) => {
+      const metricsAgeMs = host.telemetry.updatedAt
+        ? Date.now() - new Date(host.telemetry.updatedAt).getTime()
+        : Number.POSITIVE_INFINITY;
+      const connected = host.id === "local"
+        ? runtime.state === "running" || allowStagedClientConfigs
+        : host.status === "online"
+          && host.telemetry.serviceStatus === "running"
+          && metricsAgeMs <= 30_000;
+      const regionAllowed = credential.nodeScope.includes("all")
+        || credential.nodeScope.includes(host.region);
+      return connected && regionAllowed;
+    });
+    if (
+      !["active", "warning"].includes(credential.state)
+      || credential.portalStatus !== "active"
+      || credential.usedGb >= credential.quotaGb
+      || expiresAt < new Date()
+      || !eligibleHosts.length
+    ) {
+      throw httpError("ENTITLEMENT_INACTIVE", "账号当前不可使用", 403);
+    }
+    if (!credential.clientFormats.includes("sing-box")) {
+      throw httpError("FORMAT_NOT_ALLOWED", "当前用户未启用 sing-box 配置", 403);
+    }
+    return buildUserClientConfig({
+      credential,
+      hosts: eligibleHosts,
+      port: listenPort,
+      protocols: store.listProtocolConfigs()
+    });
+  };
+  const reconcileUserEntitlements = async (publisherAdminId) => {
+    try {
+      const result = await runtimeManager.reconcile(publisherAdminId);
+      return {
+        status: result.changed ? "published" : "current",
+        reason: result.reason || null
+      };
+    } catch (error) {
+      console.warn(`[RayLink] User entitlement saved; runtime publication pending: ${error.message}`);
+      return {
+        status: "pending",
+        message: "用户变更已保存，运行配置发布失败，系统将自动重试"
+      };
+    }
+  };
   const authAttempts = new Map();
   const nodeHeartbeatWrites = new Map();
   const nodeHeartbeatMinIntervalMs = Math.max(0, Number(options.nodeHeartbeatMinIntervalMs ?? 5_000));
@@ -198,6 +284,25 @@ export async function createRayLinkApp(options) {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, publicOrigin);
+
+      const subscriptionMatch = url.pathname.match(
+        /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})\/sing-box\.json$/
+      );
+      if (request.method === "GET" && subscriptionMatch) {
+        const subscriptionUser = store.userForSubscription(subscriptionMatch[1], subscriptionMatch[2]);
+        if (!subscriptionUser) {
+          sendJson(response, 401, {
+            error: { code: "SUBSCRIPTION_INVALID", message: "订阅地址无效或已经被重置" }
+          });
+          return;
+        }
+        sendSubscriptionJson(
+          request,
+          response,
+          await buildClientConfigForUser(subscriptionUser.id)
+        );
+        return;
+      }
 
       if (request.method === "POST" && url.pathname === "/api/auth/login") {
         const body = await readJson(request);
@@ -276,49 +381,21 @@ export async function createRayLinkApp(options) {
           sendJson(response, 200, profile);
           return;
         }
-        if (request.method === "GET" && url.pathname === "/api/portal/config/sing-box") {
-          const credential = store.clientCredential(sessionUser.id);
-          const expiresAt = new Date(`${credential.expiresAt}T23:59:59.999Z`);
-          const runtime = await runtimeManager.status();
-          const allowStagedClientConfigs = options.allowStagedClientConfigs
-            ?? process.env.NODE_ENV !== "production";
-          const eligibleHosts = store.listClientHosts().filter((host) => {
-            const metricsAgeMs = host.telemetry.updatedAt
-              ? Date.now() - new Date(host.telemetry.updatedAt).getTime()
-              : Number.POSITIVE_INFINITY;
-            const connected = host.id === "local"
-              ? runtime.state === "running"
-                || allowStagedClientConfigs
-              : host.status === "online"
-                && host.telemetry.serviceStatus === "running"
-                && metricsAgeMs <= 30_000;
-            const regionAllowed = credential.nodeScope.includes("all")
-              || credential.nodeScope.includes(host.region);
-            return connected && regionAllowed;
+        if (request.method === "POST" && url.pathname === "/api/portal/subscription/rotate") {
+          const subscription = store.rotateUserSubscription(sessionUser.id);
+          sendJson(response, 201, {
+            subscriptionUrl: new URL(
+              `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
+              publicOrigin
+            ).toString()
           });
-          if (
-            !["active", "warning"].includes(credential.state)
-            || credential.portalStatus !== "active"
-            || credential.usedGb >= credential.quotaGb
-            || expiresAt < new Date()
-            || !eligibleHosts.length
-          ) {
-            sendJson(response, 403, { error: { code: "ENTITLEMENT_INACTIVE", message: "账号当前不可使用" } });
-            return;
-          }
-          if (!credential.clientFormats.includes("sing-box")) {
-            sendJson(response, 403, { error: { code: "FORMAT_NOT_ALLOWED", message: "当前用户未启用 sing-box 配置" } });
-            return;
-          }
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/portal/config/sing-box") {
           sendJson(
             response,
             200,
-            buildUserClientConfig({
-              credential,
-              hosts: eligibleHosts,
-              port: listenPort,
-              protocols: store.listProtocolConfigs()
-            }),
+            await buildClientConfigForUser(sessionUser.id),
             { "content-disposition": `attachment; filename="raylink-sing-box.json"` }
           );
           return;
@@ -514,7 +591,24 @@ export async function createRayLinkApp(options) {
         }
 
         if (request.method === "POST" && url.pathname === "/api/users") {
-          sendJson(response, 201, store.createUser(await readJson(request)));
+          const user = store.createUser(await readJson(request));
+          const runtimeSync = await reconcileUserEntitlements(admin.id);
+          sendJson(response, runtimeSync.status === "pending" ? 202 : 201, {
+            ...user,
+            runtimeSync
+          });
+          return;
+        }
+
+        const userSubscriptionMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/subscription\/rotate$/);
+        if (request.method === "POST" && userSubscriptionMatch) {
+          const subscription = store.rotateUserSubscription(decodeURIComponent(userSubscriptionMatch[1]));
+          sendJson(response, 201, {
+            subscriptionUrl: new URL(
+              `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
+              publicOrigin
+            ).toString()
+          });
           return;
         }
 
@@ -535,7 +629,15 @@ export async function createRayLinkApp(options) {
 
         const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/);
         if (request.method === "PATCH" && userMatch) {
-          sendJson(response, 200, store.updateUser(decodeURIComponent(userMatch[1]), await readJson(request)));
+          const user = store.updateUser(
+            decodeURIComponent(userMatch[1]),
+            await readJson(request)
+          );
+          const runtimeSync = await reconcileUserEntitlements(admin.id);
+          sendJson(response, runtimeSync.status === "pending" ? 202 : 200, {
+            ...user,
+            runtimeSync
+          });
           return;
         }
 
@@ -579,8 +681,18 @@ export async function createRayLinkApp(options) {
       await sampleLocalTelemetry();
       telemetryTimer = setInterval(sampleLocalTelemetry, telemetryIntervalMs);
       telemetryTimer.unref?.();
+      entitlementReconcileTimer = setInterval(() => {
+        runtimeManager.reconcile().catch((error) => {
+          console.warn(`[RayLink] Entitlement reconciliation failed: ${error.message}`);
+        });
+      }, entitlementReconcileIntervalMs);
+      entitlementReconcileTimer.unref?.();
     },
     async close() {
+      if (entitlementReconcileTimer) {
+        clearInterval(entitlementReconcileTimer);
+        entitlementReconcileTimer = null;
+      }
       if (telemetryTimer) {
         clearInterval(telemetryTimer);
         telemetryTimer = null;

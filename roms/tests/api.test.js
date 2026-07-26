@@ -226,6 +226,71 @@ test("admin previews and publishes the current database snapshot", async (t) => 
   assert.equal(snapshot.deployments[0].publisherUsername, "admin");
 });
 
+test("disabling an entitled user automatically republishes runtime credentials", async (t) => {
+  const publications = [];
+  const runtimeAdapter = {
+    async publish(publication) {
+      publications.push(publication);
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    },
+    async status() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    }
+  };
+  const testApp = await startTestApp({ runtimeAdapter });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const bootstrap = await api(testApp.baseUrl, cookie, "/api/bootstrap");
+  const priya = (await bootstrap.json()).users.find((user) => user.email === "priya@vantage-bioworks.in");
+  await api(testApp.baseUrl, cookie, "/api/deployments", { method: "POST" });
+  assert.equal(publications.length, 1);
+
+  const disableResponse = await api(testApp.baseUrl, cookie, `/api/users/${priya.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state: "disabled" })
+  });
+  assert.equal(disableResponse.status, 200);
+  assert.equal(publications.length, 2);
+  assert.doesNotMatch(publications[1].configText, /priya@vantage-bioworks\.in/);
+});
+
+test("a failed entitlement publication is reported as pending and remains retryable", async (t) => {
+  const publications = [];
+  let rejectPublication = false;
+  const runtimeAdapter = {
+    async publish(publication) {
+      publications.push(publication);
+      if (rejectPublication) throw new Error("runtime unavailable");
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    },
+    async status() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    }
+  };
+  const testApp = await startTestApp({ runtimeAdapter });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const bootstrap = await api(testApp.baseUrl, cookie, "/api/bootstrap");
+  const priya = (await bootstrap.json()).users.find((user) => user.email === "priya@vantage-bioworks.in");
+  await api(testApp.baseUrl, cookie, "/api/deployments", { method: "POST" });
+
+  rejectPublication = true;
+  const disableResponse = await api(testApp.baseUrl, cookie, `/api/users/${priya.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state: "disabled" })
+  });
+  assert.equal(disableResponse.status, 202);
+  const pendingUser = await disableResponse.json();
+  assert.equal(pendingUser.state, "disabled");
+  assert.equal(pendingUser.runtimeSync.status, "pending");
+
+  rejectPublication = false;
+  const retry = await testApp.app.runtimeManager.reconcile();
+  assert.equal(retry.changed, true);
+  assert.doesNotMatch(publications.at(-1).configText, /priya@vantage-bioworks\.in/);
+});
+
 test("admin detects sing-box, enables a protocol profile and triggers one-click installation", async (t) => {
   let installCalls = 0;
   const installer = {
@@ -415,6 +480,56 @@ test("portal excludes a staged local Runtime when production delivery is enforce
 
   assert.equal(configResponse.status, 403);
   assert.equal((await configResponse.json()).error.code, "ENTITLEMENT_INACTIVE");
+});
+
+test("user creates a stable subscription URL and rotating it revokes the old URL", async (t) => {
+  const testApp = await startTestApp({ proxyHost: "node.example.com" });
+  t.after(() => testApp.close());
+  const loginResponse = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = loginResponse.headers.getSetCookie()[0].split(";")[0];
+
+  const firstRotate = await fetch(`${testApp.baseUrl}/api/portal/subscription/rotate`, {
+    method: "POST",
+    headers: { cookie: portalCookie }
+  });
+  assert.equal(firstRotate.status, 201);
+  const first = await firstRotate.json();
+  const firstSubscriptionPath = new URL(first.subscriptionUrl).pathname;
+  assert.match(firstSubscriptionPath, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/sing-box\.json$/);
+
+  const subscriptionResponse = await fetch(`${testApp.baseUrl}${firstSubscriptionPath}`);
+  assert.equal(subscriptionResponse.status, 200);
+  assert.match(subscriptionResponse.headers.get("content-disposition"), /raylink-sing-box\.json/);
+  assert.equal(subscriptionResponse.headers.get("cache-control"), "private, no-cache");
+  assert.doesNotMatch(subscriptionResponse.headers.get("cache-control"), /public/);
+  const subscriptionEtag = subscriptionResponse.headers.get("etag");
+  assert.match(subscriptionEtag, /^"[a-f0-9]{64}"$/);
+  const subscriptionConfig = await subscriptionResponse.json();
+  assert.equal(subscriptionConfig.inbounds[0].type, "tun");
+  assert.equal(subscriptionConfig.route.final, "raylink-auto");
+  const notModifiedResponse = await fetch(`${testApp.baseUrl}${firstSubscriptionPath}`, {
+    headers: { "if-none-match": subscriptionEtag }
+  });
+  assert.equal(notModifiedResponse.status, 304);
+
+  const second = await (await fetch(`${testApp.baseUrl}/api/portal/subscription/rotate`, {
+    method: "POST",
+    headers: { cookie: portalCookie }
+  })).json();
+  assert.notEqual(second.subscriptionUrl, first.subscriptionUrl);
+  const secondSubscriptionPath = new URL(second.subscriptionUrl).pathname;
+
+  const revokedResponse = await fetch(`${testApp.baseUrl}${firstSubscriptionPath}`);
+  assert.equal(revokedResponse.status, 401);
+  assert.equal((await revokedResponse.json()).error.code, "SUBSCRIPTION_INVALID");
+  assert.equal((await fetch(`${testApp.baseUrl}${secondSubscriptionPath}`)).status, 200);
 });
 
 test("invited user cannot log in before activation", async (t) => {
@@ -1032,6 +1147,12 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.equal(portalResponse.status, 200);
   const portalHtml = await portalResponse.text();
   assert.match(portalHtml, /查看我的网络服务/);
+  assert.match(portalHtml, /id="portal-subscription-action"/);
+  assert.match(portalHtml, /id="portal-subscription-url"/);
+  assert.match(portalHtml, /id="portal-copy-subscription"/);
+  assert.match(portalHtml, /TUN 需要系统 VPN 权限/);
+  assert.match(portalHtml, /mixed 回退/);
+  assert.match(portalHtml, /删除订阅/);
   assert.match(portalHtml, /href="\/styles\.css"/);
   assert.match(portalHtml, /src="\/portal\.js"/);
 });

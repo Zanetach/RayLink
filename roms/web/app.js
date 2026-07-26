@@ -1146,11 +1146,12 @@ async function saveUserForm(form) {
     portalStatus: form.querySelector("[data-portal-enabled]").classList.contains("on") ? "active" : "invited"
   };
   if (form.elements.password.value) payload.password = form.elements.password.value;
-  await api(userId ? `/api/users/${encodeURIComponent(userId)}` : "/api/users", {
+  const result = await api(userId ? `/api/users/${encodeURIComponent(userId)}` : "/api/users", {
     method: userId ? "PATCH" : "POST",
     body: JSON.stringify(payload)
   });
   await loadBootstrap();
+  return result;
 }
 
 async function saveHostForm(form) {
@@ -1262,8 +1263,9 @@ async function saveDrawer() {
   elements.drawerSave.disabled = true;
   const previousLabel = elements.drawerSave.textContent;
   elements.drawerSave.textContent = "保存中…";
+  let userSaveResult = null;
   try {
-    if (form.id === "user-drawer-form") await saveUserForm(form);
+    if (form.id === "user-drawer-form") userSaveResult = await saveUserForm(form);
     if (form.id === "host-drawer-form") await saveHostForm(form);
     if (form.id === "new-host-drawer-form") {
       const created = await saveNewHostForm(form);
@@ -1284,7 +1286,9 @@ async function saveDrawer() {
     return;
   }
 
-  const message = form?.id === "host-drawer-form"
+  const message = userSaveResult?.runtimeSync?.status === "pending"
+    ? userSaveResult.runtimeSync.message
+    : form?.id === "host-drawer-form"
       ? "Runtime 主机已更新，用户配置将使用新的公网地址。"
     : form?.id === "protocol-drawer-form"
       ? "协议草稿已保存，请在配置发布页校验并发布。"
@@ -1294,7 +1298,7 @@ async function saveDrawer() {
         ? "主机连接信息已通过本地校验。"
         : "更改已经写入当前草稿。";
   closeDrawer();
-  showToast("已保存", message);
+  showToast(userSaveResult?.runtimeSync?.status === "pending" ? "已保存，等待同步" : "已保存", message);
   elements.drawerSave.disabled = false;
 }
 
