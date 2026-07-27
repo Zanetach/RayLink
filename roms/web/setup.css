@@ -446,6 +446,146 @@
   color: var(--accent);
 }
 
+.setup-initialization-progress {
+  display: grid;
+  gap: 15px;
+  padding: 18px;
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border-subtle));
+  border-radius: var(--setup-radius-control);
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--accent) 6%, transparent), transparent 56%),
+    var(--canvas);
+}
+
+.setup-initialization-progress[hidden] {
+  display: none;
+}
+
+.setup-initialization-progress > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setup-initialization-progress > header span {
+  display: grid;
+  gap: 5px;
+}
+
+.setup-initialization-progress > header strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.setup-initialization-progress > header small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.setup-initialization-progress > header b {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.setup-initialization-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.setup-initialization-track i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 60%, white));
+  box-shadow: 0 0 18px color-mix(in oklab, var(--accent) 45%, transparent);
+  transition: width 320ms ease;
+}
+
+.setup-initialization-stages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-initialization-stages li {
+  display: grid;
+  grid-template-columns: 11px minmax(0, 1fr);
+  gap: 9px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  background: color-mix(in oklab, var(--surface-1) 72%, transparent);
+  transition: border-color 180ms ease, color 180ms ease, background 180ms ease;
+}
+
+.setup-initialization-stages li > i {
+  width: 8px;
+  height: 8px;
+  margin-top: 3px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.setup-initialization-stages li > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.setup-initialization-stages li strong {
+  color: inherit;
+  font-size: 10px;
+  font-weight: 580;
+  line-height: 1.4;
+}
+
+.setup-initialization-stages li small {
+  color: var(--faint);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.setup-initialization-stages li.active {
+  border-color: color-mix(in oklab, var(--accent) 48%, var(--border-subtle));
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface-1));
+}
+
+.setup-initialization-stages li.active > i {
+  border-color: transparent;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 14%, transparent);
+  animation: setup-progress-pulse 1.4s ease-in-out infinite;
+}
+
+.setup-initialization-stages li.complete {
+  color: var(--text-soft);
+}
+
+.setup-initialization-stages li.complete > i {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+@keyframes setup-progress-pulse {
+  50% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
 .setup-confirm {
   display: flex;
   min-height: 40px;

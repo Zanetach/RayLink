@@ -680,6 +680,9 @@ export async function createRayLinkApp(options) {
         sendJson(response, 200, {
           state: setup.state,
           ...(setup.state === "SETUP_PENDING" ? { expiresAt: setup.expiresAt } : {}),
+          ...(setup.state === "INITIALIZING" && setup.progress
+            ? { progress: setup.progress }
+            : {}),
           version: 1
         });
         return;
@@ -725,15 +728,37 @@ export async function createRayLinkApp(options) {
         store.beginSetupInitialization();
         let accessActivation = null;
         try {
+          store.updateSetupProgress({
+            stage: "runtime",
+            current: 1,
+            total: 3,
+            message: options.runtimeMode === "systemd"
+              ? "正在发布本机 sing-box Runtime"
+              : "正在准备本机 sing-box Runtime"
+          });
           if (options.runtimeMode === "systemd") {
             await runLocalRuntimeOperation(
               "首次配置发布",
               () => runtimeManager.publish(null)
             );
           }
+          store.updateSetupProgress({
+            stage: "access",
+            current: 2,
+            total: 3,
+            message: input.certificate.mode === "caddy-auto"
+              ? "正在配置 Caddy 并申请 HTTPS 证书"
+              : "正在应用访问入口配置"
+          });
           if (input.certificate.mode === "caddy-auto") {
             accessActivation = await setupAccessManager.activate(input);
           }
+          store.updateSetupProgress({
+            stage: "account",
+            current: 3,
+            total: 3,
+            message: "正在创建管理员并完成初始化"
+          });
           const admin = store.completeSetup(input);
           accessActivation = null;
           authAttempts.delete(attemptKey);

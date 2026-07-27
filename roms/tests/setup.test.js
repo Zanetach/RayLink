@@ -99,6 +99,22 @@ test("setup form keeps validation feedback inside the RayLink interface", async 
   assert.match(script, /管理员密码至少需要 12 位/);
 });
 
+test("setup page exposes durable initialization progress instead of only disabling submit", async () => {
+  const setupPage = new URL("../web/setup.html", import.meta.url);
+  const setupScript = new URL("../web/setup.js", import.meta.url);
+  const [html, script] = await Promise.all([
+    readFile(setupPage, "utf8"),
+    readFile(setupScript, "utf8")
+  ]);
+
+  assert.match(html, /id="setup-initialization-progress"/);
+  assert.match(html, /data-initialization-stage="runtime"/);
+  assert.match(html, /data-initialization-stage="access"/);
+  assert.match(html, /data-initialization-stage="account"/);
+  assert.match(script, /monitorInitialization/);
+  assert.match(script, /\/api\/setup\/status/);
+});
+
 test("address roles stay user-configurable and each Host exposes its own node address", async () => {
   const setupPage = new URL("../web/setup.html", import.meta.url);
   const setupScript = new URL("../web/setup.js", import.meta.url);
@@ -190,11 +206,31 @@ test("the durable INITIALIZING state keeps the control plane locked and is recov
   t.after(() => testApp.close());
 
   testApp.app.store.beginSetupInitialization();
-  const initializing = await fetch(`${testApp.baseUrl}/api/setup/status`);
-  assert.deepEqual(await initializing.json(), {
-    state: "INITIALIZING",
-    version: 1
+  testApp.app.store.updateSetupProgress({
+    stage: "access",
+    current: 2,
+    total: 3,
+    message: "正在配置 Caddy 与 HTTPS"
   });
+  const initializing = await fetch(`${testApp.baseUrl}/api/setup/status`);
+  const initializingStatus = await initializing.json();
+  assert.equal(initializingStatus.state, "INITIALIZING");
+  assert.deepEqual(
+    {
+      stage: initializingStatus.progress.stage,
+      current: initializingStatus.progress.current,
+      total: initializingStatus.progress.total,
+      message: initializingStatus.progress.message
+    },
+    {
+      stage: "access",
+      current: 2,
+      total: 3,
+      message: "正在配置 Caddy 与 HTTPS"
+    }
+  );
+  assert.match(initializingStatus.progress.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(initializingStatus.version, 1);
 
   const bootstrap = await fetch(`${testApp.baseUrl}/api/bootstrap`);
   assert.equal(bootstrap.status, 423);
@@ -349,6 +385,11 @@ test("the one-time setup token initializes access, admin, and local runtime", as
 
 test("domain setup activates Caddy from the IP initialization entry point", async (t) => {
   const calls = [];
+  let releaseActivation;
+  let reportActivationStarted;
+  const activationStarted = new Promise((resolve) => {
+    reportActivationStarted = resolve;
+  });
   const setupAccessManager = {
     async preflight(input) {
       calls.push([
@@ -368,6 +409,10 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
         input.runtime.address,
         input.certificate.email
       ]);
+      reportActivationStarted();
+      await new Promise((resolve) => {
+        releaseActivation = resolve;
+      });
       return { rollback: async () => calls.push(["rollback"]) };
     }
   };
@@ -411,11 +456,30 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
     caddy: "passed"
   });
 
-  const completed = await requestJson(testApp.baseUrl, "/api/setup/complete", {
+  const completionRequest = requestJson(testApp.baseUrl, "/api/setup/complete", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   });
+  await activationStarted;
+  const activeProgress = await requestJson(testApp.baseUrl, "/api/setup/status");
+  assert.equal(activeProgress.status, 200);
+  assert.deepEqual(
+    {
+      state: activeProgress.body.state,
+      stage: activeProgress.body.progress.stage,
+      current: activeProgress.body.progress.current,
+      total: activeProgress.body.progress.total
+    },
+    {
+      state: "INITIALIZING",
+      stage: "access",
+      current: 2,
+      total: 3
+    }
+  );
+  releaseActivation();
+  const completed = await completionRequest;
   assert.equal(completed.status, 201, JSON.stringify(completed.body));
   assert.equal(completed.body.state, "READY");
   assert.equal(completed.body.redirectTo, "https://panel.example.com/");
@@ -661,7 +725,7 @@ test("the release package keeps every installer dependency executable", async ()
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const version = "0.2.2";
+  const version = "0.2.3";
   const architecture = process.arch === "arm64" ? "arm64" : "amd64";
   const releaseDirectory = join(directory, `v${version}`);
   const packageDirectory = join(directory, `raylink-${version}`);
@@ -709,7 +773,7 @@ test("one-command bootstrap verifies and prepares the matching release package",
     `file://${directory}`
   ]);
 
-  assert.match(result.stdout, /RayLink v0\.2\.2/);
+  assert.match(result.stdout, /RayLink v0\.2\.3/);
   assert.match(result.stdout, new RegExp(`linux-${architecture}`));
   assert.match(result.stdout, /SHA-256 校验通过/);
   assert.match(result.stdout, /RAYLINK_PUBLIC_IP=203\.0\.113\.10/);

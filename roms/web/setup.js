@@ -9,9 +9,19 @@ const stateLabel = document.querySelector("#setup-state-label");
 const expiryLabel = document.querySelector("#setup-expiry");
 const summary = document.querySelector("#setup-summary");
 const preflightElement = document.querySelector("#setup-preflight");
+const confirmationElement = document.querySelector(".setup-confirm");
+const initializationProgress = document.querySelector("#setup-initialization-progress");
+const initializationTitle = document.querySelector("#setup-initialization-title");
+const initializationMessage = document.querySelector("#setup-initialization-message");
+const initializationPercent = document.querySelector("#setup-initialization-percent");
+const initializationBar = document.querySelector("#setup-initialization-bar");
+const initializationStages = [...document.querySelectorAll("[data-initialization-stage]")];
 const previewMode = location.protocol === "file:";
 let currentStep = 0;
 let preflightPassed = false;
+let initializationMonitorActive = false;
+let initializationMonitorTimer = null;
+let initializationResume = false;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -213,7 +223,7 @@ async function runPreflight() {
   }
 }
 
-function showStep(index) {
+function showStep(index, { runChecks = true } = {}) {
   currentStep = Math.max(0, Math.min(steps.length - 1, index));
   steps.forEach((step, stepIndex) => {
     step.hidden = stepIndex !== currentStep;
@@ -228,10 +238,80 @@ function showStep(index) {
   submitButton.hidden = currentStep !== steps.length - 1;
   if (currentStep === steps.length - 1) {
     renderSummary();
-    void runPreflight();
+    if (runChecks) void runPreflight();
   }
   steps[currentStep].scrollTop = 0;
   steps[currentStep].querySelector("input, select, textarea")?.focus();
+}
+
+function renderInitializationProgress(progressState = {}, ready = false) {
+  const total = Math.max(1, Number(progressState.total) || 3);
+  const current = ready ? total : Math.max(0, Math.min(total, Number(progressState.current) || 0));
+  const percent = ready ? 100 : Math.round((current / total) * 100);
+  const stage = ready ? "complete" : progressState.stage || "starting";
+  initializationProgress.hidden = false;
+  preflightElement.hidden = true;
+  initializationTitle.textContent = ready
+    ? "初始化完成"
+    : progressState.message || "正在准备初始化";
+  initializationMessage.textContent = ready
+    ? "正在进入 RayLink 控制台…"
+    : "进度由服务器实时上报，刷新页面后仍可继续查看。";
+  initializationPercent.textContent = `${percent}%`;
+  initializationBar.style.width = `${percent}%`;
+
+  const stageIndex = initializationStages.findIndex(
+    (item) => item.dataset.initializationStage === stage
+  );
+  initializationStages.forEach((item, index) => {
+    item.classList.toggle("complete", ready || (stageIndex >= 0 && index < stageIndex));
+    item.classList.toggle("active", !ready && index === stageIndex);
+  });
+}
+
+function stopInitializationMonitor() {
+  initializationMonitorActive = false;
+  if (initializationMonitorTimer) {
+    clearTimeout(initializationMonitorTimer);
+    initializationMonitorTimer = null;
+  }
+}
+
+async function monitorInitialization() {
+  if (!initializationMonitorActive) return;
+  try {
+    const status = await api("/api/setup/status");
+    if (status.state === "READY") {
+      stopInitializationMonitor();
+      renderInitializationProgress({ current: 3, total: 3 }, true);
+      if (initializationResume) {
+        setTimeout(() => location.replace("/"), 450);
+      }
+      return;
+    }
+    if (status.state === "INITIALIZING") {
+      renderInitializationProgress(status.progress);
+    } else if (status.state === "SETUP_PENDING" && !initializationResume) {
+      renderInitializationProgress({
+        stage: "starting",
+        current: 0,
+        total: 3,
+        message: "正在等待服务器启动初始化"
+      });
+    } else {
+      stopInitializationMonitor();
+      initializationTitle.textContent = "初始化未完成";
+      initializationMessage.textContent = "服务器已恢复为可重试状态，请重新检查后提交。";
+      initializationPercent.textContent = "需重试";
+      errorElement.textContent = "初始化未完成，请刷新页面后重试。";
+      return;
+    }
+  } catch {
+    initializationMessage.textContent = "访问入口正在切换，正在重新连接服务器…";
+  }
+  if (initializationMonitorActive) {
+    initializationMonitorTimer = setTimeout(monitorInitialization, 900);
+  }
 }
 
 function setupPayload() {
@@ -292,15 +372,28 @@ form.addEventListener("submit", async (event) => {
   errorElement.textContent = "";
   submitButton.disabled = true;
   submitButton.textContent = "正在初始化…";
+  backButton.disabled = true;
+  confirmationElement.hidden = true;
+  initializationResume = false;
+  initializationMonitorActive = true;
+  renderInitializationProgress();
+  void monitorInitialization();
   try {
     const result = await api("/api/setup/complete", {
       method: "POST",
       body: JSON.stringify(setupPayload())
     });
+    stopInitializationMonitor();
+    renderInitializationProgress({ current: 3, total: 3 }, true);
     location.assign(result.redirectTo || "/");
   } catch (error) {
+    stopInitializationMonitor();
     errorElement.textContent = error.message;
     if (error.code === "SETUP_TOKEN_INVALID") showStep(0);
+    preflightElement.hidden = false;
+    initializationProgress.hidden = true;
+    confirmationElement.hidden = false;
+    backButton.disabled = false;
     submitButton.disabled = false;
     submitButton.textContent = "完成初始化";
   }
@@ -323,11 +416,24 @@ async function initialize() {
     location.replace("/");
     return;
   }
+  if (status.state === "INITIALIZING") {
+    stateLabel.textContent = "初始化正在进行";
+    expiryLabel.textContent = "可安全刷新页面，进度会从服务器恢复";
+    summary.hidden = true;
+    confirmationElement.hidden = true;
+    showStep(steps.length - 1, { runChecks: false });
+    backButton.disabled = true;
+    submitButton.disabled = true;
+    submitButton.textContent = "正在初始化…";
+    initializationResume = true;
+    initializationMonitorActive = true;
+    renderInitializationProgress(status.progress);
+    void monitorInitialization();
+    return;
+  }
   stateLabel.textContent = status.state === "UNINITIALIZED"
     ? "尚未生成初始化令牌"
-    : status.state === "INITIALIZING"
-      ? "初始化正在进行"
-      : "等待完成首次初始化";
+    : "等待完成首次初始化";
   expiryLabel.textContent = status.state === "UNINITIALIZED"
     ? "请在服务器运行 /opt/raylink/deploy/rotate-setup-token.sh"
     : status.expiresAt

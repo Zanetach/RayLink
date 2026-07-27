@@ -702,10 +702,18 @@ export class RayLinkStore {
     ).get();
     if (existing) {
       if (existing.value === "INITIALIZING") {
-        this.db.prepare(`
-          UPDATE settings SET value = 'SETUP_PENDING', updated_at = ?
-          WHERE key = 'setup_state'
-        `).run(nowIso());
+        try {
+          this.db.exec("BEGIN IMMEDIATE");
+          this.db.prepare(`
+            UPDATE settings SET value = 'SETUP_PENDING', updated_at = ?
+            WHERE key = 'setup_state'
+          `).run(nowIso());
+          this.db.prepare("DELETE FROM settings WHERE key = 'setup_progress'").run();
+          this.db.exec("COMMIT");
+        } catch (error) {
+          this.db.exec("ROLLBACK");
+          throw error;
+        }
         existing.value = "SETUP_PENDING";
       }
       if (
@@ -746,7 +754,7 @@ export class RayLinkStore {
       SELECT key, value FROM settings
       WHERE key IN (
         'setup_state', 'setup_token_expires_at', 'canonical_origin', 'subscription_origin',
-        'allowed_origins', 'access_mode', 'certificate_mode'
+        'allowed_origins', 'access_mode', 'certificate_mode', 'setup_progress'
       )
     `).all();
     const settings = Object.fromEntries(rows.map((row) => [row.key, row.value]));
@@ -755,6 +763,9 @@ export class RayLinkStore {
       state,
       ...(state === "SETUP_PENDING"
         ? { expiresAt: settings.setup_token_expires_at || null }
+        : {}),
+      ...(state === "INITIALIZING" && settings.setup_progress
+        ? { progress: parseJson(settings.setup_progress, null) }
         : {}),
       access: settings.canonical_origin
         ? {
@@ -782,20 +793,68 @@ export class RayLinkStore {
   }
 
   beginSetupInitialization() {
-    const result = this.db.prepare(`
-      UPDATE settings SET value = 'INITIALIZING', updated_at = ?
-      WHERE key = 'setup_state' AND value = 'SETUP_PENDING'
-    `).run(nowIso());
-    if (result.changes !== 1) {
-      throw domainError("SETUP_IN_PROGRESS", "RayLink 正在初始化或已经完成", 409);
+    const timestamp = nowIso();
+    const progress = {
+      stage: "starting",
+      current: 0,
+      total: 3,
+      message: "正在准备初始化",
+      updatedAt: timestamp
+    };
+    try {
+      this.db.exec("BEGIN IMMEDIATE");
+      const result = this.db.prepare(`
+        UPDATE settings SET value = 'INITIALIZING', updated_at = ?
+        WHERE key = 'setup_state' AND value = 'SETUP_PENDING'
+      `).run(timestamp);
+      if (result.changes !== 1) {
+        throw domainError("SETUP_IN_PROGRESS", "RayLink 正在初始化或已经完成", 409);
+      }
+      this.db.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES ('setup_progress', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).run(JSON.stringify(progress), timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
+    return progress;
+  }
+
+  updateSetupProgress({ stage, current, total, message }) {
+    if (this.setupStatus().state !== "INITIALIZING") {
+      throw domainError("SETUP_NOT_INITIALIZING", "初始化当前未在执行", 409);
+    }
+    const timestamp = nowIso();
+    const progress = {
+      stage: String(stage || "starting"),
+      current: Math.max(0, Number.parseInt(current, 10) || 0),
+      total: Math.max(1, Number.parseInt(total, 10) || 3),
+      message: String(message || "正在初始化"),
+      updatedAt: timestamp
+    };
+    progress.current = Math.min(progress.current, progress.total);
+    this.db.prepare(`
+      INSERT INTO settings (key, value, updated_at) VALUES ('setup_progress', ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(JSON.stringify(progress), timestamp);
+    return progress;
   }
 
   failSetupInitialization() {
-    this.db.prepare(`
-      UPDATE settings SET value = 'SETUP_PENDING', updated_at = ?
-      WHERE key = 'setup_state' AND value = 'INITIALIZING'
-    `).run(nowIso());
+    try {
+      this.db.exec("BEGIN IMMEDIATE");
+      this.db.prepare(`
+        UPDATE settings SET value = 'SETUP_PENDING', updated_at = ?
+        WHERE key = 'setup_state' AND value = 'INITIALIZING'
+      `).run(nowIso());
+      this.db.prepare("DELETE FROM settings WHERE key = 'setup_progress'").run();
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   completeSetup({ access, certificate, admin, runtime }) {
@@ -828,7 +887,7 @@ export class RayLinkStore {
       upsert.run("access_mode", access.mode, timestamp);
       upsert.run("certificate_mode", certificate.mode, timestamp);
       this.db.prepare(
-        "DELETE FROM settings WHERE key IN ('setup_token_hash', 'setup_token_expires_at')"
+        "DELETE FROM settings WHERE key IN ('setup_token_hash', 'setup_token_expires_at', 'setup_progress')"
       ).run();
 
       this.db.prepare(`

@@ -7,7 +7,7 @@
   <title>初始化 RayLink</title>
   <link rel="icon" href="./assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css?v=0.2.2-20260727">
-  <link rel="stylesheet" href="./setup.css?v=0.2.2-20260802">
+  <link rel="stylesheet" href="./setup.css?v=0.2.3-20260727">
 </head>
 <body class="setup-page">
   <a class="skip-link" href="#setup-main">跳到初始化表单</a>
@@ -143,6 +143,32 @@
           <div class="setup-preflight" id="setup-preflight" aria-live="polite">
             正在检查访问入口与 Runtime…
           </div>
+          <section class="setup-initialization-progress" id="setup-initialization-progress" aria-live="polite" hidden>
+            <header>
+              <span>
+                <strong id="setup-initialization-title">正在准备初始化</strong>
+                <small id="setup-initialization-message">请保持此页面打开，刷新后也可继续查看。</small>
+              </span>
+              <b id="setup-initialization-percent">0%</b>
+            </header>
+            <div class="setup-initialization-track" aria-hidden="true">
+              <i id="setup-initialization-bar"></i>
+            </div>
+            <ol class="setup-initialization-stages">
+              <li data-initialization-stage="runtime">
+                <i aria-hidden="true"></i>
+                <span><strong>发布本机 Runtime</strong><small>验证并应用 sing-box 配置</small></span>
+              </li>
+              <li data-initialization-stage="access">
+                <i aria-hidden="true"></i>
+                <span><strong>配置访问入口与 HTTPS</strong><small>应用 Caddy 并等待证书签发</small></span>
+              </li>
+              <li data-initialization-stage="account">
+                <i aria-hidden="true"></i>
+                <span><strong>创建管理员并完成</strong><small>保存 Host 与控制台配置</small></span>
+              </li>
+            </ol>
+          </section>
           <label class="setup-confirm">
             <input name="confirmed" type="checkbox" required>
             <span>我已确认管理入口可达，并已安全保存管理员凭据。</span>
@@ -158,6 +184,6 @@
       </form>
     </section>
   </main>
-  <script defer src="./setup.js?v=0.2.2-20260803"></script>
+  <script defer src="./setup.js?v=0.2.3-20260727"></script>
 </body>
 </html>
