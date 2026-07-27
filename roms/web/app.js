@@ -496,14 +496,123 @@ function trafficPath(values, maxValue) {
   }).join(" ");
 }
 
+function topologyPositions(count) {
+  if (count <= 0) return [];
+  if (count === 1) return [{ x: 760, y: 160 }];
+  const radiusX = count > 8 ? 390 : 360;
+  const radiusY = count > 8 ? 126 : 116;
+  const startAngle = count === 2 ? 0 : -Math.PI / 2;
+  return Array.from({ length: count }, (_, index) => {
+    const angle = startAngle + (Math.PI * 2 * index) / count;
+    return {
+      x: Math.round(500 + Math.cos(angle) * radiusX),
+      y: Math.round(160 + Math.sin(angle) * radiusY)
+    };
+  });
+}
+
+function topologyHostState(host, runtime) {
+  if (host.id === "local" || host.kind !== "remote") {
+    const online = ["running", "staged"].includes(runtime.state);
+    return {
+      className: online ? "online" : "offline",
+      label: online ? "运行中" : "待发布",
+      online
+    };
+  }
+  if (host.status === "online") {
+    const runtimeHealthy = !host.telemetry?.serviceStatus
+      || host.telemetry.serviceStatus === "running";
+    return {
+      className: runtimeHealthy ? "online" : "warning",
+      label: runtimeHealthy ? "在线" : "Runtime 异常",
+      online: runtimeHealthy
+    };
+  }
+  if (host.status === "pending") {
+    return { className: "pending", label: "等待接入", online: false };
+  }
+  if (host.status === "degraded") {
+    return { className: "warning", label: "发布失败", online: false };
+  }
+  return { className: "offline", label: "离线", online: false };
+}
+
+function renderHostTopology(hosts, runtime) {
+  const topology = document.querySelector("#host-topology");
+  if (!topology) return;
+  const panelX = 500;
+  const panelY = 160;
+  const positions = topologyPositions(hosts.length);
+  const hostStates = hosts.map((host) => topologyHostState(host, runtime));
+  const links = hosts.map((host, index) => {
+    const position = positions[index];
+    const state = hostStates[index];
+    return `
+      <line
+        class="topology-link ${state.className}"
+        data-topology-link="${escapeHtml(host.id)}"
+        x1="${panelX}"
+        y1="${panelY}"
+        x2="${position.x}"
+        y2="${position.y}"
+        vector-effect="non-scaling-stroke"
+      />`;
+  }).join("");
+  const nodes = hosts.map((host, index) => {
+    const position = positions[index];
+    const state = hostStates[index];
+    const type = host.id === "local" || host.kind !== "remote"
+      ? "本机 Runtime"
+      : "RayLink Node";
+    return `
+      <button
+        type="button"
+        class="map-node topology-node ${state.className}"
+        data-topology-host="${escapeHtml(host.id)}"
+        data-open-host="${escapeHtml(host.id)}"
+        style="--topology-x:${(position.x / 10).toFixed(1)}%;--topology-y:${(position.y / 3.2).toFixed(1)}%"
+        aria-label="${escapeHtml(`${host.name}，${state.label}`)}"
+      >
+        <span class="topology-node-mark"><i></i>SB</span>
+        <span class="topology-node-copy">
+          <strong>${escapeHtml(host.name)}</strong>
+          <small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small>
+          <em><i></i>${escapeHtml(type)} · ${escapeHtml(state.label)}</em>
+        </span>
+      </button>`;
+  }).join("");
+  const panelHost = location.hostname || "Control Plane";
+  topology.innerHTML = `
+    <svg class="topology-links" viewBox="0 0 1000 320" preserveAspectRatio="none" aria-hidden="true">
+      ${links}
+    </svg>
+    <div class="map-origin topology-panel">
+      <span class="topology-panel-mark"><img src="/assets/brand/raylink-mark.svg?v=20260726" alt=""></span>
+      <span><strong>RayLink Panel</strong><small>${escapeHtml(panelHost)}</small></span>
+      <em><i></i>控制面在线</em>
+    </div>
+    ${nodes || '<span class="topology-empty">尚未添加 Runtime Host</span>'}
+  `;
+  const healthyCount = hostStates.filter((state) => state.online).length;
+  const status = document.querySelector("#host-map-status");
+  status.className = healthyCount === hosts.length && hosts.length
+    ? "online"
+    : healthyCount > 0
+      ? "partial"
+      : "offline";
+  status.innerHTML = `<i></i>${healthyCount}/${hosts.length} 个 Host 在线`;
+}
+
 function renderHosts() {
   if (!elements.hostBody) return;
   const hosts = controlPlane.hosts;
+  const runtime = controlPlane.runtime || { state: "unknown", mode: "dry-run" };
+  renderHostTopology(hosts, runtime);
   if (!hosts.length) {
     elements.hostBody.innerHTML = '<tr><td colspan="7"><div class="empty-state">尚未配置 Runtime 主机</div></td></tr>';
     return;
   }
-  const runtime = controlPlane.runtime || { state: "unknown", mode: "dry-run" };
   elements.hostBody.innerHTML = hosts.map((host) => {
     const protocolLabels = (host.protocols || [])
       .filter((profile) => profile.enabled)
@@ -562,12 +671,6 @@ function renderHosts() {
     </tr>`;
   }).join("");
   const host = hosts.find((item) => item.id === "local") || hosts[0];
-  const healthyCount = hosts.filter((item) => item.id === "local"
-    ? ["running", "staged"].includes(runtime.state)
-    : item.status === "online").length;
-  document.querySelector("#host-map-name").textContent = host.name;
-  document.querySelector("#host-map-address").textContent = `${host.address} · ${host.region}`;
-  document.querySelector("#host-map-status").innerHTML = `<i></i>${healthyCount}/${hosts.length} 个节点在线`;
   const managedTargetName = document.querySelector("#managed-target-name");
   if (managedTargetName) managedTargetName.textContent = host.name;
   document.querySelectorAll('.nav-item[data-view-target="system"] .nav-count').forEach((count) => {

@@ -2034,6 +2034,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /aria-controls="profile-menu"/);
   assert.doesNotMatch(indexHtml, /role="menu(item)?"/);
   assert.match(indexHtml, /class="mobile-nav"[^>]*hidden/);
+  assert.match(indexHtml, /id="host-topology"/);
+  assert.doesNotMatch(indexHtml, /route-one/);
 
   const scriptResponse = await fetch(`${testApp.baseUrl}/app.js`);
   assert.equal(scriptResponse.status, 200);
@@ -2043,6 +2045,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
   assert.doesNotMatch(appScript, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
   assert.match(appScript, /api\("\/api\/auth\/logout"/);
+  assert.match(appScript, /renderHostTopology/);
+  assert.match(appScript, /data-topology-host=/);
+  assert.match(appScript, /data-topology-link=/);
 
   const logoResponse = await fetch(
     `${testApp.baseUrl}/assets/brand/raylink-mark.svg`

@@ -6,7 +6,7 @@
   <meta name="description" content="RayLink sing-box 多用户控制台前端原型">
   <title>RayLink · sing-box control plane</title>
   <link rel="icon" href="/assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=0.2.2-20260727">
+  <link rel="stylesheet" href="./styles.css?v=0.2.3-20260727-topology">
 </head>
 <body>
   <section class="auth-screen" id="admin-auth" aria-labelledby="admin-auth-title">
@@ -385,10 +385,8 @@
           <div data-system-panel="hosts">
             <section class="host-map">
               <div class="map-header"><span>控制面与节点拓扑</span><span id="host-map-status"><i></i>等待连接</span></div>
-              <div class="map-stage" aria-label="RayLink 控制面到 sing-box Runtime 的拓扑">
-                <div class="map-route route-one"></div>
-                <button class="map-node tokyo" data-open-host="local"><i></i><span><strong id="host-map-name">本机 Runtime</strong><small id="host-map-address">尚未配置</small></span></button>
-                <span class="map-origin">RayLink 控制面</span>
+              <div class="map-stage" id="host-topology" aria-label="以 RayLink Panel 为中心的 Host 网络拓扑">
+                <span class="map-loading">正在读取 Host 网络…</span>
               </div>
             </section>
             <section class="table-panel host-table">
@@ -439,6 +437,6 @@
     <div class="toast" id="toast"><span><svg><use href="#i-check"/></svg></span><div><strong id="toast-title">已保存</strong><p id="toast-message">设置已经更新。</p></div></div>
   </div>
 
-  <script src="./app.js?v=0.2.2-20260803"></script>
+  <script src="./app.js?v=0.2.3-20260727-topology"></script>
 </body>
 </html>
