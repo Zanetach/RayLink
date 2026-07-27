@@ -2213,6 +2213,14 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(meteredBuilder, /with_v2ray_api/);
   assert.match(meteredBuilder, /sha256sum -c/);
 
+  const firewallTmpfilesResponse = await fetch(
+    `${testApp.baseUrl}/node/raylink-ufw.tmpfiles.conf`
+  );
+  assert.equal(firewallTmpfilesResponse.status, 200);
+  const firewallTmpfiles = await firewallTmpfilesResponse.text();
+  assert.match(firewallTmpfiles, /^f \/run\/ufw\.lock 0644 root root -$/m);
+  assert.match(firewallTmpfiles, /^f \/run\/xtables\.lock 0600 root root -$/m);
+
   const nodeRuntimeResponse = await fetch(`${testApp.baseUrl}/node/raylink-node.mjs`);
   assert.equal(nodeRuntimeResponse.status, 200);
   assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);

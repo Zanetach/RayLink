@@ -245,6 +245,10 @@ ln -sfn "$managed_root/99-raylink-bbr.conf" /etc/sysctl.d/99-raylink-bbr.conf
 
 cp "$install_root/deploy/raylink.service" /etc/systemd/system/raylink.service
 cp "$install_root/deploy/sing-box-raylink.service" /etc/systemd/system/sing-box-raylink.service
+install -m 0644 \
+  "$install_root/web/node/raylink-ufw.tmpfiles.conf" \
+  /usr/lib/tmpfiles.d/raylink-ufw.conf
+systemd-tmpfiles --create /usr/lib/tmpfiles.d/raylink-ufw.conf
 caddyfile_backup="$temporary_root/Caddyfile.before-raylink"
 cp -a /etc/caddy/Caddyfile "$caddyfile_backup"
 sed "s|__RAYLINK_PUBLIC_HOST__|${public_host}|g" \

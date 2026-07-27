@@ -58,6 +58,11 @@ esac
 install -d -m 0755 "$RAYLINK_NODE_ROOT"
 install -d -m 0700 /etc/raylink-node
 install -d -m 0750 /var/lib/raylink-node/sing-box
+install -d -m 0755 /etc/tmpfiles.d
+curl -fsSL "$RAYLINK_SERVER/node/raylink-ufw.tmpfiles.conf" \
+  -o /etc/tmpfiles.d/raylink-node-ufw.conf
+chmod 0644 /etc/tmpfiles.d/raylink-node-ufw.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/raylink-node-ufw.conf
 temporary_root="$(mktemp -d)"
 trap 'rm -rf "$temporary_root"' EXIT
 
@@ -141,7 +146,7 @@ chmod 0600 /etc/raylink-node/node.env
 cat > /etc/systemd/system/raylink-sing-box.service <<EOF
 [Unit]
 Description=RayLink managed sing-box runtime
-After=network-online.target
+After=network-online.target systemd-tmpfiles-setup.service
 Wants=network-online.target
 ConditionPathExists=/var/lib/raylink-node/sing-box/config.json
 
@@ -177,7 +182,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/etc/raylink-node /var/lib/raylink-node /opt/raylink-node /usr/local/bin
+ReadWritePaths=/etc/raylink-node /var/lib/raylink-node /opt/raylink-node /usr/local/bin -/run/ufw.lock -/run/xtables.lock -/etc/ufw/user.rules -/etc/ufw/user6.rules
 
 [Install]
 WantedBy=multi-user.target

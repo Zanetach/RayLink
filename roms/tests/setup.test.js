@@ -747,7 +747,7 @@ test("the release package keeps every installer dependency executable", async ()
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const version = "0.2.4";
+  const version = "0.2.5";
   const architecture = process.arch === "arm64" ? "arm64" : "amd64";
   const releaseDirectory = join(directory, `v${version}`);
   const packageDirectory = join(directory, `raylink-${version}`);
@@ -795,7 +795,7 @@ test("one-command bootstrap verifies and prepares the matching release package",
     `file://${directory}`
   ]);
 
-  assert.match(result.stdout, /RayLink v0\.2\.4/);
+  assert.match(result.stdout, new RegExp(`RayLink v${version.replaceAll(".", "\\.")}`));
   assert.match(result.stdout, new RegExp(`linux-${architecture}`));
   assert.match(result.stdout, /SHA-256 校验通过/);
   assert.match(result.stdout, /RAYLINK_PUBLIC_IP=203\.0\.113\.10/);

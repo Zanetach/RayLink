@@ -11,10 +11,6 @@ test("production Caddy entry point preserves private subscription URLs", async (
     new URL("../deploy/install-control-plane.sh", import.meta.url),
     "utf8"
   );
-  const service = await readFile(
-    new URL("../deploy/raylink.service", import.meta.url),
-    "utf8"
-  );
   const environmentExample = await readFile(
     new URL("../deploy/raylink.env.example", import.meta.url),
     "utf8"
@@ -38,9 +34,47 @@ test("production Caddy entry point preserves private subscription URLs", async (
   assert.match(installer, /ufw allow 443\/tcp/);
   assert.match(installer, /systemctl enable --now caddy/);
   assert.doesNotMatch(installer, /systemctl enable --now nginx/);
-  assert.match(service, /ReadWritePaths=\/var\/lib\/raylink \/usr\/local\/bin/);
-  assert.doesNotMatch(service, /ReadWritePaths=.*\/etc\/caddy(?:\s|$)/);
-  assert.doesNotMatch(service, /ReadWritePaths=.*\/etc\/raylink(?:\s|$)/);
   assert.match(environmentExample, /RAYLINK_SUBSCRIPTION_ORIGIN=https:\/\/sub\.example\.com/);
   assert.match(environmentExample, /RAYLINK_PROXY_HOST=node\.example\.com/);
+});
+
+test("systemd sandboxes permit only RayLink-managed UFW rule files", async () => {
+  const installer = await readFile(
+    new URL("../deploy/install-control-plane.sh", import.meta.url),
+    "utf8"
+  );
+  const service = await readFile(
+    new URL("../deploy/raylink.service", import.meta.url),
+    "utf8"
+  );
+  const nodeInstaller = await readFile(
+    new URL("../web/node/install.sh", import.meta.url),
+    "utf8"
+  );
+  const firewallTmpfiles = await readFile(
+    new URL("../web/node/raylink-ufw.tmpfiles.conf", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(installer, /systemd-tmpfiles --create \/usr\/lib\/tmpfiles\.d\/raylink-ufw\.conf/);
+  assert.match(
+    service,
+    /ReadWritePaths=\/var\/lib\/raylink \/usr\/local\/bin -\/run\/ufw\.lock -\/run\/xtables\.lock -\/etc\/ufw\/user\.rules -\/etc\/ufw\/user6\.rules/
+  );
+  assert.doesNotMatch(service, /ReadWritePaths=.*\/etc\/caddy(?:\s|$)/);
+  assert.doesNotMatch(service, /ReadWritePaths=.*\/etc\/raylink(?:\s|$)/);
+  assert.match(
+    nodeInstaller,
+    /ReadWritePaths=\/etc\/raylink-node \/var\/lib\/raylink-node \/opt\/raylink-node \/usr\/local\/bin -\/run\/ufw\.lock -\/run\/xtables\.lock -\/etc\/ufw\/user\.rules -\/etc\/ufw\/user6\.rules/
+  );
+  assert.match(
+    nodeInstaller,
+    /curl -fsSL "\$RAYLINK_SERVER\/node\/raylink-ufw\.tmpfiles\.conf"/
+  );
+  assert.match(
+    nodeInstaller,
+    /systemd-tmpfiles --create \/etc\/tmpfiles\.d\/raylink-node-ufw\.conf/
+  );
+  assert.match(firewallTmpfiles, /^f \/run\/ufw\.lock 0644 root root -$/m);
+  assert.match(firewallTmpfiles, /^f \/run\/xtables\.lock 0600 root root -$/m);
 });

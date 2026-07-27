@@ -1,6 +1,6 @@
 [Unit]
 Description=RayLink sing-box control plane
-After=network-online.target
+After=network-online.target systemd-tmpfiles-setup.service
 Wants=network-online.target
 
 [Service]
@@ -16,7 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/raylink /usr/local/bin
+ReadWritePaths=/var/lib/raylink /usr/local/bin -/run/ufw.lock -/run/xtables.lock -/etc/ufw/user.rules -/etc/ufw/user6.rules
 LockPersonality=true
 RestrictSUIDSGID=true
 
