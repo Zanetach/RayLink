@@ -705,8 +705,6 @@ test("one-command bootstrap verifies and prepares the matching release package",
     "--dry-run",
     "--public-ip",
     "203.0.113.10",
-    "--version",
-    version,
     "--release-base-url",
     `file://${directory}`
   ]);
@@ -825,7 +823,7 @@ test("one-command bootstrap verifies and prepares the matching release package",
       }
     }),
     (error) => {
-      assert.match(error.stderr, /v0\.2\.0 发布包仅提供 linux-amd64/);
+      assert.match(error.stderr, /官方发布包目前仅提供 linux-amd64/);
       return true;
     }
   );
