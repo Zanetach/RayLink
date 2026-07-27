@@ -60,6 +60,17 @@
     a { color: inherit; text-decoration: none; }
     ::selection { color: var(--night); background: var(--cyan); }
     :focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
 
     .skip-link {
       position: fixed;
@@ -468,10 +479,10 @@
     }
 
     .blueprint { background: #eef0ea; color: #14242a; }
-    .blueprint .section-kicker { color: #347d78; }
-    .blueprint .section-kicker .index { color: #9a7633; }
+    .blueprint .section-kicker { color: #286c66; }
+    .blueprint .section-kicker .index { color: #755619; }
     .blueprint .section-title em { color: #916d2f; }
-    .blueprint .section-intro { color: #617074; }
+    .blueprint .section-intro { color: #536367; }
     .blueprint-grid {
       display: grid;
       grid-template-columns: .74fr 1.26fr;
@@ -502,7 +513,7 @@
       margin: 22px 0 0;
       padding-left: 16px;
       border-left: 2px solid #caa65e;
-      color: #617074;
+      color: #536367;
       font-size: 13px;
       line-height: 1.8;
     }
@@ -518,9 +529,9 @@
       min-height: 112px;
       border-bottom: 1px solid rgba(20,36,42,.16);
     }
-    .journey-step .num { color: #9a7633; font-family: var(--serif); font-size: 13px; }
+    .journey-step .num { color: #755619; font-family: var(--serif); font-size: 13px; }
     .journey-step h3 { margin: 0; font-size: 19px; letter-spacing: -.01em; font-weight: 650; }
-    .journey-step p { margin: 7px 0 0; color: #6d797c; font-size: 12px; line-height: 1.6; }
+    .journey-step p { margin: 7px 0 0; color: #536367; font-size: 12px; line-height: 1.6; }
     .journey-step .verb {
       min-width: 54px;
       padding: 7px 10px;
@@ -705,7 +716,7 @@
       justify-content: space-between;
       gap: 24px;
       border-top: 1px solid var(--line);
-      color: rgba(244,247,245,.42);
+      color: rgba(244,247,245,.68);
       font-size: 10px;
       letter-spacing: .1em;
     }
@@ -732,10 +743,16 @@
       -webkit-backdrop-filter: blur(12px);
       backdrop-filter: blur(12px);
       opacity: 0;
+      visibility: hidden;
       pointer-events: none;
-      transition: opacity .22s ease;
+      transition: opacity .22s ease, visibility 0s linear .22s;
     }
-    .dialog-backdrop.open { opacity: 1; pointer-events: auto; }
+    .dialog-backdrop.open {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transition-delay: 0s;
+    }
     .dialog {
       width: min(620px, 100%);
       max-height: min(720px, calc(100vh - 40px));
@@ -887,7 +904,7 @@
     <section class="hero" id="top">
       <div class="hero-grid shell">
         <div>
-          <div class="eyebrow reveal">Project Kickoff · 2026</div>
+          <div class="eyebrow reveal">Project Kickoff</div>
           <h1 class="reveal delay-1">
             <span class="line"><span class="accent">AI</span>智能客服</span>
             <span class="line project-name">项目启动会</span>
@@ -929,7 +946,7 @@
         <div class="section-kicker reveal"><span class="index">01</span>Project Consensus</div>
         <h2 class="section-title reveal delay-1">让AI不只会回答，<br />更要<em>理解、连接与转化</em></h2>
         <p class="section-intro reveal delay-2">
-          项目首期围绕高频咨询场景，建立统一知识底座与智能服务闭环；在提升响应效率的同时，延续鹏利海景一号专业、细致、有温度的客户体验。
+          建议首期围绕高频咨询场景，建立统一知识底座与智能服务闭环；在提升响应效率的同时，延续鹏利海景一号专业、细致、有温度的客户体验。
         </p>
 
         <div class="belief-grid">
@@ -1041,13 +1058,14 @@
 
     <section class="roles" aria-labelledby="roles-title">
       <div class="shell">
+        <h2 class="sr-only" id="roles-title">双方项目分工</h2>
         <div class="roles-grid">
           <article class="role reveal">
             <div class="role-brand">
-              <h3 id="roles-title">千蜂AI</h3>
+              <h3>千蜂AI</h3>
               <span>TECH PARTNER</span>
             </div>
-            <p class="role-lead">提供从能力搭建到上线运营的技术与方法支持，确保智能客服真正融入业务。</p>
+            <p class="role-lead">建议负责从能力搭建到上线运营的技术与方法支持，确保智能客服真正融入业务。</p>
             <div class="role-items">
               <div class="role-item"><span>01</span>平台搭建与配置</div>
               <div class="role-item"><span>02</span>知识工程与训练</div>
@@ -1060,7 +1078,7 @@
               <h3>鹏利海景一号</h3>
               <span>BUSINESS OWNER</span>
             </div>
-            <p class="role-lead">提供真实业务场景、服务标准与一线反馈，共同定义高品质智能服务体验。</p>
+            <p class="role-lead">建议负责提供真实业务场景、服务标准与一线反馈，共同定义高品质智能服务体验。</p>
             <div class="role-items">
               <div class="role-item"><span>01</span>场景与规则确认</div>
               <div class="role-item"><span>02</span>知识素材提供</div>
@@ -1078,8 +1096,8 @@
         <div class="agenda-layout">
           <div class="agenda-sticky reveal delay-1">
             <h2 class="section-title">今天，<br />我们对齐<em>六件事</em></h2>
-            <p>用一场高密度启动会，统一项目目标、范围、责任、节奏和下一步行动。</p>
-            <span class="agenda-total">TOTAL · 60 MIN</span>
+            <p>以下为建议议程，将在启动会上共同确认项目目标、范围、责任、节奏和下一步行动。</p>
+            <span class="agenda-total">建议时长 · 60 MIN</span>
           </div>
           <div class="agenda-list">
             <article class="agenda-item reveal">
@@ -1132,7 +1150,7 @@
 
   <footer class="shell">
     <span>QIANFENG AI × PENGLI HAIJING NO.1</span>
-    <span>AI CUSTOMER SERVICE · PROJECT KICKOFF 2026</span>
+    <span>AI CUSTOMER SERVICE · PROJECT KICKOFF</span>
   </footer>
 
   <div class="dialog-backdrop" id="dialogBackdrop" role="presentation">
