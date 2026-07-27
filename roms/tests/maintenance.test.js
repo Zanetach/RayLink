@@ -77,7 +77,7 @@ test("operational maintenance bounds completed task payloads per Host and task k
     hostname: "sg-vps-01",
     platform: "linux",
     architecture: "x64",
-    agentVersion: "0.6.0",
+    agentVersion: "0.7.0",
     runtimeVersion: "1.13.14"
   });
   const completedTaskIds = [];

@@ -237,6 +237,7 @@ export class ProtocolActivationManager {
     portManager = new LocalPortManager(),
     firewallManager = new UfwFirewallManager(),
     publicProbe = new PublicConnectivityProbe(),
+    protocolProbe = null,
     certificateEmail = () => "",
     certificateProvider = null,
     randomBytes = cryptoRandomBytes,
@@ -248,6 +249,7 @@ export class ProtocolActivationManager {
     this.portManager = portManager;
     this.firewallManager = firewallManager;
     this.publicProbe = publicProbe;
+    this.protocolProbe = protocolProbe;
     this.certificateEmail = certificateEmail;
     this.certificateProvider = certificateProvider;
     this.randomBytes = randomBytes;
@@ -499,11 +501,18 @@ export class ProtocolActivationManager {
       this.record(hostId, type, "port-listening", { progress: 85, port: saved.port });
       let publicCheck = { reachable: null, reason: "仅本机协议不执行公网探测" };
       if (policy.exposure === "public" && this.runtimeMode !== "dry-run") {
-        publicCheck = await this.publicProbe.verify({
-          address: host.address,
-          port: saved.port,
-          network: policy.network
-        });
+        publicCheck = policy.network === "udp" && this.protocolProbe
+          ? await this.protocolProbe({
+              type,
+              address: host.address,
+              port: saved.port,
+              network: policy.network
+            })
+          : await this.publicProbe.verify({
+              address: host.address,
+              port: saved.port,
+              network: policy.network
+            });
       } else if (policy.exposure === "public") {
         publicCheck = { reachable: true, simulated: true };
       }

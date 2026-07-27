@@ -66,7 +66,7 @@ flowchart LR
 | 管理员登录、用户 CRUD | 已实现 | 可用 |
 | User Entitlement：到期、流量额度、Host 范围 | 已实现 | 真实字节计量、跨 Host 累计和超额撤权已贯通 |
 | 多 Host 接入与一次性令牌 | 已实现 | 需干净 VPS 验收 |
-| RayLink Node 心跳和远程任务 | 已实现 | 0.6.0 支持协议端口、防火墙、监听和公网检查；旧版暂停领任务并提示升级 |
+| RayLink Node 心跳和远程任务 | 已实现 | 0.7.0 支持协议端口、防火墙、监听及 Hysteria/TUIC 专用外部探针；旧版暂停领任务并提示升级 |
 | CPU、内存、网络、服务遥测 | 已实现 | 需长期稳定性验收 |
 | sing-box 固定版本安装 | 已修正为 1.13.14 | 需 Ubuntu/Debian 实机验收 |
 | sing-box 在线升级 | 已实现 | 官方稳定版检查、同系列兼容门禁、二进制备份、配置校验、健康检查和自动回滚 |
@@ -176,7 +176,7 @@ POST /api/portal/subscription/rotate
 - TProxy
 - Direct
 
-一键启用事务自动选择空闲端口、生成 Runtime Credential/Reality 密钥、绑定节点域名证书、配置 TCP/UDP 防火墙、运行 `sing-box check`、原子发布、检查监听和公网连接，并在任何失败时恢复配置与 RayLink 新增的防火墙规则。远程节点发现系统端口冲突时会在本机扫描并回报下一个空闲候选端口，控制面只重试该端口。
+一键启用事务自动选择空闲端口、生成 Runtime Credential/Reality 密钥、绑定节点域名证书、配置 TCP/UDP 防火墙、运行 `sing-box check`、原子发布、检查监听和公网连接，并在任何失败时恢复配置与 RayLink 新增的防火墙规则。远程节点发现系统端口冲突时会在本机扫描并回报下一个空闲候选端口，控制面只重试该端口。Hysteria、TUIC 与 Hysteria2 会进一步生成一次性客户端配置，通过真实协议握手访问 `RAYLINK_PROTOCOL_PROBE_URL`；只有握手与外部 HTTP 请求同时成功才进入“公网可用”状态。
 
 后续增强需支持同一协议创建多个实例，实例标识作为 inbound tag，端口必须做跨协议、跨实例冲突校验。保存前按目标 Host 校验：
 

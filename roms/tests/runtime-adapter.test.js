@@ -115,3 +115,77 @@ process.exit(args[0] === "check" ? 0 : 2);
     "{\"inbounds\":[]}\n"
   );
 });
+
+test("local adapter verifies Hysteria and TUIC through sing-box tools fetch", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "raylink-runtime-protocol-probe-"));
+  const fakeBinary = join(dataDir, "fake-sing-box");
+  const probeRecord = join(dataDir, "probe.json");
+  await writeFile(fakeBinary, `#!${process.execPath}
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "version") {
+  console.log("sing-box version 1.13.14");
+  process.exit(0);
+}
+if (args[0] === "check") process.exit(0);
+if (args[0] === "tools" && args[1] === "fetch") {
+  const configPath = args[args.indexOf("-c") + 1];
+  fs.writeFileSync(${JSON.stringify(probeRecord)}, fs.readFileSync(configPath));
+  process.exit(0);
+}
+process.exit(2);
+`);
+  await chmod(fakeBinary, 0o755);
+  const adapter = new LocalSingBoxAdapter({
+    dataDir,
+    binaryPath: fakeBinary,
+    mode: "systemd"
+  });
+  adapter.restartSystemd = async () => {};
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  await adapter.publish({
+    version: "v1",
+    checksum: "first",
+    configText: JSON.stringify({
+      inbounds: [{
+        type: "tuic",
+        tag: "raylink-tuic",
+        listen: "::",
+        listen_port: 8447,
+        users: [{
+          name: "probe@example.com",
+          uuid: "d5d29d63-1dad-4e45-9d0b-d4a012b71015",
+          password: "probe-password"
+        }],
+        tls: {
+          enabled: true,
+          server_name: "node.example.com",
+          certificate_path: "/tmp/certificate.pem",
+          key_path: "/tmp/private-key.pem"
+        }
+      }]
+    })
+  });
+
+  const result = await adapter.probeProtocol({
+    type: "tuic",
+    address: "node.example.com",
+    port: 8447
+  });
+
+  assert.equal(result.reachable, true);
+  assert.equal(result.protocol, "tuic");
+  assert.deepEqual(JSON.parse(await readFile(probeRecord, "utf8")).outbounds, [{
+    type: "tuic",
+    tag: "raylink-probe",
+    server: "node.example.com",
+    server_port: 8447,
+    uuid: "d5d29d63-1dad-4e45-9d0b-d4a012b71015",
+    password: "probe-password",
+    congestion_control: "bbr",
+    tls: {
+      enabled: true,
+      server_name: "node.example.com"
+    }
+  }]);
+});

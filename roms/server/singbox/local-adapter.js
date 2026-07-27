@@ -3,6 +3,11 @@ import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:f
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import {
+  buildUdpProtocolProbeConfig,
+  DEFAULT_PROTOCOL_PROBE_URL
+} from "./protocol-probe.js";
+
 const execFile = promisify(execFileCallback);
 
 function commandFailure(error, fallback) {
@@ -17,7 +22,11 @@ export class LocalSingBoxAdapter {
     dataDir,
     binaryPath = "sing-box",
     mode = "dry-run",
-    systemdUnit = "sing-box.service"
+    systemdUnit = "sing-box.service",
+    protocolProbeUrl = DEFAULT_PROTOCOL_PROBE_URL,
+    protocolProbeAttempts = 3,
+    protocolProbeDelayMs = 1_000,
+    runner = execFile
   }) {
     if (!["dry-run", "systemd"].includes(mode)) throw new Error(`Unsupported runtime mode: ${mode}`);
     if (!/^[a-zA-Z0-9@_.-]+$/.test(systemdUnit)) throw new Error("Invalid systemd unit");
@@ -27,6 +36,10 @@ export class LocalSingBoxAdapter {
     this.binaryPath = binaryPath;
     this.mode = mode;
     this.systemdUnit = systemdUnit;
+    this.protocolProbeUrl = protocolProbeUrl;
+    this.protocolProbeAttempts = Math.max(1, Number(protocolProbeAttempts || 3));
+    this.protocolProbeDelayMs = Math.max(0, Number(protocolProbeDelayMs || 0));
+    this.runner = runner;
   }
 
   async binaryVersion() {
@@ -145,6 +158,64 @@ export class LocalSingBoxAdapter {
         configPath: this.activePath,
         runtimeVersion: null
       };
+    }
+  }
+
+  async probeProtocol({ type, address, port }) {
+    const serverConfig = JSON.parse(await readFile(this.activePath, "utf8"));
+    const probeConfig = buildUdpProtocolProbeConfig({
+      type,
+      address,
+      port,
+      serverConfig
+    });
+    const probePath = join(
+      this.runtimeDir,
+      `.protocol-probe-${type}-${process.pid}-${Date.now()}.json`
+    );
+    await writeFile(probePath, `${JSON.stringify(probeConfig, null, 2)}\n`, { mode: 0o600 });
+    try {
+      await this.runner(this.binaryPath, ["check", "-c", probePath], {
+        timeout: 15_000,
+        maxBuffer: 1024 * 1024
+      });
+      let lastError = null;
+      for (let attempt = 1; attempt <= this.protocolProbeAttempts; attempt += 1) {
+        try {
+          await this.runner(this.binaryPath, [
+            "tools",
+            "fetch",
+            "-c",
+            probePath,
+            "-o",
+            "raylink-probe",
+            this.protocolProbeUrl
+          ], {
+            timeout: 30_000,
+            maxBuffer: 1024 * 1024
+          });
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < this.protocolProbeAttempts && this.protocolProbeDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, this.protocolProbeDelayMs));
+          }
+        }
+      }
+      if (lastError) throw lastError;
+      return {
+        reachable: true,
+        probe: "sing-box-tools-fetch",
+        protocol: type,
+        target: this.protocolProbeUrl
+      };
+    } catch (error) {
+      const wrapped = commandFailure(error, `${type} 协议握手或外部访问失败`);
+      wrapped.code = "PROTOCOL_HANDSHAKE_FAILED";
+      throw wrapped;
+    } finally {
+      await rm(probePath, { force: true });
     }
   }
 }

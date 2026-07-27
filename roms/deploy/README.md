@@ -175,6 +175,10 @@ RayLink 的 systemd 模式会重启 `sing-box-raylink.service`。示例为了让
 外部 HTTPS 由 Caddy 提供。若要使用非 root 账号，应另外配置严格的 polkit、文件组和
 Caddy 管理权限。
 
+`RAYLINK_PROTOCOL_PROBE_URL` 用于 Hysteria、TUIC 和 Hysteria2 的协议级验收，
+默认是 `https://www.gstatic.com/generate_204`。节点会用刚发布的真实协议配置访问
+该 HTTPS 地址，成功后才报告“公网可用”；自定义地址必须稳定返回并使用受信任证书。
+
 ## Caddy 与域名初始化
 
 安装阶段 Caddy 使用 IP 证书代理 `127.0.0.1:4173`。在首次初始化界面选择域名后，

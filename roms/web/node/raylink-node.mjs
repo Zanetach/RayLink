@@ -32,9 +32,74 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const AGENT_VERSION = "0.6.0";
+const AGENT_VERSION = "0.7.0";
 const SECRET_ENVELOPE_ALGORITHM = "x25519-hkdf-sha256-aes-256-gcm";
 const SECRET_ENVELOPE_CONTEXT = Buffer.from("raylink-node-secret-v1", "utf8");
+const UDP_PROTOCOL_PROBE_TYPES = new Set(["hysteria", "tuic", "hysteria2"]);
+const DEFAULT_PROTOCOL_PROBE_URL = "https://www.gstatic.com/generate_204";
+
+export function buildUdpProtocolProbeConfig({ activation, configText }) {
+  const serverConfig = JSON.parse(configText);
+  const inbound = serverConfig.inbounds?.find((entry) => (
+    entry.type === activation.type
+    && Number(entry.listen_port) === Number(activation.port)
+  ));
+  if (!inbound) {
+    throw new Error(`找不到 ${activation.type} 的已发布入站配置`);
+  }
+  const user = inbound.users?.find((entry) => entry.name === "raylink-probe@internal")
+    || inbound.users?.[0];
+  if (!user) {
+    throw new Error(`${activation.type} 外部探针需要至少一个有效用户`);
+  }
+  const serverName = inbound.tls?.server_name;
+  if (!serverName) {
+    throw new Error(`${activation.type} 外部探针缺少 TLS 服务器名称`);
+  }
+  const common = {
+    type: activation.type,
+    tag: "raylink-probe",
+    server: activation.address,
+    server_port: activation.port
+  };
+  let outbound;
+  if (activation.type === "hysteria") {
+    outbound = {
+      ...common,
+      auth_str: user.auth_str,
+      up_mbps: inbound.up_mbps,
+      down_mbps: inbound.down_mbps
+    };
+  } else if (activation.type === "tuic") {
+    outbound = {
+      ...common,
+      uuid: user.uuid,
+      password: user.password,
+      congestion_control: "bbr"
+    };
+  } else if (activation.type === "hysteria2") {
+    outbound = { ...common, password: user.password };
+  } else {
+    throw new Error(`协议 ${activation.type} 不支持专用外部探针`);
+  }
+  outbound.tls = {
+    enabled: true,
+    server_name: serverName
+  };
+  return {
+    log: { disabled: true },
+    dns: {
+      servers: [{ type: "local", tag: "raylink-probe-dns" }],
+      final: "raylink-probe-dns",
+      strategy: "prefer_ipv4"
+    },
+    outbounds: [outbound],
+    route: {
+      final: "raylink-probe",
+      default_domain_resolver: "raylink-probe-dns"
+    }
+  };
+}
 
 function generateEncryptionKeypair() {
   const { publicKey, privateKey } = generateKeyPairSync("x25519");
@@ -336,7 +401,10 @@ async function runCommand(command, args, options = {}) {
     });
   } catch (error) {
     const detail = String(error.stderr || error.stdout || error.message).trim();
-    throw new Error(detail || `${command} 执行失败`);
+    const wrapped = new Error(detail || `${command} 执行失败`);
+    wrapped.code = error.code;
+    wrapped.cause = error;
+    throw wrapped;
   }
 }
 
@@ -454,6 +522,18 @@ export class NodeRuntimeAdapter {
     this.publicProbe = options.publicProbe || {
       verify: (activation) => this.verifyPublicConnectivity(activation)
     };
+    this.protocolProbe = options.protocolProbe || {
+      verify: (activation) => this.verifyUdpProtocol(activation)
+    };
+    this.protocolProbeUrl = options.protocolProbeUrl || DEFAULT_PROTOCOL_PROBE_URL;
+    this.protocolProbeAttempts = Math.max(
+      1,
+      Number(options.protocolProbeAttempts || 3)
+    );
+    this.protocolProbeDelayMs = Math.max(
+      0,
+      Number(options.protocolProbeDelayMs ?? 1_000)
+    );
   }
 
   get configPath() {
@@ -546,6 +626,57 @@ export class NodeRuntimeAdapter {
       socket.once("error", reject);
     });
     return { reachable: true };
+  }
+
+  async verifyUdpProtocol(activation) {
+    const probeConfig = buildUdpProtocolProbeConfig({
+      activation,
+      configText: activation.configText
+    });
+    const probePath = join(
+      this.dataDir,
+      `.protocol-probe-${activation.type}-${process.pid}-${Date.now()}.json`
+    );
+    await writeFile(probePath, `${JSON.stringify(probeConfig, null, 2)}\n`, { mode: 0o600 });
+    try {
+      await this.commandRunner(this.binaryPath, ["check", "-c", probePath]);
+      let lastError = null;
+      for (let attempt = 1; attempt <= this.protocolProbeAttempts; attempt += 1) {
+        try {
+          await this.commandRunner(this.binaryPath, [
+            "tools",
+            "fetch",
+            "-c",
+            probePath,
+            "-o",
+            "raylink-probe",
+            this.protocolProbeUrl
+          ]);
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < this.protocolProbeAttempts && this.protocolProbeDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, this.protocolProbeDelayMs));
+          }
+        }
+      }
+      if (lastError) throw lastError;
+      return {
+        reachable: true,
+        probe: "sing-box-tools-fetch",
+        protocol: activation.type,
+        target: this.protocolProbeUrl
+      };
+    } catch (error) {
+      const wrapped = new Error(
+        `${activation.type} 协议握手或外部访问失败：${error.message}`
+      );
+      wrapped.code = "PROTOCOL_HANDSHAKE_FAILED";
+      throw wrapped;
+    } finally {
+      await rm(probePath, { force: true });
+    }
   }
 
   async installTlsBundle(task, privateKeyPem) {
@@ -685,8 +816,15 @@ export class NodeRuntimeAdapter {
       let activation = null;
       if (task.activation) {
         await this.portVerifier.waitForListening(task.activation);
+        const useProtocolProbe = task.activation.network === "udp"
+          && UDP_PROTOCOL_PROBE_TYPES.has(task.activation.type);
         const publicCheck = task.activation.exposure === "public"
-          ? await this.publicProbe.verify(task.activation)
+          ? useProtocolProbe
+            ? await this.protocolProbe.verify({
+                ...task.activation,
+                configText: task.configText
+              })
+            : await this.publicProbe.verify(task.activation)
           : { reachable: null, reason: "仅本机协议不执行公网探测" };
         activation = {
           firewallManaged: firewalls.some((item) => item.managed === true),
@@ -1203,6 +1341,7 @@ async function main() {
     binaryPath: process.env.SING_BOX_BIN,
     systemdUnit: process.env.SING_BOX_SYSTEMD_UNIT,
     runtimeMode: process.env.RAYLINK_RUNTIME_MODE,
+    protocolProbeUrl: process.env.RAYLINK_PROTOCOL_PROBE_URL,
     preferMeteredRuntime: process.env.RAYLINK_ENABLE_USER_METERING !== "false"
   });
   await node.run();

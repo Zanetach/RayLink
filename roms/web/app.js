@@ -1,7 +1,7 @@
 const users = [];
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
-const requiredNodeAgentVersion = "0.6.0";
+const requiredNodeAgentVersion = "0.7.0";
 
 const clientCatalog = {
   "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "下载配置" }

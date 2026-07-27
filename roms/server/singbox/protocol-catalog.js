@@ -1,5 +1,34 @@
+import { createHmac } from "node:crypto";
+
 const sourceRoot = "https://github.com/SagerNet/sing-box/tree/v1.13.14";
 const docsRoot = "https://sing-box.sagernet.org/configuration/inbound";
+const udpProbeTypes = new Set(["hysteria", "tuic", "hysteria2"]);
+const udpProbeUserName = "raylink-probe@internal";
+
+function udpProbeUser(masterPassword, type) {
+  const password = createHmac("sha256", masterPassword)
+    .update(`raylink-probe-password:${type}`)
+    .digest("base64url")
+    .slice(0, 32);
+  const uuidBytes = createHmac("sha256", masterPassword)
+    .update(`raylink-probe-uuid:${type}`)
+    .digest()
+    .subarray(0, 16);
+  uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40;
+  uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80;
+  const hex = uuidBytes.toString("hex");
+  return {
+    email: udpProbeUserName,
+    runtimePassword: password,
+    runtimeUuid: [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20)
+    ].join("-")
+  };
+}
 
 export const protocolCatalog = [
   protocol("shadowsocks", "Shadowsocks 2022", 8388, "密码型多用户协议，RayLink 默认入口。", { clientCapable: true }),
@@ -294,7 +323,10 @@ export function buildProtocolInbounds({ profiles, users, masterPassword }) {
     if (tls) base.tls = tls;
     const transport = buildTransport(profile);
     if (transport) base.transport = transport;
-    applyServerUsers(base, profile.type, users, masterPassword);
+    const serverUsers = udpProbeTypes.has(profile.type)
+      ? [...users, udpProbeUser(masterPassword, profile.type)]
+      : users;
+    applyServerUsers(base, profile.type, serverUsers, masterPassword);
     return base;
   });
 }

@@ -5,6 +5,7 @@ RAYLINK_SERVER="${RAYLINK_SERVER:-}"
 RAYLINK_ENROLL_TOKEN="${RAYLINK_ENROLL_TOKEN:-}"
 RAYLINK_NODE_ROOT="${RAYLINK_NODE_ROOT:-/opt/raylink-node}"
 RAYLINK_NODE_VERSION="${RAYLINK_NODE_VERSION:-22}"
+RAYLINK_PROTOCOL_PROBE_URL="${RAYLINK_PROTOCOL_PROBE_URL:-https://www.gstatic.com/generate_204}"
 SING_BOX_VERSION="${SING_BOX_VERSION:-1.13.14}"
 RAYLINK_ENABLE_USER_METERING="${RAYLINK_ENABLE_USER_METERING:-true}"
 
@@ -24,6 +25,8 @@ if ! printf '%s' "$RAYLINK_SERVER" | grep -Eq '^https://[A-Za-z0-9._:-]+$'; then
   fi
 fi
 printf '%s' "$RAYLINK_ENROLL_TOKEN" | grep -Eq '^[A-Za-z0-9_-]{20,256}$' || fail "接入令牌格式无效"
+printf '%s' "$RAYLINK_PROTOCOL_PROBE_URL" | grep -Eq '^https://[^[:space:]]+$' \
+  || fail "RAYLINK_PROTOCOL_PROBE_URL 必须是 HTTPS 地址"
 command -v curl >/dev/null 2>&1 || fail "需要 curl"
 command -v tar >/dev/null 2>&1 || fail "需要 tar"
 command -v systemctl >/dev/null 2>&1 || fail "需要 systemd"
@@ -128,6 +131,7 @@ fi
   printf 'RAYLINK_NODE_STATE=/etc/raylink-node/node.json\n'
   printf 'RAYLINK_NODE_DATA=/var/lib/raylink-node/sing-box\n'
   printf 'RAYLINK_RUNTIME_MODE=systemd\n'
+  printf 'RAYLINK_PROTOCOL_PROBE_URL=%s\n' "$RAYLINK_PROTOCOL_PROBE_URL"
   printf 'RAYLINK_ENABLE_USER_METERING=%s\n' "$RAYLINK_ENABLE_USER_METERING"
   printf 'SING_BOX_BIN=%s\n' "$sing_box_bin"
   printf 'SING_BOX_SYSTEMD_UNIT=raylink-sing-box.service\n'

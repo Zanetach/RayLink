@@ -268,6 +268,155 @@ test("remote protocol activation opens its firewall, verifies listening and repo
   assert.equal(result.activation.firewallManaged, true);
 });
 
+test("Hysteria 2 activation completes a real sing-box protocol fetch before reporting public readiness", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-hysteria2-probe-"));
+  let probeConfig = null;
+  let probeAttempts = 0;
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath: "sing-box",
+    runtimeMode: "dry-run",
+    commandRunner: async (command, args) => {
+      if (command === "sing-box" && args[0] === "tools" && args[1] === "fetch") {
+        probeAttempts += 1;
+        const configPath = args[args.indexOf("-c") + 1];
+        probeConfig = JSON.parse(await readFile(configPath, "utf8"));
+        if (probeAttempts === 1) throw new Error("temporary probe failure");
+        return { stdout: "", stderr: "" };
+      }
+      return { stdout: "sing-box version 1.13.14\n", stderr: "" };
+    },
+    protocolProbeDelayMs: 0,
+    firewallManager: {
+      open: async () => ({ managed: true, rollback: async () => {} })
+    },
+    portVerifier: {
+      assertAvailable: async () => true,
+      waitForListening: async () => true
+    },
+    publicProbe: {
+      verify: async () => {
+        throw new Error("generic UDP probe must not be used");
+      }
+    }
+  });
+  const configText = JSON.stringify({
+    inbounds: [{
+      type: "hysteria2",
+      tag: "raylink-hysteria2",
+      listen: "::",
+      listen_port: 8448,
+      users: [{ name: "probe@example.com", password: "probe-password" }],
+      tls: {
+        enabled: true,
+        server_name: "node.example.com",
+        acme: {
+          domain: ["node.example.com"],
+          email: "ops@example.com"
+        }
+      }
+    }]
+  });
+
+  const result = await adapter.publish({
+    version: "v1",
+    checksum: "checksum",
+    configText,
+    activation: {
+      type: "hysteria2",
+      exposure: "public",
+      network: "udp",
+      address: "node.example.com",
+      listen: "::",
+      port: 8448
+    }
+  });
+
+  assert.deepEqual(result.activation.publicCheck, {
+    reachable: true,
+    probe: "sing-box-tools-fetch",
+    protocol: "hysteria2",
+    target: "https://www.gstatic.com/generate_204"
+  });
+  assert.equal(probeAttempts, 2);
+  assert.deepEqual(probeConfig.outbounds, [{
+    type: "hysteria2",
+    tag: "raylink-probe",
+    server: "node.example.com",
+    server_port: 8448,
+    password: "probe-password",
+    tls: {
+      enabled: true,
+      server_name: "node.example.com"
+    }
+  }]);
+});
+
+test("a failed TUIC protocol probe restores the previous config and firewall rules", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-tuic-probe-rollback-"));
+  const configPath = join(directory, "config.json");
+  await writeFile(configPath, "{\"previous\":true}\n");
+  const rollbacks = [];
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath: "sing-box",
+    runtimeMode: "dry-run",
+    commandRunner: async () => ({ stdout: "sing-box version 1.13.14\n", stderr: "" }),
+    firewallManager: {
+      open: async ({ port, network }) => ({
+        managed: true,
+        rollback: async () => rollbacks.push(`${port}/${network}`)
+      })
+    },
+    portVerifier: {
+      assertAvailable: async () => true,
+      waitForListening: async () => true
+    },
+    protocolProbe: {
+      verify: async () => {
+        const error = new Error("TUIC 握手超时");
+        error.code = "PROTOCOL_HANDSHAKE_FAILED";
+        throw error;
+      }
+    }
+  });
+
+  await assert.rejects(
+    adapter.publish({
+      version: "v1",
+      checksum: "checksum",
+      configText: JSON.stringify({
+        inbounds: [{
+          type: "tuic",
+          listen_port: 8447,
+          users: [{
+            uuid: "d5d29d63-1dad-4e45-9d0b-d4a012b71015",
+            password: "probe-password"
+          }],
+          tls: { enabled: true, server_name: "node.example.com" }
+        }]
+      }),
+      activation: {
+        type: "tuic",
+        exposure: "public",
+        network: "udp",
+        address: "node.example.com",
+        listen: "::",
+        port: 8447,
+        challengePorts: [
+          { port: 80, network: "tcp" },
+          { port: 443, network: "tcp" }
+        ]
+      }
+    }),
+    (error) => error.code === "PROTOCOL_HANDSHAKE_FAILED"
+      && error.rolledBack === true
+  );
+
+  assert.equal(await readFile(configPath, "utf8"), "{\"previous\":true}\n");
+  assert.deepEqual(rollbacks, ["443/tcp", "80/tcp", "8447/udp"]);
+});
+
 test("RayLink Node default UFW manager opens and rolls back only its own rule", async () => {
   const calls = [];
   const adapter = new NodeRuntimeAdapter({

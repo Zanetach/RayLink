@@ -35,7 +35,7 @@ import {
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
-const REQUIRED_NODE_AGENT_VERSION = "0.6.0";
+const REQUIRED_NODE_AGENT_VERSION = "0.7.0";
 const defaultWebDir = fileURLToPath(new URL("../web", import.meta.url));
 
 const contentTypes = {
@@ -347,7 +347,8 @@ export async function createRayLinkApp(options) {
     dataDir: options.dataDir,
     binaryPath: options.singBoxBinary || "sing-box",
     mode: options.runtimeMode || "dry-run",
-    systemdUnit: options.systemdUnit || "sing-box.service"
+    systemdUnit: options.systemdUnit || "sing-box.service",
+    protocolProbeUrl: options.protocolProbeUrl
   });
   const tlsAssetPackager = options.tlsAssetPackager || new RemoteTlsAssetPackager({
     remoteDataDir: options.remoteNodeDataDir
@@ -465,6 +466,10 @@ export async function createRayLinkApp(options) {
         enabled: options.runtimeMode === "systemd"
       }),
       ...(options.publicProbe ? { publicProbe: options.publicProbe } : {}),
+      protocolProbe: options.protocolProbe
+        || (typeof runtimeAdapter.probeProtocol === "function"
+          ? (input) => runtimeAdapter.probeProtocol(input)
+          : null),
       certificateEmail: () => store.setupStatus().certificate?.email || "",
       certificateProvider: async (domain) => {
         if (store.setupStatus().certificate?.mode !== "caddy-auto") return null;

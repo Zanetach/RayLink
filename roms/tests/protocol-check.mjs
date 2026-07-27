@@ -7,11 +7,15 @@ import { join } from "node:path";
 
 import { buildSingBoxConfig } from "../server/singbox/config.js";
 import {
+  buildUdpProtocolProbeConfig as buildLocalUdpProtocolProbeConfig
+} from "../server/singbox/protocol-probe.js";
+import {
   buildProtocolClientConfig,
   defaultProtocolConfigs,
   normalizeProtocolConfig,
   protocolCatalog
 } from "../server/singbox/protocol-catalog.js";
+import { buildUdpProtocolProbeConfig } from "../web/node/raylink-node.mjs";
 
 const singBoxBinary = process.env.SING_BOX_BIN || "sing-box";
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "raylink-protocol-check-"));
@@ -200,6 +204,7 @@ try {
   }
 
   const checkedAcmeProtocols = [];
+  const checkedUdpProtocolProbes = [];
   for (const type of ["naive", "hysteria", "tuic", "hysteria2"]) {
     const profile = acmeProfile(type);
     const serverConfig = buildSingBoxConfig({
@@ -212,6 +217,27 @@ try {
       masterPassword
     });
     await checkConfig(`server-${type}-acme`, serverConfig);
+    if (["hysteria", "tuic", "hysteria2"].includes(type)) {
+      const probeConfig = buildUdpProtocolProbeConfig({
+        activation: {
+          type,
+          address: "node.example.com",
+          port: profile.port
+        },
+        configText: JSON.stringify(serverConfig)
+      });
+      assert.deepEqual(
+        probeConfig,
+        buildLocalUdpProtocolProbeConfig({
+          type,
+          address: "node.example.com",
+          port: profile.port,
+          serverConfig
+        })
+      );
+      await checkConfig(`probe-${type}`, probeConfig);
+      checkedUdpProtocolProbes.push(type);
+    }
     checkedAcmeProtocols.push(type);
   }
 
@@ -236,7 +262,8 @@ try {
     serverProtocolsChecked: checkedProtocols,
     clientProtocolsChecked: clientProfiles.map((profile) => profile.type),
     realityProtocolsChecked: checkedRealityProtocols,
-    acmeProtocolsChecked: checkedAcmeProtocols
+    acmeProtocolsChecked: checkedAcmeProtocols,
+    udpProtocolProbesChecked: checkedUdpProtocolProbes
   }));
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });

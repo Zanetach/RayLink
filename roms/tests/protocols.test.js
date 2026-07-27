@@ -104,6 +104,28 @@ test("ACME TLS profiles compile a node-bound certificate request for sing-box 1.
   });
 });
 
+test("UDP protocol probe has a dedicated credential even before the first user is created", () => {
+  const profile = normalizeProtocolConfig({
+    ...defaultProtocolConfigs().find((item) => item.type === "hysteria2"),
+    enabled: true,
+    tls: {
+      mode: "acme",
+      serverName: "node.example.com",
+      acmeEmail: "ops@example.com"
+    }
+  });
+
+  const [inbound] = buildProtocolInbounds({
+    profiles: [profile],
+    users: [],
+    masterPassword: "c2VydmVyLWtleS0xNg=="
+  });
+
+  assert.equal(inbound.users.length, 1);
+  assert.equal(inbound.users[0].name, "raylink-probe@internal");
+  assert.match(inbound.users[0].password, /^[A-Za-z0-9_-]{32}$/);
+});
+
 test("client configuration includes every enabled user-facing protocol", () => {
   const profiles = defaultProtocolConfigs(8388).map((profile) => {
     if (profile.type === "vless") {

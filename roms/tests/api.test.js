@@ -145,7 +145,7 @@ test("remote one-click activation automatically retries the next port reported f
       hostname: "retry-node",
       platform: "linux",
       architecture: "x64",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.14",
       buildTags: ["with_utls", "with_acme", "with_quic"]
     })
@@ -346,7 +346,7 @@ test("empty-database API workflow reaches a multi-Host client configuration", as
       hostname: "sg-vps-01",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.14",
       buildTags: ["with_quic", "with_utls", "with_v2ray_api"]
     })
@@ -786,7 +786,7 @@ test("protocol profiles belong to one host and never enable the same protocol on
       hostname: "sg-vps-01",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.12",
       buildTags: ["with_quic", "with_utls"]
     })
@@ -946,7 +946,7 @@ test("admin checks, upgrades the local Runtime and queues a remote Runtime upgra
     body: JSON.stringify({
       token: created.enrollmentToken,
       hostname: "upgrade-sg",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.14",
       buildTags: ["with_quic"]
     })
@@ -1584,7 +1584,7 @@ test("user subscription includes every online host allowed by the user node scop
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "x64",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1698,7 +1698,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
   assert.equal(blockedResponse.status, 426);
   const blocked = await blockedResponse.json();
   assert.equal(blocked.error.code, "NODE_UPGRADE_REQUIRED");
-  assert.equal(blocked.requiredVersion, "0.6.0");
+  assert.equal(blocked.requiredVersion, "0.7.0");
 
   const beforeUpgrade = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
   const waitingHost = beforeUpgrade.hosts.find((host) => host.id === enrolled.hostId);
@@ -1708,7 +1708,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
     method: "POST",
     headers: { ...nodeHeaders, "content-type": "application/json" },
     body: JSON.stringify({
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.12",
       telemetry: { serviceStatus: "running" }
     })
@@ -1752,7 +1752,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1826,7 +1826,7 @@ test("remote entitlement revocation is critical, retryable and visible until app
       hostname: "revoke-node",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.12"
     })
   })).json();
@@ -2065,7 +2065,7 @@ test("RayLink Node reports real cumulative user counters idempotently and enforc
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       token: createdHost.enrollmentToken,
-      agentVersion: "0.6.0",
+      agentVersion: "0.7.0",
       runtimeVersion: "1.13.14",
       buildTags: ["with_v2ray_api"]
     })
@@ -2218,7 +2218,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);
   const nodeRuntime = await nodeRuntimeResponse.text();
   assert.match(nodeRuntime, /class RayLinkNode/);
-  assert.match(nodeRuntime, /AGENT_VERSION = "0\.6\.0"/);
+  assert.match(nodeRuntime, /AGENT_VERSION = "0\.7\.0"/);
   assert.match(nodeRuntime, /upgrade-runtime/);
 
   const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);

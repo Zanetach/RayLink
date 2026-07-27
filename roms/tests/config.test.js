@@ -45,6 +45,28 @@ test("subscription origin is independent from the control-plane and Host address
   );
 });
 
+test("protocol probe endpoint is configurable and must use HTTPS in production", () => {
+  const config = loadConfig({
+    NODE_ENV: "production",
+    RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
+    RAYLINK_ADMIN_PASSWORD: "a-production-password",
+    RAYLINK_PROTOCOL_PROBE_URL: "https://probe.example.com/generate_204"
+  });
+  assert.equal(
+    config.protocolProbeUrl,
+    "https://probe.example.com/generate_204"
+  );
+  assert.throws(
+    () => loadConfig({
+      NODE_ENV: "production",
+      RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
+      RAYLINK_ADMIN_PASSWORD: "a-production-password",
+      RAYLINK_PROTOCOL_PROBE_URL: "http://probe.example.com/"
+    }),
+    /RAYLINK_PROTOCOL_PROBE_URL must use HTTPS/
+  );
+});
+
 test("production first-run mode still requires HTTPS and a hashed expiring token", () => {
   assert.throws(
     () => loadConfig({

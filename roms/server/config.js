@@ -13,12 +13,17 @@ export function loadConfig(env = process.env) {
   const port = positiveInteger(env.RAYLINK_PORT, 4173, "RAYLINK_PORT");
   const publicOrigin = env.RAYLINK_PUBLIC_ORIGIN || `http://${host}:${port}`;
   const subscriptionOrigin = env.RAYLINK_SUBSCRIPTION_ORIGIN || publicOrigin;
+  const protocolProbeUrl = env.RAYLINK_PROTOCOL_PROBE_URL
+    || "https://www.gstatic.com/generate_204";
   const setupRequired = env.RAYLINK_SETUP_REQUIRED === "true";
   if (env.NODE_ENV === "production" && new URL(publicOrigin).protocol !== "https:") {
     throw new Error("RAYLINK_PUBLIC_ORIGIN must use HTTPS in production");
   }
   if (env.NODE_ENV === "production" && new URL(subscriptionOrigin).protocol !== "https:") {
     throw new Error("RAYLINK_SUBSCRIPTION_ORIGIN must use HTTPS in production");
+  }
+  if (env.NODE_ENV === "production" && new URL(protocolProbeUrl).protocol !== "https:") {
+    throw new Error("RAYLINK_PROTOCOL_PROBE_URL must use HTTPS in production");
   }
   if (Boolean(env.RAYLINK_SETUP_TOKEN_HASH) !== Boolean(env.RAYLINK_SETUP_TOKEN_EXPIRES_AT)) {
     throw new Error("RAYLINK_SETUP_TOKEN_HASH and RAYLINK_SETUP_TOKEN_EXPIRES_AT must be set together");
@@ -43,6 +48,7 @@ export function loadConfig(env = process.env) {
     publicOrigin,
     subscriptionOrigin,
     proxyHost: env.RAYLINK_PROXY_HOST || new URL(publicOrigin).hostname,
+    protocolProbeUrl,
     runtimeMode,
     preferMeteredRuntime: env.RAYLINK_USER_METERING !== "false",
     singBoxBinary: env.SING_BOX_BIN || "sing-box",

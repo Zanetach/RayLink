@@ -12,7 +12,9 @@ function compile(store, listenPort, hostId = "local") {
   const configText = `${JSON.stringify(config, null, 2)}\n`;
   const checksum = createHash("sha256").update(configText).digest("hex");
   const eligibleUsers = new Set(
-    config.inbounds.flatMap((inbound) => inbound.users?.map((user) => user.name || user.username) || [])
+    config.inbounds.flatMap((inbound) => inbound.users?.map(
+      (user) => user.name || user.username
+    ).filter((name) => name !== "raylink-probe@internal") || [])
   ).size;
   return {
     config,

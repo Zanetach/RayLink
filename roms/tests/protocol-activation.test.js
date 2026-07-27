@@ -94,6 +94,15 @@ function fixture(type, overrides = {}) {
       return { reachable: true };
     }
   };
+  const protocolProbe = async (input) => {
+    events.push(["protocol-probe", input.type, input.port]);
+    if (overrides.protocolProbeError) throw new Error("协议握手失败");
+    return {
+      reachable: true,
+      probe: "sing-box-tools-fetch",
+      protocol: input.type
+    };
+  };
   const runtimeManager = {
     publish: async (_adminId, options) => {
       events.push(["publish", options]);
@@ -119,6 +128,7 @@ function fixture(type, overrides = {}) {
     portManager,
     firewallManager,
     publicProbe,
+    protocolProbe,
     certificateEmail: () => "ops@example.com",
     randomBytes: () => Buffer.from("0011223344556677", "hex")
   });
@@ -184,6 +194,11 @@ test("one-click Hysteria 2 binds node domain to ACME and opens UDP", async () =>
     ["firewall-open", "tcp", 80],
     ["firewall-open", "tcp", 443]
   ]);
+  assert.deepEqual(
+    events.filter(([name]) => name === "protocol-probe"),
+    [["protocol-probe", "hysteria2", 8448]]
+  );
+  assert.equal(events.some(([name]) => name === "public-probe"), false);
 });
 
 test("advanced protocols cannot be one-click exposed", async () => {
