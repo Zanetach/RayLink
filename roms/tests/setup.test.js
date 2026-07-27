@@ -86,6 +86,19 @@ test("setup page assets load when previewed directly from disk", async () => {
   }
 });
 
+test("setup form keeps validation feedback inside the RayLink interface", async () => {
+  const setupPage = new URL("../web/setup.html", import.meta.url);
+  const setupScript = new URL("../web/setup.js", import.meta.url);
+  const [html, script] = await Promise.all([
+    readFile(setupPage, "utf8"),
+    readFile(setupScript, "utf8")
+  ]);
+
+  assert.match(html, /<form[^>]+id="setup-form"[^>]+novalidate/);
+  assert.doesNotMatch(script, /\.reportValidity\(/);
+  assert.match(script, /管理员密码至少需要 12 位/);
+});
+
 test("setup-required instances without a token expose UNINITIALIZED until a token is generated", async (t) => {
   const testApp = await startSetupApp({
     setupTokenHash: "",

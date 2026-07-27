@@ -461,6 +461,11 @@
   padding-top: 12px;
 }
 
+.setup-form :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
 .setup-actions {
   display: flex;
   min-height: 64px;

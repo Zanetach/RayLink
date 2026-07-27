@@ -74,18 +74,72 @@ function currentFields() {
     .filter((field) => !field.disabled);
 }
 
+function fieldLabel(field) {
+  return field.closest("label")?.querySelector("span")?.textContent.trim() || "该字段";
+}
+
+function passwordClassCount(password) {
+  return [
+    /[a-z]/.test(password),
+    /[A-Z]/.test(password),
+    /\d/.test(password),
+    /[^A-Za-z0-9]/.test(password)
+  ].filter(Boolean).length;
+}
+
+function validationMessage(field) {
+  const value = String(field.value || "");
+  if (field.name === "password") {
+    if (!value) return "请输入管理员密码";
+    if (value.length < 12) return "管理员密码至少需要 12 位";
+    if (passwordClassCount(value) < 3) {
+      return "管理员密码需包含大小写字母、数字、符号中的至少三类";
+    }
+    return "";
+  }
+  if (field.name === "passwordConfirm") {
+    if (!value) return "请再次输入管理员密码";
+    if (value !== form.elements.password.value) return "两次输入的管理员密码不一致";
+    return "";
+  }
+  if (field.validity.valueMissing) {
+    return field.type === "checkbox"
+      ? "请确认管理入口可达，并已保存管理员凭据"
+      : `请填写${fieldLabel(field)}`;
+  }
+  if (field.validity.typeMismatch) {
+    return field.type === "email" ? "请输入有效的邮箱地址" : "请输入有效的访问地址";
+  }
+  if (field.validity.tooShort) {
+    return `${fieldLabel(field)}至少需要 ${field.minLength} 位`;
+  }
+  if (field.validity.patternMismatch) {
+    return "区域标识只能包含 2–32 位字母、数字或连字符";
+  }
+  return field.checkValidity() ? "" : `请检查${fieldLabel(field)}`;
+}
+
+function clearFieldError(field) {
+  field.classList.remove("invalid");
+  field.removeAttribute("aria-invalid");
+}
+
+function presentValidationError(field, message) {
+  field.classList.add("invalid");
+  field.setAttribute("aria-invalid", "true");
+  errorElement.textContent = message;
+  field.focus();
+}
+
 function validateStep() {
   errorElement.textContent = "";
   for (const field of currentFields()) {
-    if (!field.reportValidity()) return false;
-  }
-  if (
-    currentStep === 2
-    && form.elements.password.value !== form.elements.passwordConfirm.value
-  ) {
-    errorElement.textContent = "两次输入的管理员密码不一致";
-    form.elements.passwordConfirm.focus();
-    return false;
+    clearFieldError(field);
+    const message = validationMessage(field);
+    if (message) {
+      presentValidationError(field, message);
+      return false;
+    }
   }
   return true;
 }
@@ -208,6 +262,15 @@ document.querySelectorAll('input[name="accessMode"]').forEach((radio) => {
   radio.addEventListener("change", updateCertificateOptions);
 });
 form.elements.certificateMode.addEventListener("change", updateCertificateOptions);
+for (const field of form.elements) {
+  if (!(field instanceof HTMLElement)) continue;
+  const clearCurrentError = () => {
+    clearFieldError(field);
+    errorElement.textContent = "";
+  };
+  field.addEventListener("input", clearCurrentError);
+  field.addEventListener("change", clearCurrentError);
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
