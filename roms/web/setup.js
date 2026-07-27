@@ -42,9 +42,11 @@ function tokenFromFragment() {
 function updateCertificateOptions() {
   const mode = form.elements.accessMode.value;
   const select = form.elements.certificateMode;
+  const previousMode = select.value;
   select.replaceChildren();
   const choices = mode === "domain"
     ? [
+        ["caddy-auto", "Caddy 自动 HTTPS"],
         ["external", "已有 HTTPS / 反向代理"]
       ]
     : [
@@ -54,6 +56,13 @@ function updateCertificateOptions() {
   for (const [value, label] of choices) {
     select.add(new Option(label, value));
   }
+  if (choices.some(([value]) => value === previousMode)) {
+    select.value = previousMode;
+  }
+  const automaticCertificate = select.value === "caddy-auto";
+  const emailField = document.querySelector("[data-certificate-email]");
+  emailField.hidden = !automaticCertificate;
+  form.elements.certificateEmail.required = automaticCertificate;
   form.elements.canonicalOrigin.placeholder = mode === "domain"
     ? "https://panel.example.com"
     : "https://203.0.113.10";
@@ -86,6 +95,9 @@ function renderSummary() {
     ["访问方式", mode === "domain" ? "域名" : "IP 地址"],
     ["主访问地址", form.elements.canonicalOrigin.value.trim()],
     ["证书方式", form.elements.certificateMode.selectedOptions[0]?.textContent || ""],
+    ...(form.elements.certificateMode.value === "caddy-auto"
+      ? [["证书邮箱", form.elements.certificateEmail.value.trim()]]
+      : []),
     ["管理员", form.elements.username.value.trim()],
     ["本机 Runtime", `${form.elements.runtimeName.value.trim()} · ${form.elements.runtimeRegion.value.trim()}`],
     ["主机地址", form.elements.runtimeAddress.value.trim()]
@@ -114,11 +126,19 @@ async function runPreflight() {
       setupToken: "一次性令牌",
       accessOrigin: "当前访问入口",
       https: "HTTPS",
-      runtime: "sing-box Runtime"
+      runtime: "sing-box Runtime",
+      dns: "域名 DNS",
+      caddy: "Caddy"
+    };
+    const states = {
+      passed: "通过",
+      development: "开发模式",
+      automatic: "将自动配置",
+      "configuration-ready": "配置就绪"
     };
     preflightElement.replaceChildren(...Object.entries(result.checks).map(([key, value]) => {
       const row = document.createElement("span");
-      row.textContent = `${labels[key] || key}：${value === "passed" ? "通过" : "开发模式"}`;
+      row.textContent = `${labels[key] || key}：${states[value] || value}`;
       row.dataset.state = value;
       return row;
     }));
@@ -162,7 +182,10 @@ function setupPayload() {
         .map((value) => value.trim())
         .filter(Boolean)
     },
-    certificate: { mode: form.elements.certificateMode.value },
+    certificate: {
+      mode: form.elements.certificateMode.value,
+      email: form.elements.certificateEmail.value.trim()
+    },
     admin: {
       username: form.elements.username.value.trim(),
       password: form.elements.password.value
@@ -182,6 +205,7 @@ backButton.addEventListener("click", () => showStep(currentStep - 1));
 document.querySelectorAll('input[name="accessMode"]').forEach((radio) => {
   radio.addEventListener("change", updateCertificateOptions);
 });
+form.elements.certificateMode.addEventListener("change", updateCertificateOptions);
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();

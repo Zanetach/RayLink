@@ -50,3 +50,31 @@ test("production first-run mode still requires HTTPS and a hashed expiring token
     RAYLINK_SETUP_TOKEN_HASH: "hash-without-expiry"
   }), /must be set together/);
 });
+
+test("first-run configuration exposes the managed Caddy access paths", () => {
+  const config = loadConfig({
+    NODE_ENV: "production",
+    RAYLINK_PUBLIC_ORIGIN: "https://203.0.113.10",
+    RAYLINK_ADMIN_PASSWORD: "a-production-password",
+    RAYLINK_SETUP_REQUIRED: "true",
+    RAYLINK_CADDY_BIN: "/usr/bin/caddy",
+    RAYLINK_CADDYFILE: "/etc/caddy/Caddyfile",
+    RAYLINK_ENV_FILE: "/etc/raylink/raylink.env",
+    RAYLINK_CONTROL_CERT: "/etc/caddy/raylink/control-plane.crt",
+    RAYLINK_CONTROL_KEY: "/etc/caddy/raylink/control-plane.key"
+  });
+
+  assert.deepEqual({
+    caddyBinary: config.caddyBinary,
+    caddyfilePath: config.caddyfilePath,
+    environmentFilePath: config.environmentFilePath,
+    controlPlaneCertificatePath: config.controlPlaneCertificatePath,
+    controlPlanePrivateKeyPath: config.controlPlanePrivateKeyPath
+  }, {
+    caddyBinary: "/usr/bin/caddy",
+    caddyfilePath: "/etc/caddy/Caddyfile",
+    environmentFilePath: "/etc/raylink/raylink.env",
+    controlPlaneCertificatePath: "/etc/caddy/raylink/control-plane.crt",
+    controlPlanePrivateKeyPath: "/etc/caddy/raylink/control-plane.key"
+  });
+});

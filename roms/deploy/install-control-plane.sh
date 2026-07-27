@@ -9,17 +9,38 @@ fail() {
 [ "$(id -u)" -eq 0 ] || fail "请以 root 运行"
 [ "$(uname -s)" = "Linux" ] || fail "当前一键安装仅支持 Linux"
 command -v systemctl >/dev/null 2>&1 || fail "当前系统未使用 systemd"
+if command -v caddy >/dev/null 2>&1 || [ -e /etc/caddy/Caddyfile ]; then
+  fail "检测到已有 Caddy；为避免覆盖现有站点，请使用全新 VPS 或先迁移现有 Caddy 配置"
+fi
 
 install_root=/opt/raylink
 data_root=/var/lib/raylink
 config_root=/etc/raylink
+managed_root="$data_root/managed"
 node_root=/opt/raylink-nodejs
 node_version="${RAYLINK_NODE_VERSION:-22.23.1}"
 package_url="${RAYLINK_PACKAGE_URL:-}"
 package_sha256="${RAYLINK_PACKAGE_SHA256:-}"
 source_root="${RAYLINK_SOURCE_DIR:-}"
 temporary_root="$(mktemp -d)"
-trap 'rm -rf "$temporary_root"' EXIT
+installation_succeeded=false
+caddyfile_backup=
+cleanup() {
+  status=$?
+  trap - EXIT
+  if [ "$installation_succeeded" != true ] \
+    && [ -n "$caddyfile_backup" ] \
+    && [ -f "$caddyfile_backup" ]; then
+    unlink /etc/caddy/Caddyfile 2>/dev/null || true
+    cp -a "$caddyfile_backup" /etc/caddy/Caddyfile
+    if systemctl is-active --quiet caddy; then
+      caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -rf "$temporary_root"
+  exit "$status"
+}
+trap cleanup EXIT
 
 if [ -e "$install_root/package.json" ]; then
   fail "$install_root 已存在；升级请使用控制台在线升级，不要覆盖安装"
@@ -53,7 +74,34 @@ public_origin="https://${public_host}"
 if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl nginx openssl tar xz-utils
+  apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    debian-archive-keyring \
+    debian-keyring \
+    gnupg \
+    openssl \
+    tar \
+    xz-utils
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+    -o "$temporary_root/caddy-stable.gpg.key"
+  caddy_key_fingerprint="$(
+    gpg --batch --show-keys --with-colons "$temporary_root/caddy-stable.gpg.key" \
+      | awk -F: '$1 == "fpr" { print $10; exit }'
+  )"
+  [ "$caddy_key_fingerprint" = "65760C51EDEA2017CEA2CA15155B6D79CA56EA34" ] \
+    || fail "Caddy 仓库签名密钥指纹不匹配"
+  gpg --dearmor --yes \
+    -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    "$temporary_root/caddy-stable.gpg.key"
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+    -o /etc/apt/sources.list.d/caddy-stable.list
+  chmod o+r \
+    /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    /etc/apt/sources.list.d/caddy-stable.list
+  apt-get update
+  apt-get install -y caddy
 else
   fail "当前版本仅自动安装 Debian/Ubuntu 依赖"
 fi
@@ -100,7 +148,10 @@ fi
 
 install -d -m 0755 "$install_root"
 cp -a "$source_root/package.json" "$source_root/server" "$source_root/web" "$source_root/deploy" "$install_root/"
-install -d -m 0700 "$data_root" "$config_root" "$config_root/tls"
+install -d -m 0710 -o root -g caddy "$data_root"
+install -d -m 0750 -o root -g caddy "$managed_root"
+install -d -m 0700 "$config_root"
+install -d -m 0750 -o root -g caddy /etc/caddy/raylink
 
 runtime_version=1.13.14
 runtime_artifact="$source_root/web/node/runtime/raylink-sing-box-${runtime_version}-linux-${runtime_arch}"
@@ -134,9 +185,13 @@ fi
 openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 825 \
   -subj "/CN=${public_ip}" \
   -addext "subjectAltName=IP:${public_ip}" \
-  -keyout "$config_root/tls/control-plane.key" \
-  -out "$config_root/tls/control-plane.crt"
-chmod 0600 "$config_root/tls/control-plane.key"
+  -keyout /etc/caddy/raylink/control-plane.key \
+  -out /etc/caddy/raylink/control-plane.crt
+chown root:caddy \
+  /etc/caddy/raylink/control-plane.key \
+  /etc/caddy/raylink/control-plane.crt
+chmod 0640 /etc/caddy/raylink/control-plane.key
+chmod 0644 /etc/caddy/raylink/control-plane.crt
 
 setup_token="$(openssl rand -hex 24)"
 setup_token_hash="$(
@@ -171,21 +226,41 @@ umask 077
     'RAYLINK_SETUP_REQUIRED=true' \
     "RAYLINK_SETUP_TOKEN_HASH=${setup_token_hash}" \
     "RAYLINK_SETUP_TOKEN_EXPIRES_AT=${setup_expires_at}" \
+    'RAYLINK_CADDY_BIN=/usr/bin/caddy' \
+    "RAYLINK_CADDYFILE=${managed_root}/Caddyfile" \
+    "RAYLINK_ENV_FILE=${managed_root}/raylink.env" \
+    'RAYLINK_CONTROL_CERT=/etc/caddy/raylink/control-plane.crt' \
+    'RAYLINK_CONTROL_KEY=/etc/caddy/raylink/control-plane.key' \
     'SING_BOX_BIN=/usr/local/bin/raylink-sing-box' \
     'SING_BOX_SYSTEMD_UNIT=sing-box-raylink.service'
-} > "$config_root/raylink.env"
+} > "$managed_root/raylink.env"
+chmod 0600 "$managed_root/raylink.env"
+ln -sfn "$managed_root/raylink.env" "$config_root/raylink.env"
 
 cp "$install_root/deploy/raylink.service" /etc/systemd/system/raylink.service
 cp "$install_root/deploy/sing-box-raylink.service" /etc/systemd/system/sing-box-raylink.service
-cp "$install_root/deploy/nginx-first-run.conf.example" /etc/nginx/conf.d/raylink.conf
-nginx -t
+caddyfile_backup="$temporary_root/Caddyfile.before-raylink"
+cp -a /etc/caddy/Caddyfile "$caddyfile_backup"
+sed "s|__RAYLINK_PUBLIC_HOST__|${public_host}|g" \
+  "$install_root/deploy/caddy-first-run.Caddyfile" \
+  > "$managed_root/Caddyfile"
+chown root:caddy "$managed_root/Caddyfile"
+chmod 0640 "$managed_root/Caddyfile"
+ln -sfn "$managed_root/Caddyfile" /etc/caddy/Caddyfile
+caddy validate --config "$managed_root/Caddyfile" --adapter caddyfile
 systemctl daemon-reload
-systemctl enable --now nginx
+systemctl enable --now caddy
+systemctl reload caddy
 systemctl enable sing-box-raylink
 systemctl enable --now raylink
+installation_succeeded=true
 
 printf '\nRayLink 已安装。\n'
 printf '首次初始化地址（令牌 30 分钟有效）：\n'
 printf '%s/setup#token=%s\n\n' "$public_origin" "$setup_token"
 printf '首次使用 IP 证书时浏览器会提示自签名证书；核对证书指纹后继续：\n'
-openssl x509 -in "$config_root/tls/control-plane.crt" -noout -fingerprint -sha256
+openssl x509 \
+  -in /etc/caddy/raylink/control-plane.crt \
+  -noout \
+  -fingerprint \
+  -sha256

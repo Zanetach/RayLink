@@ -8,7 +8,7 @@ RayLink 的产品介绍、架构、界面截图、一键安装和完整使用说
 ```text
 server/   控制面 API、SQLite、配置编译、RayLink Node 任务与流量计量
 web/      管理控制台、首次初始化、用户中心与 RayLink Node
-deploy/   一键安装、systemd、Nginx 与发布包脚本
+deploy/   一键安装、systemd、Caddy 与发布包脚本
 tests/    API、协议、Deployment、RayLink Node 安全与计量测试
 docs/     协议研究、架构决策和生产落地资料
 ```

@@ -12,6 +12,9 @@
 v0.2.0 Release 当前支持 AMD64（x86_64）。服务器需要预先具备 `curl`。
 使用 root 登录时，直接复制执行这一条命令：
 
+> `main` 已切换为 Caddy，并把域名自动 HTTPS 纳入初始化向导；该能力需要下一个
+> Release，现有 v0.2.0 发布包不包含本次切换。
+
 ```bash
 bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.0/install.sh | bash'
 ```
@@ -47,7 +50,8 @@ bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/dow
 - 从 Node.js 官方源安装并校验 Node.js 22；
 - 优先校验并安装发布包内预编译的 sing-box 1.13.14 计量版；
 - 开发源码包未携带预编译 Runtime 时，才回退到本机编译；
-- 安装 RayLink、systemd 和 Nginx；
+- 从 Caddy 官方 APT 仓库安装 Caddy，并配置 systemd 自启动；
+- 安装 RayLink 和 sing-box systemd 服务；
 - 为服务器 IP 生成带 SAN 的首次访问证书；
 - 输出仅显示一次的 `https://服务器IP/setup#token=...` 初始化地址。
 
@@ -116,26 +120,32 @@ bash /opt/raylink/deploy/rotate-setup-token.sh
 首次初始化包含五步：
 
 1. 验证一次性安装令牌；
-2. 选择域名或 IP 主访问入口，并配置已有 HTTPS/反向代理；
+2. 选择域名或 IP 主访问入口；域名模式填写证书通知邮箱，由 Caddy 检查 DNS、
+   自动申请证书并配置续期；
 3. 创建正式管理员；
 4. 设置本机 Runtime 名称、地址和区域；
 5. 检查并进入控制台。
 
-没有域名时可以长期使用 IP HTTPS；浏览器需要信任安装器生成的本机 CA/证书。
-正式对外服务更推荐配置域名和受信任证书，再将“主访问地址”切换为该域名。
+没有域名时可以长期使用 IP HTTPS；浏览器需要信任安装器生成的本机证书。使用域名时
+必须先把 A/AAAA 记录直接解析到该 VPS（初始化时关闭 CDN 代理），并开放 TCP 80/443。
+Caddy 切换域名后仍保留 IP HTTPS 入口用于恢复。
 
 ## 手动安装
 
 安装 Node.js 22.5+ 和审批版本的 sing-box，然后创建目录：
 
 ```bash
-install -d -m 700 /var/lib/raylink
+install -d -m 710 -o root -g caddy /var/lib/raylink
+install -d -m 750 -o root -g caddy /var/lib/raylink/managed
 install -d -m 700 /etc/raylink
 ```
 
-将项目复制到 `/opt/raylink`，并根据 `raylink.env.example` 创建 `/etc/raylink/raylink.env`。
+将项目复制到 `/opt/raylink`，根据 `raylink.env.example` 创建
+`/var/lib/raylink/managed/raylink.env`，将初始 Caddyfile 放到同一目录，并建立兼容链接：
 
 ```bash
+ln -sfn /var/lib/raylink/managed/raylink.env /etc/raylink/raylink.env
+ln -sfn /var/lib/raylink/managed/Caddyfile /etc/caddy/Caddyfile
 cp deploy/raylink.service /etc/systemd/system/raylink.service
 cp deploy/sing-box-raylink.service /etc/systemd/system/sing-box-raylink.service
 systemctl daemon-reload
@@ -156,19 +166,31 @@ sed -i 's/RAYLINK_RUNTIME_MODE=dry-run/RAYLINK_RUNTIME_MODE=systemd/' /etc/rayli
 systemctl restart raylink
 ```
 
-RayLink 的 systemd 模式会重启 `sing-box-raylink.service`。示例为了让配置写入、读取和服务重启权限一致，以 root 运行两项服务；因此 RayLink 必须只监听回环地址，并置于 HTTPS 反向代理后方。若要使用非 root 账号，应另外配置严格的 polkit 权限和共享文件组。
+RayLink 的 systemd 模式会重启 `sing-box-raylink.service`。示例为了让配置写入、读取、
+服务重启和首次 Caddy 配置切换权限一致，以 root 运行 RayLink；服务只监听回环地址，
+外部 HTTPS 由 Caddy 提供。若要使用非 root 账号，应另外配置严格的 polkit、文件组和
+Caddy 管理权限。
 
-## 反向代理
+## Caddy 与域名初始化
 
-只代理 `127.0.0.1:4173`，并启用 HTTPS。`RAYLINK_PUBLIC_ORIGIN` 必须与浏览器实际访问的源完全一致，例如：
+安装阶段 Caddy 使用 IP 证书代理 `127.0.0.1:4173`。在首次初始化界面选择域名后，
+RayLink 会：
 
-```text
-RAYLINK_PUBLIC_ORIGIN=https://panel.example.com
-```
+1. 检查域名 A/AAAA 是否直接指向当前 VPS；
+2. 校验候选 Caddyfile；
+3. 平滑加载域名配置并等待自动签发证书；
+4. 将 `RAYLINK_PUBLIC_ORIGIN` 和 Host 地址持久化；
+5. 从本机使用域名 SNI 验证证书链和 HTTPS 确实可用；
+6. 保留 IP HTTPS 站点作为恢复入口；
+7. 任一步失败时恢复原 Caddyfile 和环境文件。
 
-生产 Nginx 配置应从 [nginx.conf.example](nginx.conf.example) 开始。该示例明确关闭
-`/sub/` 路径的 access log，因为 URL 中包含可直接取得用户配置的订阅密钥。不要使用会记录完整 URI
-的全局访问日志覆盖这条规则；部署后用测试订阅请求检查访问日志中不存在 `/sub/`。
+一键安装把受管 Caddyfile 和环境文件存放在 `/var/lib/raylink/managed/`，并从
+`/etc/caddy/Caddyfile`、`/etc/raylink/raylink.env` 建立兼容链接。这样控制面不需要
+写入整个 `/etc/caddy` 或 `/etc/raylink` 目录。
+
+生成的 Caddyfile 默认不开启访问日志，避免包含配置 URL 密钥的 `/sub/` 地址落盘。
+若自行增加日志，必须对 `/sub/` 路径禁用或脱敏。Caddy 的自动 HTTPS 需要公网 TCP
+80/443；证书申请和续期由 Caddy 管理。
 
 不要通过公网直接暴露 4173。
 
@@ -177,8 +199,10 @@ RAYLINK_PUBLIC_ORIGIN=https://panel.example.com
 ```bash
 systemctl status raylink
 systemctl status sing-box-raylink
+systemctl status caddy
 journalctl -u raylink -n 100 --no-pager
 journalctl -u sing-box-raylink -n 100 --no-pager
+journalctl -u caddy -n 100 --no-pager
 ```
 
 配置发布失败时，RayLink 会保留上一份活动配置；首次发布失败则不会留下未启动的活动文件。

@@ -1,0 +1,18 @@
+{
+	admin 127.0.0.1:2019
+}
+
+(raylink_proxy) {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:4173
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+}
+
+https://__RAYLINK_PUBLIC_HOST__ {
+	tls /etc/caddy/raylink/control-plane.crt /etc/caddy/raylink/control-plane.key
+	import raylink_proxy
+}

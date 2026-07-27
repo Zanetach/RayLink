@@ -82,8 +82,12 @@ flowchart LR
 
 当前发布安装包面向 **Debian/Ubuntu + systemd + AMD64（x86_64）**。在生产验收清单全部通过前，应视为候选版本。准备一台全新 VPS，并开放：
 
+- Caddy 自动 HTTPS 需要的 `80`
 - 控制台 HTTPS 端口 `443`
 - 你在界面启用的代理协议端口
+
+> [!NOTE]
+> Caddy 初始化功能当前位于 `main`，需要在下一个 Release 发布后才能通过下面的版本化命令安装；现有 v0.2.0 发布包不包含本次切换。
 
 服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
@@ -108,13 +112,17 @@ bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/dow
 
 - 安装并校验 Node.js 22
 - 安装预编译的 sing-box 1.13.14 计量版 Runtime
-- 配置 RayLink、Nginx 与 systemd 自启动
+- 配置 RayLink、HTTPS 入口与 systemd 自启动
 - 为 IP 首次访问生成本机证书
 - 输出仅显示一次、30 分钟有效的初始化地址
 
-打开安装器输出的 `https://服务器IP/setup#token=...`，依次完成访问地址、正式管理员、本机 Host 和 Runtime 检查。首次使用 IP 证书时，浏览器会提示本机签发；继续前请核对安装器打印的 SHA-256 证书指纹。
+打开安装器输出的 `https://服务器IP/setup#token=...`。选择域名时，先将域名的 A/AAAA
+记录直接解析到该 VPS（初始化时不要启用 CDN 代理），再填写域名和证书通知邮箱。RayLink
+会核对解析目标，由 Caddy 自动申请并续期证书，并在受信任 HTTPS 实际可用后完成初始化；
+同时保留 IP 恢复入口。没有域名时继续使用 IP HTTPS。首次使用 IP 证书时，浏览器会提示
+本机签发；继续前请核对安装器打印的 SHA-256 证书指纹。
 
-生产环境建议配置域名和受信任 TLS 证书。没有域名时也可以使用 IP HTTPS。完整部署、反向代理、手动安装和令牌轮换说明见 [部署手册](roms/deploy/README.md)。
+完整部署、Caddy、手动安装和令牌轮换说明见 [部署手册](roms/deploy/README.md)。
 
 ## 添加第二台 VPS
 
@@ -209,16 +217,19 @@ npm run check:production
 | `RAYLINK_DATA_DIR` | `./data` | SQLite、快照和受管配置目录 |
 | `RAYLINK_RUNTIME_MODE` | `dry-run` | `dry-run` 或 `systemd` |
 | `RAYLINK_USER_METERING` | `true` | 保留用户级流量统计能力 |
+| `RAYLINK_CADDYFILE` | `/etc/caddy/Caddyfile` | 首次初始化受管 Caddy 配置 |
+| `RAYLINK_ENV_FILE` | `/etc/raylink/raylink.env` | 域名切换后持久化正式入口 |
 | `SING_BOX_BIN` | `sing-box` | 受管 sing-box 可执行文件 |
 | `SING_BOX_SYSTEMD_UNIT` | `sing-box.service` | 发布后重启的 systemd 服务 |
 
-生产环境必须让 RayLink 只监听回环地址，并放在 HTTPS 反向代理后方；不要向公网直接开放 `4173`。`/sub/` URL 包含配置 URL 密钥，反向代理访问日志必须屏蔽该路径。
+生产环境必须让 RayLink 只监听回环地址，并由 Caddy 提供 HTTPS；不要向公网直接开放 `4173`。
+`/sub/` URL 包含配置 URL 密钥，RayLink 生成的 Caddyfile 默认不开启访问日志。
 
 ## 当前边界
 
 v0.2.0 已覆盖单控制面、多 Host、用户客户端配置、安全发布和真实流量计量的核心链路。以下功能仍在后续范围：
 
-- TLS 证书自动签发、续期和到期告警
+- TLS 证书到期告警与 DNS 提供商 API 集成
 - 配置 URL 二维码与 Mihomo 格式转换
 - 财务账单、周期重置、退款和人工调账
 - 多 Host 灰度升级与维护窗口

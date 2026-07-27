@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { RayLinkStore } from "./database.js";
 import { validateNodeEncryptionPublicKey } from "./node-secrets.js";
+import { CaddySetupAccessManager } from "./setup-access.js";
 import { buildUserClientConfig } from "./singbox/client-config.js";
 import {
   APPROVED_METERED_RUNTIME_VERSION,
@@ -197,10 +198,24 @@ function normalizeSetupInput(body) {
 
   const certificateMode = String(body.certificate?.mode || "");
   const certificateModes = accessMode === "domain"
-    ? ["external"]
+    ? ["caddy-auto", "external"]
     : ["external", "ip-self-signed"];
   if (!certificateModes.includes(certificateMode)) {
     throw httpError("INVALID_SETUP_INPUT", "证书模式与当前访问方式不匹配", 422);
+  }
+  if (certificateMode === "caddy-auto" && new URL(canonicalOrigin).port) {
+    throw httpError(
+      "CADDY_STANDARD_HTTPS_REQUIRED",
+      "Caddy 自动 HTTPS 需要使用标准 443 端口",
+      422
+    );
+  }
+  const certificateEmail = String(body.certificate?.email || "").trim().toLowerCase();
+  if (
+    certificateMode === "caddy-auto"
+    && !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,63}$/.test(certificateEmail)
+  ) {
+    throw httpError("INVALID_SETUP_INPUT", "请输入有效的证书通知邮箱", 422);
   }
 
   const username = String(body.admin?.username || "").trim();
@@ -230,7 +245,10 @@ function normalizeSetupInput(body) {
       canonicalOrigin,
       allowedOrigins: uniqueAllowedOrigins
     },
-    certificate: { mode: certificateMode },
+    certificate: {
+      mode: certificateMode,
+      ...(certificateMode === "caddy-auto" ? { email: certificateEmail } : {})
+    },
     admin: { username, password },
     runtime
   };
@@ -404,15 +422,44 @@ export async function createRayLinkApp(options) {
         : "http";
     return request.headers.host ? `${requestProtocol}://${request.headers.host}` : "";
   };
+  const setupAccessManager = options.setupAccessManager || new CaddySetupAccessManager({
+    caddyfilePath: options.caddyfilePath || "/etc/caddy/Caddyfile",
+    environmentFilePath: options.environmentFilePath || "/etc/raylink/raylink.env",
+    initialOrigin: publicOrigin.origin,
+    certificatePath: options.controlPlaneCertificatePath
+      || "/etc/caddy/raylink/control-plane.crt",
+    privateKeyPath: options.controlPlanePrivateKeyPath
+      || "/etc/caddy/raylink/control-plane.key",
+    caddyBinary: options.caddyBinary || "caddy"
+  });
+  const preserveAutomaticRecoveryOrigin = (input) => {
+    if (
+      input.certificate.mode === "caddy-auto"
+      && !input.access.allowedOrigins.includes(publicOrigin.origin)
+    ) {
+      input.access.allowedOrigins.push(publicOrigin.origin);
+    }
+  };
   const preflightSetup = async (request, input) => {
     const requestOrigin = requestOriginFor(request);
-    if (requestOrigin !== input.access.canonicalOrigin) {
+    const automaticDomain = input.certificate.mode === "caddy-auto";
+    if (
+      automaticDomain
+        ? requestOrigin !== publicOrigin.origin
+          && !input.access.allowedOrigins.includes(requestOrigin)
+        : requestOrigin !== input.access.canonicalOrigin
+    ) {
       throw httpError(
         "SETUP_ORIGIN_NOT_ACTIVE",
-        "请先通过主访问地址打开初始化链接，确认 DNS 与 HTTPS 可用后再完成初始化",
+        automaticDomain
+          ? "请通过当前 IP 初始化入口配置域名"
+          : "请先通过主访问地址打开初始化链接，确认 DNS 与 HTTPS 可用后再完成初始化",
         422
       );
     }
+    const accessChecks = automaticDomain
+      ? await setupAccessManager.preflight(input)
+      : {};
     const installation = await installer.status();
     if (options.runtimeMode === "systemd") {
       if (!installation.installed) {
@@ -429,9 +476,14 @@ export async function createRayLinkApp(options) {
     return {
       checks: {
         setupToken: "passed",
-        accessOrigin: "passed",
-        https: new URL(input.access.canonicalOrigin).protocol === "https:" ? "passed" : "development",
-        runtime: options.runtimeMode === "systemd" ? "passed" : "development"
+        accessOrigin: automaticDomain ? "configuration-ready" : "passed",
+        https: automaticDomain
+          ? "automatic"
+          : new URL(input.access.canonicalOrigin).protocol === "https:"
+            ? "passed"
+            : "development",
+        runtime: options.runtimeMode === "systemd" ? "passed" : "development",
+        ...accessChecks
       }
     };
   };
@@ -606,6 +658,7 @@ export async function createRayLinkApp(options) {
           throw httpError("SETUP_TOKEN_INVALID", "初始化令牌无效或已经过期", 401);
         }
         const input = normalizeSetupInput(body);
+        preserveAutomaticRecoveryOrigin(input);
         input.runtime = store.normalizeHostUpdate("local", input.runtime);
         sendJson(response, 200, await preflightSetup(request, input));
         return;
@@ -625,9 +678,11 @@ export async function createRayLinkApp(options) {
           throw httpError("SETUP_TOKEN_INVALID", "初始化令牌无效或已经过期", 401);
         }
         const input = normalizeSetupInput(body);
+        preserveAutomaticRecoveryOrigin(input);
         input.runtime = store.normalizeHostUpdate("local", input.runtime);
         await preflightSetup(request, input);
         store.beginSetupInitialization();
+        let accessActivation = null;
         try {
           if (options.runtimeMode === "systemd") {
             await runLocalRuntimeOperation(
@@ -635,23 +690,35 @@ export async function createRayLinkApp(options) {
               () => runtimeManager.publish(null)
             );
           }
+          if (input.certificate.mode === "caddy-auto") {
+            accessActivation = await setupAccessManager.activate(input);
+          }
           const admin = store.completeSetup(input);
+          accessActivation = null;
           authAttempts.delete(attemptKey);
           const session = store.createAdminSession(admin.id);
           const finalOrigin = currentPublicOrigin();
+          const sameOrigin = requestOriginFor(request) === finalOrigin.origin;
           sendJson(response, 201, {
             state: "READY",
             currentAdmin: admin,
-            redirectTo: "/"
-          }, {
+            redirectTo: sameOrigin ? "/" : new URL("/", finalOrigin).toString()
+          }, sameOrigin ? {
             "set-cookie": sessionCookie(
               SESSION_COOKIE,
               session.secret,
               session.expiresAt,
               finalOrigin.protocol === "https:"
             )
-          });
+          } : {});
         } catch (error) {
+          if (accessActivation?.rollback) {
+            try {
+              await accessActivation.rollback();
+            } catch (rollbackError) {
+              console.error(`[RayLink] Caddy rollback failed: ${rollbackError.message}`);
+            }
+          }
           store.failSetupInitialization();
           throw error;
         }

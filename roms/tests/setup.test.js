@@ -100,7 +100,10 @@ test("an uninitialized instance exposes only the setup flow", async (t) => {
 
   const setup = await fetch(`${testApp.baseUrl}/setup`);
   assert.equal(setup.status, 200);
-  assert.match(await setup.text(), /首次初始化 RayLink/);
+  const setupHtml = await setup.text();
+  assert.match(setupHtml, /首次初始化 RayLink/);
+  assert.match(setupHtml, /Caddy 自动 HTTPS/);
+  assert.match(setupHtml, /name="certificateEmail"/);
 
   const logo = await fetch(
     `${testApp.baseUrl}/assets/brand/raylink-mark.svg?v=20260726`
@@ -287,6 +290,198 @@ test("the one-time setup token initializes access, admin, and local runtime", as
   assert.equal((await login.json()).currentAdmin.username, "admin");
 
   assert.equal(testApp.app.store.getHost("local").name, "Tokyo Gateway");
+});
+
+test("domain setup activates Caddy from the IP initialization entry point", async (t) => {
+  const calls = [];
+  const setupAccessManager = {
+    async preflight(input) {
+      calls.push(["preflight", input.access.canonicalOrigin, input.certificate.email]);
+      return { dns: "passed", caddy: "passed" };
+    },
+    async activate(input) {
+      calls.push(["activate", input.access.canonicalOrigin, input.certificate.email]);
+      return { rollback: async () => calls.push(["rollback"]) };
+    }
+  };
+  const testApp = await startSetupApp({ setupAccessManager });
+  t.after(() => testApp.close());
+  const payload = {
+    token: testApp.setupToken,
+    access: {
+      mode: "domain",
+      canonicalOrigin: "https://panel.example.com",
+      allowedOrigins: [testApp.baseUrl]
+    },
+    certificate: {
+      mode: "caddy-auto",
+      email: "ops@example.com"
+    },
+    admin: {
+      username: "admin",
+      password: "Production@Admin2026"
+    },
+    runtime: {
+      name: "Domain Gateway",
+      address: "panel.example.com",
+      region: "tokyo"
+    }
+  };
+
+  const preflight = await requestJson(testApp.baseUrl, "/api/setup/preflight", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  assert.equal(preflight.status, 200, JSON.stringify(preflight.body));
+  assert.deepEqual(preflight.body.checks, {
+    setupToken: "passed",
+    accessOrigin: "configuration-ready",
+    https: "automatic",
+    runtime: "development",
+    dns: "passed",
+    caddy: "passed"
+  });
+
+  const completed = await requestJson(testApp.baseUrl, "/api/setup/complete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  assert.equal(completed.status, 201, JSON.stringify(completed.body));
+  assert.equal(completed.body.state, "READY");
+  assert.equal(completed.body.redirectTo, "https://panel.example.com/");
+  assert.deepEqual(
+    testApp.app.store.setupStatus().access.allowedOrigins.sort(),
+    ["http://127.0.0.1", testApp.baseUrl, "https://panel.example.com"].sort()
+  );
+  assert.deepEqual(calls, [
+    ["preflight", "https://panel.example.com", "ops@example.com"],
+    ["preflight", "https://panel.example.com", "ops@example.com"],
+    ["activate", "https://panel.example.com", "ops@example.com"]
+  ]);
+});
+
+test("automatic Caddy setup rejects a nonstandard HTTPS port", async (t) => {
+  const testApp = await startSetupApp({
+    setupAccessManager: {
+      preflight: async () => ({ dns: "passed", caddy: "passed" }),
+      activate: async () => ({ rollback: async () => {} })
+    }
+  });
+  t.after(() => testApp.close());
+
+  const response = await requestJson(testApp.baseUrl, "/api/setup/preflight", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: testApp.setupToken,
+      access: {
+        mode: "domain",
+        canonicalOrigin: "https://panel.example.com:8443",
+        allowedOrigins: [testApp.baseUrl]
+      },
+      certificate: {
+        mode: "caddy-auto",
+        email: "ops@example.com"
+      },
+      admin: {
+        username: "admin",
+        password: "Production@Admin2026"
+      },
+      runtime: {
+        name: "Domain Gateway",
+        address: "panel.example.com",
+        region: "tokyo"
+      }
+    })
+  });
+
+  assert.equal(response.status, 422);
+  assert.equal(response.body.error.code, "CADDY_STANDARD_HTTPS_REQUIRED");
+
+  const unsafeEmail = await requestJson(testApp.baseUrl, "/api/setup/preflight", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: testApp.setupToken,
+      access: {
+        mode: "domain",
+        canonicalOrigin: "https://panel.example.com",
+        allowedOrigins: [testApp.baseUrl]
+      },
+      certificate: {
+        mode: "caddy-auto",
+        email: "ops@example.com{"
+      },
+      admin: {
+        username: "admin",
+        password: "Production@Admin2026"
+      },
+      runtime: {
+        name: "Domain Gateway",
+        address: "panel.example.com",
+        region: "tokyo"
+      }
+    })
+  });
+  assert.equal(unsafeEmail.status, 422);
+  assert.equal(unsafeEmail.body.error.code, "INVALID_SETUP_INPUT");
+});
+
+test("a failed Caddy activation leaves first-run setup retryable", async (t) => {
+  const activationError = Object.assign(new Error("certificate challenge failed"), {
+    code: "CADDY_ACTIVATION_FAILED",
+    statusCode: 502
+  });
+  const testApp = await startSetupApp({
+    setupAccessManager: {
+      preflight: async () => ({ dns: "passed", caddy: "passed" }),
+      activate: async () => {
+        throw activationError;
+      }
+    }
+  });
+  t.after(() => testApp.close());
+  const response = await requestJson(testApp.baseUrl, "/api/setup/complete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: testApp.setupToken,
+      access: {
+        mode: "domain",
+        canonicalOrigin: "https://panel.example.com",
+        allowedOrigins: [testApp.baseUrl]
+      },
+      certificate: {
+        mode: "caddy-auto",
+        email: "ops@example.com"
+      },
+      admin: {
+        username: "admin",
+        password: "Production@Admin2026"
+      },
+      runtime: {
+        name: "Domain Gateway",
+        address: "panel.example.com",
+        region: "tokyo"
+      }
+    })
+  });
+
+  assert.equal(response.status, 502);
+  assert.equal(response.body.error.code, "CADDY_ACTIVATION_FAILED");
+  const status = await fetch(`${testApp.baseUrl}/api/setup/status`);
+  assert.equal((await status.json()).state, "SETUP_PENDING");
+  const login = await fetch(`${testApp.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      username: "admin",
+      password: "Production@Admin2026"
+    })
+  });
+  assert.equal(login.status, 423);
 });
 
 test("the control-plane installer emits a fragment setup URL and never persists plaintext token", async () => {

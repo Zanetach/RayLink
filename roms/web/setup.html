@@ -48,7 +48,7 @@
         <section class="setup-step" data-step="1" hidden>
           <p class="eyebrow">Step 2 / 5</p>
           <h2>访问入口与 HTTPS</h2>
-          <p class="setup-intro">域名和 IP 均可作为管理入口。公网环境必须使用 HTTPS；域名方式需先准备有效证书和反向代理，IP 方式可使用安装器生成的证书。</p>
+          <p class="setup-intro">域名和 IP 均可作为管理入口。选择域名后，请先将 A/AAAA 记录直接解析到本机公网 IP；RayLink 会检查 DNS，并由 Caddy 自动申请和续期 HTTPS 证书。IP 入口会保留用于故障恢复。</p>
           <div class="setup-choice-grid">
             <label class="setup-choice">
               <input type="radio" name="accessMode" value="domain" checked>
@@ -71,8 +71,14 @@
           <label class="field">
             <span>证书方式</span>
             <select name="certificateMode">
+              <option value="caddy-auto">Caddy 自动 HTTPS</option>
               <option value="external">已有 HTTPS / 反向代理</option>
             </select>
+          </label>
+          <label class="field" data-certificate-email>
+            <span>证书通知邮箱</span>
+            <input name="certificateEmail" type="email" autocomplete="email" placeholder="ops@example.com">
+            <small>用于 ACME 证书账户和到期通知，不会展示给终端用户。</small>
           </label>
         </section>
 
@@ -137,6 +143,6 @@
       </form>
     </section>
   </main>
-  <script type="module" src="/setup.js?v=0.2.0-20260727"></script>
+  <script type="module" src="/setup.js?v=0.2.0-20260728"></script>
 </body>
 </html>

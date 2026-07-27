@@ -7,9 +7,10 @@ fail() {
 }
 
 [ "$(id -u)" -eq 0 ] || fail "请以 root 运行"
-env_file=/etc/raylink/raylink.env
+env_link=/etc/raylink/raylink.env
+env_file="$(readlink -f "$env_link")"
 node_binary=/opt/raylink-nodejs/bin/node
-[ -f "$env_file" ] || fail "未找到 $env_file"
+[ -n "$env_file" ] && [ -f "$env_file" ] || fail "未找到 $env_link"
 [ -x "$node_binary" ] || fail "未找到 RayLink Node.js Runtime"
 grep -q '^RAYLINK_SETUP_REQUIRED=true$' "$env_file" \
   || fail "该实例未处于首次初始化模式"
@@ -42,7 +43,7 @@ public_origin="$(sed -n 's/^RAYLINK_PUBLIC_ORIGIN=//p' "$env_file" | head -n 1)"
 printf '%s' "$public_origin" | grep -Eq '^https://[^[:space:]]+$' \
   || fail "RAYLINK_PUBLIC_ORIGIN 不是有效的 HTTPS 地址"
 
-temporary_env="$(mktemp /etc/raylink/raylink.env.XXXXXX)"
+temporary_env="$(mktemp "${env_file}.XXXXXX")"
 trap 'rm -f "$temporary_env"' EXIT
 awk \
   -v token_hash="$setup_token_hash" \

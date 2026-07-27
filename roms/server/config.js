@@ -45,6 +45,15 @@ export function loadConfig(env = process.env) {
     listenPort: positiveInteger(env.RAYLINK_PROXY_PORT, 8388, "RAYLINK_PROXY_PORT"),
     setupRequired,
     setupTokenHash: env.RAYLINK_SETUP_TOKEN_HASH || "",
-    setupTokenExpiresAt: env.RAYLINK_SETUP_TOKEN_EXPIRES_AT || ""
+    setupTokenExpiresAt: env.RAYLINK_SETUP_TOKEN_EXPIRES_AT || "",
+    caddyBinary: env.RAYLINK_CADDY_BIN || "caddy",
+    caddyfilePath: resolve(env.RAYLINK_CADDYFILE || "/etc/caddy/Caddyfile"),
+    environmentFilePath: resolve(env.RAYLINK_ENV_FILE || "/etc/raylink/raylink.env"),
+    controlPlaneCertificatePath: resolve(
+      env.RAYLINK_CONTROL_CERT || "/etc/caddy/raylink/control-plane.crt"
+    ),
+    controlPlanePrivateKeyPath: resolve(
+      env.RAYLINK_CONTROL_KEY || "/etc/caddy/raylink/control-plane.key"
+    )
   };
 }
