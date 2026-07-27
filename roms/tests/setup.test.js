@@ -71,6 +71,21 @@ async function startSetupApp(overrides = {}) {
   };
 }
 
+test("setup page assets load when previewed directly from disk", async () => {
+  const setupPage = new URL("../web/setup.html", import.meta.url);
+  const html = await readFile(setupPage, "utf8");
+  const assetReferences = [
+    ...html.matchAll(/(?:href|src)="([^"]+\.(?:css|js|svg)(?:\?[^"]*)?)"/g)
+  ].map((match) => match[1]);
+
+  assert.ok(assetReferences.length >= 4);
+  for (const reference of assetReferences) {
+    const asset = new URL(reference, setupPage);
+    asset.search = "";
+    await readFile(asset);
+  }
+});
+
 test("setup-required instances without a token expose UNINITIALIZED until a token is generated", async (t) => {
   const testApp = await startSetupApp({
     setupTokenHash: "",
@@ -100,10 +115,15 @@ test("an uninitialized instance exposes only the setup flow", async (t) => {
 
   const setup = await fetch(`${testApp.baseUrl}/setup`);
   assert.equal(setup.status, 200);
+  assert.equal(setup.headers.get("cache-control"), "no-cache");
   const setupHtml = await setup.text();
   assert.match(setupHtml, /首次初始化 RayLink/);
   assert.match(setupHtml, /Caddy 自动 HTTPS/);
   assert.match(setupHtml, /name="certificateEmail"/);
+
+  const setupSlash = await fetch(`${testApp.baseUrl}/setup/`, { redirect: "manual" });
+  assert.equal(setupSlash.status, 302);
+  assert.equal(setupSlash.headers.get("location"), "/setup");
 
   const logo = await fetch(
     `${testApp.baseUrl}/assets/brand/raylink-mark.svg?v=20260726`

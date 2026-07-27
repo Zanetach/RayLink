@@ -5,21 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="RayLink 首次初始化">
   <title>初始化 RayLink</title>
-  <link rel="icon" href="/assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=0.2.0-20260727">
-  <link rel="stylesheet" href="/setup.css?v=0.2.0-20260727">
+  <link rel="icon" href="./assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css?v=0.2.0-20260727">
+  <link rel="stylesheet" href="./setup.css?v=0.2.0-20260730">
 </head>
 <body class="setup-page">
-  <main class="setup-shell">
+  <a class="skip-link" href="#setup-main">跳到初始化表单</a>
+  <main class="setup-shell" id="setup-main">
     <header class="setup-brand">
-      <span class="brand-mark"><img src="/assets/brand/raylink-mark.svg?v=20260726" alt="" aria-hidden="true"></span>
-      <span><strong>RayLink</strong><small>First-run setup</small></span>
+      <span class="setup-brand-identity">
+        <span class="brand-mark"><img src="./assets/brand/raylink-mark.svg?v=20260726" alt="" aria-hidden="true"></span>
+        <span><strong>RayLink</strong><small>Control plane</small></span>
+      </span>
+      <span class="setup-security-state"><i aria-hidden="true"></i>Secure bootstrap</span>
     </header>
 
     <section class="setup-card" aria-labelledby="setup-title">
       <aside class="setup-sidebar">
         <p class="eyebrow">安全初始化</p>
-        <h1 id="setup-title">首次初始化 RayLink</h1>
+        <h1 id="setup-title" aria-label="首次初始化 RayLink">
+          <span>首次初始化</span>
+          <span>RayLink</span>
+        </h1>
         <p>完成访问入口、管理员和本机 Runtime 配置。一次性令牌只在本次初始化中使用。</p>
         <ol class="setup-progress" aria-label="初始化进度">
           <li class="active" data-progress="0"><span>1</span>验证安装</li>
@@ -143,6 +150,6 @@
       </form>
     </section>
   </main>
-  <script type="module" src="/setup.js?v=0.2.0-20260728"></script>
+  <script defer src="./setup.js?v=0.2.0-20260730"></script>
 </body>
 </html>

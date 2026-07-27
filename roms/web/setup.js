@@ -9,6 +9,7 @@ const stateLabel = document.querySelector("#setup-state-label");
 const expiryLabel = document.querySelector("#setup-expiry");
 const summary = document.querySelector("#setup-summary");
 const preflightElement = document.querySelector("#setup-preflight");
+const previewMode = location.protocol === "file:";
 let currentStep = 0;
 let preflightPassed = false;
 
@@ -168,6 +169,7 @@ function showStep(index) {
     renderSummary();
     void runPreflight();
   }
+  steps[currentStep].scrollTop = 0;
   steps[currentStep].querySelector("input, select, textarea")?.focus();
 }
 
@@ -234,6 +236,17 @@ form.addEventListener("submit", async (event) => {
 async function initialize() {
   tokenFromFragment();
   updateCertificateOptions();
+  if (previewMode) {
+    stateLabel.textContent = "本地界面预览";
+    expiryLabel.textContent = "部署后将在这里显示初始化令牌有效期";
+    form.elements.token.value = "raylink-preview-token";
+    form.elements.accessMode.value = "domain";
+    form.elements.canonicalOrigin.value = "https://panel.example.com";
+    form.elements.certificateEmail.value = "ops@example.com";
+    form.elements.runtimeAddress.value = "panel.example.com";
+    updateCertificateOptions();
+    return;
+  }
   const status = await api("/api/setup/status");
   if (status.state === "READY") {
     location.replace("/");

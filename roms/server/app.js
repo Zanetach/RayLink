@@ -140,7 +140,7 @@ async function sendStatic(response, webDir, pathname) {
     response.writeHead(200, {
       "content-type": contentTypes[extname(filePath)] || "application/octet-stream",
       "content-length": payload.length,
-      "cache-control": filePath.endsWith("index.html") ? "no-cache" : "public, max-age=300",
+      "cache-control": filePath.endsWith(".html") ? "no-cache" : "public, max-age=300",
       "content-security-policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
@@ -727,6 +727,11 @@ export async function createRayLinkApp(options) {
 
       if (setup.state !== "READY") {
         if (request.method === "GET" && ["/", "/index.html"].includes(url.pathname)) {
+          response.writeHead(302, { location: "/setup", "cache-control": "no-store" });
+          response.end();
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/setup/") {
           response.writeHead(302, { location: "/setup", "cache-control": "no-store" });
           response.end();
           return;
