@@ -250,6 +250,11 @@ chmod 0640 "$managed_root/Caddyfile"
 ln -sfn "$managed_root/Caddyfile" /etc/caddy/Caddyfile
 caddy validate --config "$managed_root/Caddyfile" --adapter caddyfile
 systemctl daemon-reload
+if command -v ufw >/dev/null 2>&1 \
+  && ufw status 2>/dev/null | grep -q '^Status: active'; then
+  ufw allow 80/tcp comment 'RayLink Caddy HTTP'
+  ufw allow 443/tcp comment 'RayLink Caddy HTTPS'
+fi
 systemctl enable --now caddy
 systemctl reload caddy
 systemctl enable sing-box-raylink

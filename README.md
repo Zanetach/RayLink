@@ -89,20 +89,20 @@ flowchart LR
 服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.1/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.2/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.1/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.2/install.sh | sudo bash'
 ```
 
 脚本会检测公网 IP，下载固定的 AMD64 发布包及 SHA-256，校验后解压，再执行系统安装。
 若需要指定公网 IP：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.1/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.2/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 一键安装会自动完成：
@@ -226,7 +226,7 @@ npm run check:production
 
 ## 当前边界
 
-v0.2.1 已覆盖单控制面、多 Host、用户客户端配置、安全发布、真实流量计量，以及由 Caddy 管理的首次初始化与域名配置。以下功能仍在后续范围：
+v0.2.2 已覆盖单控制面、多 Host、用户客户端配置、安全发布、真实流量计量，以及由 Caddy 管理的首次初始化与域名配置。以下功能仍在后续范围：
 
 - TLS 证书到期告警与 DNS 提供商 API 集成
 - 配置 URL 二维码与 Mihomo 格式转换
@@ -244,6 +244,7 @@ v0.2.1 已覆盖单控制面、多 Host、用户客户端配置、安全发布�
 - [生产落地计划](roms/docs/release/raylink-production-implementation-plan.md)
 - [v0.2.0 生产候选验收记录](roms/docs/release/v0.2.0-production-acceptance.md)
 - [v0.2.1 发布说明](roms/docs/release/v0.2.1.md)
+- [v0.2.2 发布说明](roms/docs/release/v0.2.2.md)
 - [领域模型](roms/CONTEXT.md)
 - [架构决策记录](roms/docs/adr/)
 - [v0.2.0 发布说明](roms/docs/release/v0.2.0.md)

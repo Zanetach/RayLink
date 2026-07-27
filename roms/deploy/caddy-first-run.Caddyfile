@@ -12,7 +12,11 @@
 	}
 }
 
-https://__RAYLINK_PUBLIC_HOST__ {
+:443 {
 	tls /etc/caddy/raylink/control-plane.crt /etc/caddy/raylink/control-plane.key
 	import raylink_proxy
+}
+
+http://__RAYLINK_PUBLIC_HOST__ {
+	redir https://__RAYLINK_PUBLIC_HOST__{uri} permanent
 }
