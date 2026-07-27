@@ -12,9 +12,13 @@ export function loadConfig(env = process.env) {
   const host = env.RAYLINK_HOST || "127.0.0.1";
   const port = positiveInteger(env.RAYLINK_PORT, 4173, "RAYLINK_PORT");
   const publicOrigin = env.RAYLINK_PUBLIC_ORIGIN || `http://${host}:${port}`;
+  const subscriptionOrigin = env.RAYLINK_SUBSCRIPTION_ORIGIN || publicOrigin;
   const setupRequired = env.RAYLINK_SETUP_REQUIRED === "true";
   if (env.NODE_ENV === "production" && new URL(publicOrigin).protocol !== "https:") {
     throw new Error("RAYLINK_PUBLIC_ORIGIN must use HTTPS in production");
+  }
+  if (env.NODE_ENV === "production" && new URL(subscriptionOrigin).protocol !== "https:") {
+    throw new Error("RAYLINK_SUBSCRIPTION_ORIGIN must use HTTPS in production");
   }
   if (Boolean(env.RAYLINK_SETUP_TOKEN_HASH) !== Boolean(env.RAYLINK_SETUP_TOKEN_EXPIRES_AT)) {
     throw new Error("RAYLINK_SETUP_TOKEN_HASH and RAYLINK_SETUP_TOKEN_EXPIRES_AT must be set together");
@@ -37,6 +41,7 @@ export function loadConfig(env = process.env) {
     seedDemoData: env.NODE_ENV !== "production",
     trustProxy: env.RAYLINK_TRUST_PROXY === "true",
     publicOrigin,
+    subscriptionOrigin,
     proxyHost: env.RAYLINK_PROXY_HOST || new URL(publicOrigin).hostname,
     runtimeMode,
     preferMeteredRuntime: env.RAYLINK_USER_METERING !== "false",

@@ -14,6 +14,7 @@ test("Caddy setup activates a domain and can restore the IP entry point", async 
   const originalCaddyfile = "https://203.0.113.10 {\n  reverse_proxy 127.0.0.1:4173\n}\n";
   const originalEnvironment = [
     "RAYLINK_PUBLIC_ORIGIN=https://203.0.113.10",
+    "RAYLINK_SUBSCRIPTION_ORIGIN=https://203.0.113.10",
     "RAYLINK_PROXY_HOST=203.0.113.10",
     ""
   ].join("\n");
@@ -21,19 +22,27 @@ test("Caddy setup activates a domain and can restore the IP entry point", async 
   await writeFile(environmentFilePath, originalEnvironment);
   const commands = [];
   const verifiedOrigins = [];
+  const resolvedDomains = [];
   const manager = new CaddySetupAccessManager({
     caddyfilePath,
     environmentFilePath,
     initialOrigin: "https://203.0.113.10",
     certificatePath: "/etc/caddy/raylink/control-plane.crt",
     privateKeyPath: "/etc/caddy/raylink/control-plane.key",
-    lookup: async () => [{ address: "203.0.113.10", family: 4 }],
+    lookup: async (hostname) => {
+      resolvedDomains.push(hostname);
+      return [{ address: "203.0.113.10", family: 4 }];
+    },
     runCommand: async (command, args) => commands.push([command, ...args]),
     verifyHttps: async (origin) => verifiedOrigins.push(origin)
   });
   const input = {
-    access: { canonicalOrigin: "https://panel.example.com" },
-    certificate: { mode: "caddy-auto", email: "ops@example.com" }
+    access: {
+      canonicalOrigin: "https://panel.example.com",
+      subscriptionOrigin: "https://sub.example.com"
+    },
+    certificate: { mode: "caddy-auto", email: "ops@example.com" },
+    runtime: { address: "node.example.com" }
   };
 
   assert.deepEqual(await manager.preflight(input), {
@@ -45,6 +54,9 @@ test("Caddy setup activates a domain and can restore the IP entry point", async 
   const activeCaddyfile = await readFile(caddyfilePath, "utf8");
   assert.match(activeCaddyfile, /email ops@example\.com/);
   assert.match(activeCaddyfile, /panel\.example\.com \{/);
+  assert.match(activeCaddyfile, /sub\.example\.com \{/);
+  assert.match(activeCaddyfile, /path \/sub\/\* \/rule-sets\/\*/);
+  assert.match(activeCaddyfile, /respond 404/);
   assert.match(activeCaddyfile, /https:\/\/203\.0\.113\.10 \{/);
   assert.match(activeCaddyfile, /tls \/etc\/caddy\/raylink\/control-plane\.crt \/etc\/caddy\/raylink\/control-plane\.key/);
   assert.match(activeCaddyfile, /reverse_proxy 127\.0\.0\.1:4173/);
@@ -53,16 +65,21 @@ test("Caddy setup activates a domain and can restore the IP entry point", async 
     await readFile(environmentFilePath, "utf8"),
     [
       "RAYLINK_PUBLIC_ORIGIN=https://panel.example.com",
-      "RAYLINK_PROXY_HOST=panel.example.com",
+      "RAYLINK_SUBSCRIPTION_ORIGIN=https://sub.example.com",
+      "RAYLINK_PROXY_HOST=node.example.com",
       ""
     ].join("\n")
   );
+  assert.deepEqual(resolvedDomains, ["panel.example.com", "sub.example.com"]);
   assert.deepEqual(commands, [
     ["caddy", "version"],
     ["caddy", "adapt", "--config", `${caddyfilePath}.candidate`, "--adapter", "caddyfile"],
     ["caddy", "reload", "--config", caddyfilePath, "--adapter", "caddyfile"]
   ]);
-  assert.deepEqual(verifiedOrigins, ["https://panel.example.com"]);
+  assert.deepEqual(verifiedOrigins, [
+    "https://panel.example.com",
+    "https://sub.example.com"
+  ]);
 
   await activation.rollback();
   assert.equal(await readFile(caddyfilePath, "utf8"), originalCaddyfile);
@@ -104,8 +121,12 @@ test("Caddy setup restores both files when the live reload fails", async (t) => 
 
   await assert.rejects(
     () => manager.activate({
-      access: { canonicalOrigin: "https://panel.example.com" },
-      certificate: { mode: "caddy-auto", email: "ops@example.com" }
+      access: {
+        canonicalOrigin: "https://panel.example.com",
+        subscriptionOrigin: "https://sub.example.com"
+      },
+      certificate: { mode: "caddy-auto", email: "ops@example.com" },
+      runtime: { address: "node.example.com" }
     }),
     (error) => {
       assert.equal(error.code, "CADDY_ACTIVATION_FAILED");
@@ -132,7 +153,10 @@ test("Caddy setup rejects DNS records that do not point to the initial server", 
 
   await assert.rejects(
     () => manager.preflight({
-      access: { canonicalOrigin: "https://panel.example.com" },
+      access: {
+        canonicalOrigin: "https://panel.example.com",
+        subscriptionOrigin: "https://sub.example.com"
+      },
       certificate: { mode: "caddy-auto", email: "ops@example.com" }
     }),
     (error) => {
@@ -173,8 +197,12 @@ test("Caddy setup restores both files when the second atomic replacement fails",
 
   await assert.rejects(
     () => manager.activate({
-      access: { canonicalOrigin: "https://panel.example.com" },
-      certificate: { mode: "caddy-auto", email: "ops@example.com" }
+      access: {
+        canonicalOrigin: "https://panel.example.com",
+        subscriptionOrigin: "https://sub.example.com"
+      },
+      certificate: { mode: "caddy-auto", email: "ops@example.com" },
+      runtime: { address: "node.example.com" }
     }),
     (error) => {
       assert.equal(error.code, "CADDY_FILES_ACTIVATION_FAILED");
@@ -212,8 +240,12 @@ test("Caddy setup restores the IP entry point when trusted HTTPS is unavailable"
 
   await assert.rejects(
     () => manager.activate({
-      access: { canonicalOrigin: "https://panel.example.com" },
-      certificate: { mode: "caddy-auto", email: "ops@example.com" }
+      access: {
+        canonicalOrigin: "https://panel.example.com",
+        subscriptionOrigin: "https://sub.example.com"
+      },
+      certificate: { mode: "caddy-auto", email: "ops@example.com" },
+      runtime: { address: "node.example.com" }
     }),
     (error) => {
       assert.equal(error.code, "DOMAIN_HTTPS_NOT_READY");

@@ -22,6 +22,29 @@ test("production control plane requires an HTTPS public origin", () => {
   );
 });
 
+test("subscription origin is independent from the control-plane and Host addresses", () => {
+  const config = loadConfig({
+    NODE_ENV: "production",
+    RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
+    RAYLINK_SUBSCRIPTION_ORIGIN: "https://sub.example.com",
+    RAYLINK_PROXY_HOST: "node.example.com",
+    RAYLINK_ADMIN_PASSWORD: "a-production-password"
+  });
+
+  assert.equal(config.publicOrigin, "https://panel.example.com");
+  assert.equal(config.subscriptionOrigin, "https://sub.example.com");
+  assert.equal(config.proxyHost, "node.example.com");
+  assert.throws(
+    () => loadConfig({
+      NODE_ENV: "production",
+      RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
+      RAYLINK_SUBSCRIPTION_ORIGIN: "http://sub.example.com",
+      RAYLINK_ADMIN_PASSWORD: "a-production-password"
+    }),
+    /RAYLINK_SUBSCRIPTION_ORIGIN must use HTTPS/
+  );
+});
+
 test("production first-run mode still requires HTTPS and a hashed expiring token", () => {
   assert.throws(
     () => loadConfig({

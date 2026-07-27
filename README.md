@@ -116,11 +116,13 @@ bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/dow
 - 为 IP 首次访问生成本机证书
 - 输出仅显示一次、30 分钟有效的初始化地址
 
-打开安装器输出的 `https://服务器IP/setup#token=...`。选择域名时，先将域名的 A/AAAA
-记录直接解析到该 VPS（初始化时不要启用 CDN 代理），再填写域名和证书通知邮箱。RayLink
-会核对解析目标，由 Caddy 自动申请并续期证书，并在受信任 HTTPS 实际可用后完成初始化；
-同时保留 IP 恢复入口。没有域名时继续使用 IP HTTPS。首次使用 IP 证书时，浏览器会提示
-本机签发；继续前请核对安装器打印的 SHA-256 证书指纹。
+打开安装器输出的 `https://服务器IP/setup#token=...`。域名模式将控制台、订阅服务和
+Host 节点连接地址拆开，例如 `panel.example.com`、`sub.example.com` 和
+`node.example.com`，三个域名可以同时解析到同一个公网 IP。初始化时不要为节点域名启用
+CDN 代理。RayLink 会检查控制台和订阅域名的解析目标，由 Caddy 分别申请并续期证书；
+订阅域名只开放 `/sub/*` 和 `/rule-sets/*`。节点域名保存在 Host 上，用于生成 sing-box
+客户端连接配置。系统同时保留 IP 恢复入口。没有域名时继续使用 IP HTTPS；首次使用 IP
+证书时，请核对安装器打印的 SHA-256 证书指纹。
 
 完整部署、Caddy、手动安装和令牌轮换说明见 [部署手册](roms/deploy/README.md)。
 

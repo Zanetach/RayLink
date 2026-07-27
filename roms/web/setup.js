@@ -64,6 +64,10 @@ function updateCertificateOptions() {
   const emailField = document.querySelector("[data-certificate-email]");
   emailField.hidden = !automaticCertificate;
   form.elements.certificateEmail.required = automaticCertificate;
+  const subscriptionField = document.querySelector("[data-subscription-origin]");
+  subscriptionField.hidden = mode !== "domain";
+  form.elements.subscriptionOrigin.disabled = mode !== "domain";
+  form.elements.subscriptionOrigin.required = mode === "domain";
   form.elements.canonicalOrigin.placeholder = mode === "domain"
     ? "https://panel.example.com"
     : "https://203.0.113.10";
@@ -148,7 +152,10 @@ function renderSummary() {
   const mode = form.elements.accessMode.value;
   const rows = [
     ["访问方式", mode === "domain" ? "域名" : "IP 地址"],
-    ["主访问地址", form.elements.canonicalOrigin.value.trim()],
+    ["控制台地址", form.elements.canonicalOrigin.value.trim()],
+    ["订阅服务", mode === "domain"
+      ? form.elements.subscriptionOrigin.value.trim()
+      : form.elements.canonicalOrigin.value.trim()],
     ["证书方式", form.elements.certificateMode.selectedOptions[0]?.textContent || ""],
     ...(form.elements.certificateMode.value === "caddy-auto"
       ? [["证书邮箱", form.elements.certificateEmail.value.trim()]]
@@ -233,6 +240,9 @@ function setupPayload() {
     access: {
       mode: form.elements.accessMode.value,
       canonicalOrigin: form.elements.canonicalOrigin.value.trim(),
+      subscriptionOrigin: form.elements.accessMode.value === "domain"
+        ? form.elements.subscriptionOrigin.value.trim()
+        : form.elements.canonicalOrigin.value.trim(),
       allowedOrigins: form.elements.allowedOrigins.value
         .split(/\r?\n/)
         .map((value) => value.trim())
@@ -305,8 +315,9 @@ async function initialize() {
     form.elements.token.value = "raylink-preview-token";
     form.elements.accessMode.value = "domain";
     form.elements.canonicalOrigin.value = "https://panel.example.com";
+    form.elements.subscriptionOrigin.value = "https://sub.example.com";
     form.elements.certificateEmail.value = "ops@example.com";
-    form.elements.runtimeAddress.value = "panel.example.com";
+    form.elements.runtimeAddress.value = "node.example.com";
     updateCertificateOptions();
     return;
   }

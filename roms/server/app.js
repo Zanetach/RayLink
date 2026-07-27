@@ -180,9 +180,17 @@ function normalizeSetupInput(body) {
     throw httpError("INVALID_SETUP_INPUT", "请选择域名或 IP 访问模式", 422);
   }
   const canonicalOrigin = normalizedOrigin(body.access?.canonicalOrigin, "主访问地址");
+  const subscriptionOrigin = normalizedOrigin(
+    body.access?.subscriptionOrigin || canonicalOrigin,
+    "订阅服务地址"
+  );
   const canonicalHost = new URL(canonicalOrigin).hostname.replace(/^\[|\]$/g, "");
+  const subscriptionHost = new URL(subscriptionOrigin).hostname.replace(/^\[|\]$/g, "");
   if (accessMode === "domain" && isIP(canonicalHost)) {
     throw httpError("INVALID_SETUP_INPUT", "域名访问模式不能填写 IP 地址", 422);
+  }
+  if (accessMode === "domain" && isIP(subscriptionHost)) {
+    throw httpError("INVALID_SETUP_INPUT", "订阅服务地址必须填写域名", 422);
   }
   if (accessMode === "ip" && !isIP(canonicalHost) && canonicalHost !== "localhost") {
     throw httpError("INVALID_SETUP_INPUT", "IP 访问模式必须填写 IP 地址", 422);
@@ -203,10 +211,13 @@ function normalizeSetupInput(body) {
   if (!certificateModes.includes(certificateMode)) {
     throw httpError("INVALID_SETUP_INPUT", "证书模式与当前访问方式不匹配", 422);
   }
-  if (certificateMode === "caddy-auto" && new URL(canonicalOrigin).port) {
+  if (
+    certificateMode === "caddy-auto"
+    && (new URL(canonicalOrigin).port || new URL(subscriptionOrigin).port)
+  ) {
     throw httpError(
       "CADDY_STANDARD_HTTPS_REQUIRED",
-      "Caddy 自动 HTTPS 需要使用标准 443 端口",
+      "Caddy 自动 HTTPS 的控制台和订阅地址需要使用标准 443 端口",
       422
     );
   }
@@ -243,6 +254,7 @@ function normalizeSetupInput(body) {
     access: {
       mode: accessMode,
       canonicalOrigin,
+      subscriptionOrigin,
       allowedOrigins: uniqueAllowedOrigins
     },
     certificate: {
@@ -294,6 +306,7 @@ function clearedSessionCookie(name, secure) {
 export async function createRayLinkApp(options) {
   const dbPath = options.dbPath || join(options.dataDir, "raylink.db");
   const publicOrigin = new URL(options.publicOrigin);
+  const configuredSubscriptionOrigin = new URL(options.subscriptionOrigin || publicOrigin);
   const proxyHost = options.proxyHost || publicOrigin.hostname;
   const listenPort = options.listenPort || 8388;
   const store = new RayLinkStore({
@@ -311,6 +324,10 @@ export async function createRayLinkApp(options) {
   const currentPublicOrigin = () => {
     const configured = store.setupStatus().access?.canonicalOrigin;
     return configured ? new URL(configured) : publicOrigin;
+  };
+  const currentSubscriptionOrigin = () => {
+    const configured = store.setupStatus().access?.subscriptionOrigin;
+    return configured ? new URL(configured) : configuredSubscriptionOrigin;
   };
   const requestOriginIsAllowed = (request) => {
     const requestOrigin = request.headers.origin;
@@ -575,7 +592,7 @@ export async function createRayLinkApp(options) {
       credential,
       hosts: eligibleHosts,
       ruleSetBaseUrl: ruleSetCache.available()
-        ? new URL("/rule-sets/", currentPublicOrigin()).toString()
+        ? new URL("/rule-sets/", currentSubscriptionOrigin()).toString()
         : null
     });
   };
@@ -634,6 +651,30 @@ export async function createRayLinkApp(options) {
     try {
       const url = new URL(request.url, currentPublicOrigin());
       const setup = store.setupStatus();
+      const subscriptionOrigin = currentSubscriptionOrigin();
+      let requestHostname = "";
+      try {
+        const forwardedHost = options.trustProxy
+          ? String(request.headers["x-forwarded-host"] || "").split(",")[0].trim()
+          : "";
+        requestHostname = new URL(
+          `http://${forwardedHost || request.headers.host || ""}`
+        ).hostname;
+      } catch {
+        requestHostname = "";
+      }
+      const subscriptionOnlyHost = subscriptionOrigin.hostname !== currentPublicOrigin().hostname
+        && requestHostname === subscriptionOrigin.hostname;
+      if (
+        subscriptionOnlyHost
+        && !url.pathname.startsWith("/sub/")
+        && !url.pathname.startsWith("/rule-sets/")
+      ) {
+        sendJson(response, 404, {
+          error: { code: "NOT_FOUND", message: "接口不存在" }
+        });
+        return;
+      }
 
       if (request.method === "GET" && url.pathname === "/api/setup/status") {
         sendJson(response, 200, {
@@ -890,7 +931,7 @@ export async function createRayLinkApp(options) {
           sendJson(response, 201, {
             subscriptionUrl: new URL(
               `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
-              currentPublicOrigin()
+              currentSubscriptionOrigin()
             ).toString()
           });
           return;
@@ -1261,7 +1302,7 @@ export async function createRayLinkApp(options) {
           sendJson(response, 201, {
             subscriptionUrl: new URL(
               `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
-              currentPublicOrigin()
+              currentSubscriptionOrigin()
             ).toString()
           });
           return;

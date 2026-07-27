@@ -120,10 +120,10 @@ bash /opt/raylink/deploy/rotate-setup-token.sh
 首次初始化包含五步：
 
 1. 验证一次性安装令牌；
-2. 选择域名或 IP 主访问入口；域名模式填写证书通知邮箱，由 Caddy 检查 DNS、
-   自动申请证书并配置续期；
+2. 选择域名或 IP 访问入口；域名模式分别填写控制台域名和订阅域名，由 Caddy
+   检查 DNS、自动申请证书并配置续期；
 3. 创建正式管理员；
-4. 设置本机 Runtime 名称、地址和区域；
+4. 设置本机 Runtime 名称、节点连接地址和区域；
 5. 检查并进入控制台。
 
 没有域名时可以长期使用 IP HTTPS；浏览器需要信任安装器生成的本机证书。使用域名时
@@ -176,13 +176,16 @@ Caddy 管理权限。
 安装阶段 Caddy 使用 IP 证书代理 `127.0.0.1:4173`。在首次初始化界面选择域名后，
 RayLink 会：
 
-1. 检查域名 A/AAAA 是否直接指向当前 VPS；
+1. 检查控制台域名和订阅域名的 A/AAAA 是否直接指向当前 VPS；
 2. 校验候选 Caddyfile；
-3. 平滑加载域名配置并等待自动签发证书；
-4. 将 `RAYLINK_PUBLIC_ORIGIN` 和 Host 地址持久化；
-5. 从本机使用域名 SNI 验证证书链和 HTTPS 确实可用；
+3. 为控制台和订阅域名分别建立站点并等待自动签发证书；
+4. 分别持久化 `RAYLINK_PUBLIC_ORIGIN`、`RAYLINK_SUBSCRIPTION_ORIGIN` 和 Host 节点地址；
+5. 从本机使用两个域名的 SNI 验证证书链和 HTTPS 确实可用；
 6. 保留 IP HTTPS 站点作为恢复入口；
 7. 任一步失败时恢复原 Caddyfile 和环境文件。
+
+订阅域名只转发 `/sub/*` 和 `/rule-sets/*`，其他路径统一返回 404；Host 节点地址
+用于生成 sing-box 客户端连接配置，不参与控制台或订阅 HTTP 路由。
 
 一键安装把受管 Caddyfile 和环境文件存放在 `/var/lib/raylink/managed/`，并从
 `/etc/caddy/Caddyfile`、`/etc/raylink/raylink.env` 建立兼容链接。这样控制面不需要

@@ -7,7 +7,7 @@
   <title>初始化 RayLink</title>
   <link rel="icon" href="./assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css?v=0.2.0-20260727">
-  <link rel="stylesheet" href="./setup.css?v=0.2.0-20260731">
+  <link rel="stylesheet" href="./setup.css?v=0.2.0-20260802">
 </head>
 <body class="setup-page">
   <a class="skip-link" href="#setup-main">跳到初始化表单</a>
@@ -55,7 +55,7 @@
         <section class="setup-step" data-step="1" hidden>
           <p class="eyebrow">Step 2 / 5</p>
           <h2>访问入口与 HTTPS</h2>
-          <p class="setup-intro">域名和 IP 均可作为管理入口。选择域名后，请先将 A/AAAA 记录直接解析到本机公网 IP；RayLink 会检查 DNS，并由 Caddy 自动申请和续期 HTTPS 证书。IP 入口会保留用于故障恢复。</p>
+          <p class="setup-intro">控制台、订阅服务和节点连接地址可以使用同一公网 IP。选择域名后，请先将对应的 A/AAAA 记录直接解析到本机公网 IP。</p>
           <div class="setup-choice-grid">
             <label class="setup-choice">
               <input type="radio" name="accessMode" value="domain" checked>
@@ -66,11 +66,18 @@
               <span><strong>IP 访问</strong><small>适合暂时没有域名的环境</small></span>
             </label>
           </div>
-          <label class="field">
-            <span>主访问地址</span>
-            <input name="canonicalOrigin" type="url" placeholder="https://panel.example.com" required>
-            <small>只填写协议、域名或 IP 和可选端口，不要包含路径。</small>
-          </label>
+          <div class="setup-address-grid">
+            <label class="field">
+              <span>控制台访问地址</span>
+              <input name="canonicalOrigin" type="url" placeholder="https://panel.example.com" required>
+              <small>管理员和用户中心使用，例如 panel.example.com。</small>
+            </label>
+            <label class="field" data-subscription-origin>
+              <span>订阅服务地址</span>
+              <input name="subscriptionOrigin" type="url" placeholder="https://sub.example.com" required>
+              <small>只提供订阅和规则文件，不开放管理后台。</small>
+            </label>
+          </div>
           <label class="field">
             <span>其他允许的管理端地址（可选）</span>
             <textarea name="allowedOrigins" rows="3" placeholder="每行一个，例如 https://10.0.0.8"></textarea>
@@ -117,8 +124,9 @@
             <input name="runtimeName" value="RayLink Runtime" maxlength="80" required>
           </label>
           <label class="field">
-            <span>主机地址</span>
-            <input name="runtimeAddress" placeholder="host.example.com 或服务器 IP" required>
+            <span>节点连接地址</span>
+            <input name="runtimeAddress" placeholder="node.example.com 或服务器 IP" required>
+            <small>客户端连接 sing-box 协议时使用，不是控制台域名。</small>
           </label>
           <label class="field">
             <span>区域标识</span>
@@ -150,6 +158,6 @@
       </form>
     </section>
   </main>
-  <script defer src="./setup.js?v=0.2.0-20260731"></script>
+  <script defer src="./setup.js?v=0.2.0-20260801"></script>
 </body>
 </html>

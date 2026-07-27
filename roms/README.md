@@ -30,6 +30,8 @@ npm start
 ```bash
 RAYLINK_ADMIN_PASSWORD='replace-with-a-long-random-secret' \
 RAYLINK_DATA_DIR='/var/lib/raylink' \
+RAYLINK_PUBLIC_ORIGIN='https://panel.example.com' \
+RAYLINK_SUBSCRIPTION_ORIGIN='https://sub.example.com' \
 RAYLINK_PROXY_HOST='node.example.com' \
 SING_BOX_BIN='/usr/local/bin/raylink-sing-box' \
 npm start

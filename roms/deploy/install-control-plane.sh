@@ -215,6 +215,7 @@ umask 077
     'RAYLINK_HOST=127.0.0.1' \
     'RAYLINK_PORT=4173' \
     "RAYLINK_PUBLIC_ORIGIN=${public_origin}" \
+    "RAYLINK_SUBSCRIPTION_ORIGIN=${public_origin}" \
     'RAYLINK_TRUST_PROXY=true' \
     'RAYLINK_ADMIN_USERNAME=bootstrap-admin' \
     "RAYLINK_ADMIN_PASSWORD=${bootstrap_password}" \

@@ -745,7 +745,7 @@ export class RayLinkStore {
     const rows = this.db.prepare(`
       SELECT key, value FROM settings
       WHERE key IN (
-        'setup_state', 'setup_token_expires_at', 'canonical_origin',
+        'setup_state', 'setup_token_expires_at', 'canonical_origin', 'subscription_origin',
         'allowed_origins', 'access_mode', 'certificate_mode'
       )
     `).all();
@@ -760,6 +760,7 @@ export class RayLinkStore {
         ? {
             mode: settings.access_mode,
             canonicalOrigin: settings.canonical_origin,
+            subscriptionOrigin: settings.subscription_origin || settings.canonical_origin,
             allowedOrigins: parseJson(settings.allowed_origins, []),
             certificateMode: settings.certificate_mode
           }
@@ -822,6 +823,7 @@ export class RayLinkStore {
       `);
       upsert.run("setup_state", "READY", timestamp);
       upsert.run("canonical_origin", access.canonicalOrigin, timestamp);
+      upsert.run("subscription_origin", access.subscriptionOrigin, timestamp);
       upsert.run("allowed_origins", JSON.stringify(access.allowedOrigins), timestamp);
       upsert.run("access_mode", access.mode, timestamp);
       upsert.run("certificate_mode", certificate.mode, timestamp);

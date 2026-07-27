@@ -133,6 +133,9 @@ test("an uninitialized instance exposes only the setup flow", async (t) => {
   assert.match(setupHtml, /首次初始化 RayLink/);
   assert.match(setupHtml, /Caddy 自动 HTTPS/);
   assert.match(setupHtml, /name="certificateEmail"/);
+  assert.match(setupHtml, /name="subscriptionOrigin"/);
+  assert.match(setupHtml, /订阅服务地址/);
+  assert.match(setupHtml, /节点连接地址/);
 
   const setupSlash = await fetch(`${testApp.baseUrl}/setup/`, { redirect: "manual" });
   assert.equal(setupSlash.status, 302);
@@ -329,11 +332,23 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
   const calls = [];
   const setupAccessManager = {
     async preflight(input) {
-      calls.push(["preflight", input.access.canonicalOrigin, input.certificate.email]);
+      calls.push([
+        "preflight",
+        input.access.canonicalOrigin,
+        input.access.subscriptionOrigin,
+        input.runtime.address,
+        input.certificate.email
+      ]);
       return { dns: "passed", caddy: "passed" };
     },
     async activate(input) {
-      calls.push(["activate", input.access.canonicalOrigin, input.certificate.email]);
+      calls.push([
+        "activate",
+        input.access.canonicalOrigin,
+        input.access.subscriptionOrigin,
+        input.runtime.address,
+        input.certificate.email
+      ]);
       return { rollback: async () => calls.push(["rollback"]) };
     }
   };
@@ -344,6 +359,7 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
     access: {
       mode: "domain",
       canonicalOrigin: "https://panel.example.com",
+      subscriptionOrigin: "https://sub.example.com",
       allowedOrigins: [testApp.baseUrl]
     },
     certificate: {
@@ -356,7 +372,7 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
     },
     runtime: {
       name: "Domain Gateway",
-      address: "panel.example.com",
+      address: "node.example.com",
       region: "tokyo"
     }
   };
@@ -388,10 +404,33 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
     testApp.app.store.setupStatus().access.allowedOrigins.sort(),
     ["http://127.0.0.1", testApp.baseUrl, "https://panel.example.com"].sort()
   );
+  assert.equal(
+    testApp.app.store.setupStatus().access.subscriptionOrigin,
+    "https://sub.example.com"
+  );
+  assert.equal(testApp.app.store.getHost("local").address, "node.example.com");
   assert.deepEqual(calls, [
-    ["preflight", "https://panel.example.com", "ops@example.com"],
-    ["preflight", "https://panel.example.com", "ops@example.com"],
-    ["activate", "https://panel.example.com", "ops@example.com"]
+    [
+      "preflight",
+      "https://panel.example.com",
+      "https://sub.example.com",
+      "node.example.com",
+      "ops@example.com"
+    ],
+    [
+      "preflight",
+      "https://panel.example.com",
+      "https://sub.example.com",
+      "node.example.com",
+      "ops@example.com"
+    ],
+    [
+      "activate",
+      "https://panel.example.com",
+      "https://sub.example.com",
+      "node.example.com",
+      "ops@example.com"
+    ]
   ]);
 });
 

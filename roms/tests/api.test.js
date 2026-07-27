@@ -999,7 +999,11 @@ test("portal excludes a staged local Runtime when production delivery is enforce
 });
 
 test("user creates a stable subscription URL and rotating it revokes the old URL", async (t) => {
-  const testApp = await startTestApp({ proxyHost: "node.example.com" });
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    subscriptionOrigin: "https://sub.example.com",
+    trustProxy: true
+  });
   t.after(() => testApp.close());
   const loginResponse = await fetch(`${testApp.baseUrl}/api/portal/login`, {
     method: "POST",
@@ -1017,10 +1021,18 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   });
   assert.equal(firstRotate.status, 201);
   const first = await firstRotate.json();
+  assert.equal(new URL(first.subscriptionUrl).origin, "https://sub.example.com");
   const firstSubscriptionPath = new URL(first.subscriptionUrl).pathname;
   assert.match(firstSubscriptionPath, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/sing-box\.json$/);
 
-  const subscriptionResponse = await fetch(`${testApp.baseUrl}${firstSubscriptionPath}`);
+  const isolatedControlPlane = await fetch(`${testApp.baseUrl}/api/bootstrap`, {
+    headers: { "x-forwarded-host": "sub.example.com" }
+  });
+  assert.equal(isolatedControlPlane.status, 404);
+
+  const subscriptionResponse = await fetch(`${testApp.baseUrl}${firstSubscriptionPath}`, {
+    headers: { "x-forwarded-host": "sub.example.com" }
+  });
   assert.equal(subscriptionResponse.status, 200);
   assert.match(subscriptionResponse.headers.get("content-disposition"), /raylink-sing-box\.json/);
   assert.equal(subscriptionResponse.headers.get("cache-control"), "private, no-cache");
@@ -1055,6 +1067,7 @@ test("subscription uses control-plane managed official rule sets when cached", a
   ]);
   const testApp = await startTestApp({
     proxyHost: "node.example.com",
+    subscriptionOrigin: "https://sub.example.com",
     ruleSetCache: {
       prepare: async () => {},
       available: () => true,
@@ -1079,6 +1092,11 @@ test("subscription uses control-plane managed official rule sets when cached", a
   assert.deepEqual(
     config.route.rule_set.map((ruleSet) => new URL(ruleSet.url).pathname),
     ["/rule-sets/geosite-geolocation-cn.srs", "/rule-sets/geoip-cn.srs"]
+  );
+  assert.ok(
+    config.route.rule_set.every(
+      (ruleSet) => new URL(ruleSet.url).origin === "https://sub.example.com"
+    )
   );
 
   const ruleSetResponse = await fetch(`${testApp.baseUrl}/rule-sets/geosite-geolocation-cn.srs`);

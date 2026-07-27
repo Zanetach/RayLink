@@ -85,13 +85,27 @@ async function waitForTrustedHttps(origin) {
   throw lastError;
 }
 
-function caddyfileForDomain({
-  domain,
+function caddyfileForDomains({
+  consoleDomain,
+  subscriptionDomain,
   email,
   initialOrigin,
   certificatePath,
   privateKeyPath
 }) {
+  const subscriptionSite = subscriptionDomain === consoleDomain
+    ? ""
+    : `
+${subscriptionDomain} {
+\t@subscription path /sub/* /rule-sets/*
+\thandle @subscription {
+\t\timport raylink_proxy
+\t}
+\thandle {
+\t\trespond 404
+\t}
+}
+`;
   return `{
 \tadmin 127.0.0.1:2019
 \temail ${email}
@@ -107,9 +121,10 @@ function caddyfileForDomain({
 \t}
 }
 
-${domain} {
+${consoleDomain} {
 \timport raylink_proxy
 }
+${subscriptionSite}
 
 ${initialOrigin} {
 \ttls ${certificatePath} ${privateKeyPath}
@@ -147,32 +162,38 @@ export class CaddySetupAccessManager {
   }
 
   async preflight(input) {
-    const hostname = new URL(input.access.canonicalOrigin).hostname;
-    try {
-      const addresses = await this.lookup(hostname);
-      if (!Array.isArray(addresses) || addresses.length === 0) {
-        throw new Error("DNS returned no addresses");
-      }
-      const initialHostname = normalizedIp(new URL(this.initialOrigin).hostname);
-      if (
-        isIP(initialHostname)
-        && !addresses.some(({ address }) => normalizedIp(address) === initialHostname)
-      ) {
-        const resolved = addresses.map(({ address }) => address).join(", ");
+    const origins = [...new Set([
+      input.access.canonicalOrigin,
+      input.access.subscriptionOrigin
+    ])];
+    for (const origin of origins) {
+      const hostname = new URL(origin).hostname;
+      try {
+        const addresses = await this.lookup(hostname);
+        if (!Array.isArray(addresses) || addresses.length === 0) {
+          throw new Error("DNS returned no addresses");
+        }
+        const initialHostname = normalizedIp(new URL(this.initialOrigin).hostname);
+        if (
+          isIP(initialHostname)
+          && !addresses.some(({ address }) => normalizedIp(address) === initialHostname)
+        ) {
+          const resolved = addresses.map(({ address }) => address).join(", ");
+          throw setupAccessError(
+            "DOMAIN_DNS_MISMATCH",
+            `域名 ${hostname} 当前解析到 ${resolved}，请改为本机公网 IP ${initialHostname} 后重试`,
+            422
+          );
+        }
+      } catch (error) {
+        if (error?.code === "DOMAIN_DNS_MISMATCH") throw error;
         throw setupAccessError(
-          "DOMAIN_DNS_MISMATCH",
-          `域名 ${hostname} 当前解析到 ${resolved}，请改为本机公网 IP ${initialHostname} 后重试`,
-          422
+          "DOMAIN_DNS_NOT_READY",
+          `域名 ${hostname} 尚未解析，请配置 DNS 后重试`,
+          422,
+          error
         );
       }
-    } catch (error) {
-      if (error?.code === "DOMAIN_DNS_MISMATCH") throw error;
-      throw setupAccessError(
-        "DOMAIN_DNS_NOT_READY",
-        `域名 ${hostname} 尚未解析，请配置 DNS 后重试`,
-        422,
-        error
-      );
     }
     try {
       await this.runCommand(this.caddyBinary, ["version"]);
@@ -189,11 +210,12 @@ export class CaddySetupAccessManager {
 
   async activate(input) {
     const canonicalOrigin = new URL(input.access.canonicalOrigin);
-    const domain = canonicalOrigin.hostname;
+    const subscriptionOrigin = new URL(input.access.subscriptionOrigin);
     const previousCaddyfile = await readFile(this.caddyfilePath, "utf8");
     const previousEnvironment = await readFile(this.environmentFilePath, "utf8");
-    const nextCaddyfile = caddyfileForDomain({
-      domain,
+    const nextCaddyfile = caddyfileForDomains({
+      consoleDomain: canonicalOrigin.hostname,
+      subscriptionDomain: subscriptionOrigin.hostname,
       email: input.certificate.email,
       initialOrigin: this.initialOrigin,
       certificatePath: this.certificatePath,
@@ -201,12 +223,16 @@ export class CaddySetupAccessManager {
     });
     const nextEnvironment = replaceEnvironmentValue(
       replaceEnvironmentValue(
-        previousEnvironment,
-        "RAYLINK_PUBLIC_ORIGIN",
-        canonicalOrigin.origin
+        replaceEnvironmentValue(
+          previousEnvironment,
+          "RAYLINK_PUBLIC_ORIGIN",
+          canonicalOrigin.origin
+        ),
+        "RAYLINK_SUBSCRIPTION_ORIGIN",
+        subscriptionOrigin.origin
       ),
       "RAYLINK_PROXY_HOST",
-      domain
+      input.runtime.address
     );
     const caddyCandidate = `${this.caddyfilePath}.candidate`;
     const environmentCandidate = `${this.environmentFilePath}.candidate`;
@@ -301,7 +327,12 @@ export class CaddySetupAccessManager {
     }
 
     try {
-      await this.verifyHttps(canonicalOrigin.origin);
+      for (const origin of new Set([
+        canonicalOrigin.origin,
+        subscriptionOrigin.origin
+      ])) {
+        await this.verifyHttps(origin);
+      }
     } catch (error) {
       try {
         await restore();
