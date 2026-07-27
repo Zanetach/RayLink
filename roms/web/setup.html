@@ -55,7 +55,7 @@
         <section class="setup-step" data-step="1" hidden>
           <p class="eyebrow">Step 2 / 5</p>
           <h2>访问入口与 HTTPS</h2>
-          <p class="setup-intro">控制台、订阅服务和节点连接地址可以使用同一公网 IP。选择域名后，请先将对应的 A/AAAA 记录直接解析到本机公网 IP。</p>
+          <p class="setup-intro">这些是地址角色，不是固定域名。控制台和订阅地址由管理员自定义；选择域名后，请先将对应的 A/AAAA 记录直接解析到本机公网 IP。</p>
           <div class="setup-choice-grid">
             <label class="setup-choice">
               <input type="radio" name="accessMode" value="domain" checked>
@@ -70,12 +70,12 @@
             <label class="field">
               <span>控制台访问地址</span>
               <input name="canonicalOrigin" type="url" placeholder="https://panel.example.com" required>
-              <small>管理员和用户中心使用，例如 panel.example.com。</small>
+              <small>整个 RayLink 共用一个管理入口，可填写任意自有域名或 IP 地址。</small>
             </label>
             <label class="field" data-subscription-origin>
               <span>订阅服务地址</span>
               <input name="subscriptionOrigin" type="url" placeholder="https://sub.example.com" required>
-              <small>只提供订阅和规则文件，不开放管理后台。</small>
+              <small>整个 RayLink 共用一个订阅入口，可独立使用其他域名；不开放管理后台。</small>
             </label>
           </div>
           <label class="field">
@@ -126,7 +126,7 @@
           <label class="field">
             <span>节点连接地址</span>
             <input name="runtimeAddress" placeholder="node.example.com 或服务器 IP" required>
-            <small>客户端连接 sing-box 协议时使用，不是控制台域名。</small>
+            <small>当前 Host 独立配置，可使用自定义域名或公网 IP；以后新增的每台 Host 都能填写不同地址。</small>
           </label>
           <label class="field">
             <span>区域标识</span>
@@ -158,6 +158,6 @@
       </form>
     </section>
   </main>
-  <script defer src="./setup.js?v=0.2.0-20260801"></script>
+  <script defer src="./setup.js?v=0.2.0-20260803"></script>
 </body>
 </html>

@@ -993,7 +993,7 @@ function hostDrawerMarkup(hostId) {
       <div class="drawer-profile"><span class="avatar">${escapeHtml(host.name.slice(0, 1))}</span><div><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></div></div>
       <p class="drawer-section-label">主机连接</p>
       <label class="field"><span>名称</span><input name="hostname" value="${escapeHtml(host.name)}" placeholder="例如：东京生产节点" required></label>
-      <label class="field"><span>公网 IP 或域名</span><input name="address" value="${escapeHtml(host.address)}" placeholder="node.example.com" required></label>
+      <label class="field"><span>节点连接地址（每台 Host 独立）</span><input name="address" value="${escapeHtml(host.address)}" placeholder="node.example.com" required><small class="field-hint">每台 Host 可以使用不同的域名或公网 IP，订阅会使用这里的地址连接该节点。</small></label>
       <label class="field"><span>区域标识</span><input name="region" value="${escapeHtml(host.region)}" pattern="[A-Za-z0-9-]{2,32}" placeholder="tokyo" required></label>
       <p class="drawer-section-label">入口协议</p>
       <p class="field-hint">协议属于当前主机。启用后请在“运维”中发布配置，用户订阅会自动聚合可用主机上的入口。</p>
@@ -1040,7 +1040,7 @@ function newHostDrawerMarkup() {
       <div class="drawer-profile"><span class="avatar">+</span><div><strong>添加第二台 VPS</strong><small>创建一次性接入令牌并安装 RayLink Node</small></div></div>
       <p class="drawer-section-label">节点信息</p>
       <label class="field"><span>名称</span><input name="hostname" placeholder="例如：法兰克福 02" required><small class="field-error"></small></label>
-      <label class="field"><span>公网 IP 或域名</span><input name="address" placeholder="node-frankfurt.example.com" required><small class="field-error"></small><small class="field-hint">将写入用户客户端配置，请填写用户可访问的公网地址。</small></label>
+      <label class="field"><span>节点连接地址（每台 Host 独立）</span><input name="address" placeholder="node-frankfurt.example.com" required><small class="field-error"></small><small class="field-hint">每台 Host 可以使用不同的域名或公网 IP；该地址会写入用户客户端配置。</small></label>
       <label class="field"><span>区域标识</span><input name="region" pattern="[A-Za-z0-9-]{2,32}" placeholder="frankfurt" required><small class="field-error"></small><small class="field-hint">用户的“节点范围”会按此标识决定是否获得该节点。</small></label>
       <p class="drawer-section-label">接入过程</p>
       <div class="switch-row"><div><strong>1. 创建节点</strong><small>控制面生成仅可使用一次的接入令牌</small></div><span class="tag">当前步骤</span></div>

@@ -314,10 +314,7 @@ async function initialize() {
     expiryLabel.textContent = "部署后将在这里显示初始化令牌有效期";
     form.elements.token.value = "raylink-preview-token";
     form.elements.accessMode.value = "domain";
-    form.elements.canonicalOrigin.value = "https://panel.example.com";
-    form.elements.subscriptionOrigin.value = "https://sub.example.com";
     form.elements.certificateEmail.value = "ops@example.com";
-    form.elements.runtimeAddress.value = "node.example.com";
     updateCertificateOptions();
     return;
   }

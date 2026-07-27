@@ -99,6 +99,25 @@ test("setup form keeps validation feedback inside the RayLink interface", async 
   assert.match(script, /管理员密码至少需要 12 位/);
 });
 
+test("address roles stay user-configurable and each Host exposes its own node address", async () => {
+  const setupPage = new URL("../web/setup.html", import.meta.url);
+  const setupScript = new URL("../web/setup.js", import.meta.url);
+  const appScript = new URL("../web/app.js", import.meta.url);
+  const [html, setup, app] = await Promise.all([
+    readFile(setupPage, "utf8"),
+    readFile(setupScript, "utf8"),
+    readFile(appScript, "utf8")
+  ]);
+
+  assert.match(html, /这些是地址角色，不是固定域名/);
+  assert.match(html, /当前 Host 独立配置/);
+  assert.doesNotMatch(setup, /canonicalOrigin\.value = "https:\/\/panel\.example\.com"/);
+  assert.doesNotMatch(setup, /subscriptionOrigin\.value = "https:\/\/sub\.example\.com"/);
+  assert.doesNotMatch(setup, /runtimeAddress\.value = "node\.example\.com"/);
+  assert.match(app, /节点连接地址（每台 Host 独立）/);
+  assert.match(app, /每台 Host 可以使用不同的域名或公网 IP/);
+});
+
 test("setup-required instances without a token expose UNINITIALIZED until a token is generated", async (t) => {
   const testApp = await startSetupApp({
     setupTokenHash: "",
