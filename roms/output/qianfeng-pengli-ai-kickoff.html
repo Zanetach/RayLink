@@ -1,0 +1,1249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07141c" />
+  <meta name="description" content="千蜂AI × 鹏利海景一号 AI智能客服项目启动会" />
+  <title>千蜂AI × 鹏利海景一号｜AI智能客服项目启动会</title>
+  <script>document.documentElement.classList.add('js');</script>
+  <style>
+    :root {
+      --night: #07141c;
+      --night-soft: #0b1d27;
+      --panel: #102833;
+      --panel-light: #15343f;
+      --white: #f4f7f5;
+      --mist: #aab9b8;
+      --line: rgba(214, 231, 226, .14);
+      --cyan: #61e6d1;
+      --cyan-soft: #9cf3e5;
+      --gold: #d9b875;
+      --gold-soft: #f0d9a7;
+      --orange: #ff725e;
+      --max-width: 1280px;
+      --serif: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+      --sans: "Avenir Next", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+      --ease: cubic-bezier(.16, 1, .3, 1);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: var(--night); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--white);
+      background:
+        radial-gradient(circle at 78% 2%, rgba(62, 181, 171, .14), transparent 28rem),
+        var(--night);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      opacity: .4;
+      background-image:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+      background-size: 80px 80px;
+      mask-image: linear-gradient(to bottom, black, transparent 72%);
+    }
+
+    button, a { font: inherit; }
+    button { color: inherit; }
+    a { color: inherit; text-decoration: none; }
+    ::selection { color: var(--night); background: var(--cyan); }
+    :focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+
+    .skip-link {
+      position: fixed;
+      left: 16px;
+      top: -64px;
+      z-index: 200;
+      padding: 10px 14px;
+      border-radius: 999px;
+      color: var(--night);
+      background: var(--cyan);
+      transition: top .2s ease;
+    }
+    .skip-link:focus { top: 16px; }
+
+    .progress {
+      position: fixed;
+      inset: 0 auto auto 0;
+      z-index: 120;
+      width: 100%;
+      height: 2px;
+      transform: scaleX(0);
+      transform-origin: left;
+      background: linear-gradient(90deg, var(--cyan), var(--gold));
+    }
+
+    .noise {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      pointer-events: none;
+      opacity: .12;
+      background:
+        radial-gradient(circle at 20% 30%, rgba(255,255,255,.08) 0 1px, transparent 1.5px),
+        radial-gradient(circle at 70% 60%, rgba(255,255,255,.05) 0 1px, transparent 1.5px);
+      background-size: 9px 11px, 13px 15px;
+      mix-blend-mode: soft-light;
+    }
+
+    .shell { width: min(var(--max-width), calc(100% - 64px)); margin: 0 auto; }
+
+    .topbar {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 90;
+      height: 86px;
+      transition: background-color .25s ease, border-color .25s ease;
+    }
+    .topbar.scrolled {
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 20, 28, .78);
+      -webkit-backdrop-filter: blur(18px);
+      backdrop-filter: blur(18px);
+    }
+    .nav {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+    }
+    .cobrand { display: flex; align-items: center; gap: 15px; min-width: 0; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      white-space: nowrap;
+    }
+    .brand-mark {
+      width: 29px;
+      height: 29px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(97, 230, 209, .45);
+      border-radius: 50%;
+      color: var(--cyan);
+      font-size: 11px;
+      box-shadow: inset 0 0 18px rgba(97,230,209,.08);
+    }
+    .brand.secondary .brand-mark { border-color: rgba(217,184,117,.45); color: var(--gold); }
+    .brand-cross { color: rgba(244,247,245,.28); font-size: 16px; font-weight: 300; }
+    .nav-links { display: flex; align-items: center; gap: 28px; }
+    .nav-links a {
+      position: relative;
+      color: var(--mist);
+      font-size: 12px;
+      letter-spacing: .08em;
+      transition: color .2s ease;
+    }
+    .nav-links a::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 100%;
+      bottom: -7px;
+      height: 1px;
+      background: var(--cyan);
+      transition: right .3s var(--ease);
+    }
+    .nav-links a:hover { color: var(--white); }
+    .nav-links a:hover::after { right: 0; }
+    .menu-button {
+      display: none;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+    }
+    .menu-button span {
+      display: block;
+      width: 16px;
+      height: 1px;
+      margin: 5px auto;
+      background: currentColor;
+      transition: transform .2s ease;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 100svh;
+      display: grid;
+      align-items: center;
+      overflow: hidden;
+      padding: 144px 0 78px;
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      top: 13%;
+      right: -11%;
+      width: min(62vw, 820px);
+      aspect-ratio: 1;
+      border: 1px solid rgba(97,230,209,.15);
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 7vw rgba(97,230,209,.018),
+        0 0 0 14vw rgba(97,230,209,.012),
+        inset 0 0 140px rgba(97,230,209,.04);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -5vw;
+      bottom: -26vh;
+      width: 72vw;
+      height: 55vh;
+      border-radius: 50% 0 0 0;
+      transform: rotate(-7deg);
+      background:
+        radial-gradient(ellipse at 20% 10%, rgba(97,230,209,.2), transparent 35%),
+        linear-gradient(150deg, transparent 32%, rgba(97,230,209,.035) 33%, rgba(97,230,209,.14) 50%, transparent 67%);
+      filter: blur(1px);
+    }
+    .hero-grid {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: minmax(0, 1.12fr) minmax(310px, .62fr);
+      gap: 7vw;
+      align-items: end;
+    }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 38px; height: 1px; background: currentColor; }
+    .hero h1 {
+      margin: 0;
+      max-width: 880px;
+      font-family: var(--serif);
+      font-size: clamp(48px, 7.2vw, 104px);
+      line-height: .96;
+      letter-spacing: -.055em;
+      font-weight: 600;
+      text-wrap: balance;
+    }
+    .hero h1 .line { display: block; }
+    .hero h1 .project-name {
+      margin-top: .18em;
+      color: transparent;
+      -webkit-text-stroke: 1px rgba(244,247,245,.55);
+      font-family: var(--sans);
+      font-size: .74em;
+      font-weight: 500;
+      letter-spacing: -.045em;
+    }
+    .hero h1 .accent { color: var(--gold-soft); }
+    .hero-lead {
+      max-width: 590px;
+      margin: 30px 0 0;
+      color: var(--mist);
+      font-size: clamp(14px, 1.4vw, 17px);
+      line-height: 1.9;
+      letter-spacing: .035em;
+    }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 37px; }
+    .button {
+      min-height: 50px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 0 23px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--white);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      cursor: pointer;
+      transition: transform .25s var(--ease), color .2s ease, background-color .2s ease, border-color .2s ease;
+    }
+    .button:hover { transform: translateY(-2px); border-color: rgba(244,247,245,.45); }
+    .button.primary { color: var(--night); border-color: var(--cyan); background: var(--cyan); }
+    .button.primary:hover { background: var(--cyan-soft); }
+    .button-arrow { font-size: 18px; font-weight: 400; transition: transform .2s var(--ease); }
+    .button:hover .button-arrow { transform: translateX(4px); }
+
+    .hero-side {
+      position: relative;
+      min-height: 430px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding-bottom: 10px;
+    }
+    .orbit {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 248px;
+      aspect-ratio: 1;
+      animation: orbit-rotate 28s linear infinite;
+    }
+    .orbit::before, .orbit::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(97,230,209,.24);
+      border-radius: 50%;
+    }
+    .orbit::after { inset: 34px; border-style: dashed; border-color: rgba(217,184,117,.25); }
+    .orbit-dot {
+      position: absolute;
+      top: 24px;
+      left: 28px;
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--night);
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 18px var(--cyan);
+    }
+    @keyframes orbit-rotate { to { transform: rotate(360deg); } }
+    .kickoff-card {
+      position: relative;
+      width: min(100%, 360px);
+      margin-left: auto;
+      border: 1px solid var(--line);
+      background: linear-gradient(145deg, rgba(20,51,63,.82), rgba(8,24,33,.82));
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+    }
+    .kickoff-card::before {
+      content: "";
+      position: absolute;
+      inset: -1px auto auto -1px;
+      width: 70px;
+      height: 2px;
+      background: var(--gold);
+    }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 19px 22px;
+      border-bottom: 1px solid var(--line);
+      color: var(--mist);
+      font-size: 10px;
+      letter-spacing: .16em;
+    }
+    .status { display: flex; align-items: center; gap: 8px; color: var(--cyan); }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 5px rgba(97,230,209,.08); }
+    .card-body { padding: 26px 22px 24px; }
+    .card-index { color: var(--gold); font-size: 11px; letter-spacing: .15em; }
+    .card-body strong {
+      display: block;
+      margin-top: 12px;
+      font-family: var(--serif);
+      font-size: 27px;
+      line-height: 1.4;
+      font-weight: 500;
+    }
+    .card-body p { margin: 12px 0 0; color: var(--mist); font-size: 12px; line-height: 1.75; }
+    .card-foot {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid var(--line);
+    }
+    .card-foot div { padding: 15px 10px; text-align: center; }
+    .card-foot div + div { border-left: 1px solid var(--line); }
+    .card-foot strong { display: block; color: var(--white); font-size: 15px; font-weight: 600; }
+    .card-foot span { display: block; margin-top: 4px; color: var(--mist); font-size: 9px; letter-spacing: .1em; }
+    .hero-scroll {
+      position: absolute;
+      left: 50%;
+      bottom: 24px;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: rgba(244,247,245,.4);
+      font-size: 9px;
+      letter-spacing: .2em;
+      transform: translateX(-50%);
+    }
+    .hero-scroll::after { content: ""; width: 48px; height: 1px; background: rgba(244,247,245,.25); }
+
+    section { position: relative; padding: 126px 0; }
+    .section-kicker {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 24px;
+      color: var(--cyan);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .section-kicker .index { color: var(--gold); font-family: var(--serif); font-size: 18px; letter-spacing: 0; }
+    .section-title {
+      max-width: 880px;
+      margin: 0;
+      font-family: var(--serif);
+      font-size: clamp(36px, 5.5vw, 72px);
+      line-height: 1.12;
+      letter-spacing: -.04em;
+      font-weight: 500;
+      text-wrap: balance;
+    }
+    .section-title em { color: var(--gold-soft); font-style: normal; }
+    .section-intro {
+      max-width: 650px;
+      margin: 24px 0 0;
+      color: var(--mist);
+      font-size: 15px;
+      line-height: 1.9;
+    }
+
+    .consensus { border-top: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.015), transparent); }
+    .belief-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      margin-top: 72px;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+    .belief {
+      min-height: 330px;
+      position: relative;
+      padding: 36px;
+      background: var(--night);
+      overflow: hidden;
+      transition: background-color .35s ease;
+    }
+    .belief:hover { background: var(--night-soft); }
+    .belief::after {
+      content: attr(data-cn);
+      position: absolute;
+      right: -10px;
+      bottom: -34px;
+      color: rgba(244,247,245,.025);
+      font-family: var(--serif);
+      font-size: 148px;
+      line-height: 1;
+      transition: color .35s ease, transform .35s var(--ease);
+    }
+    .belief:hover::after { color: rgba(97,230,209,.055); transform: translate(-4px,-4px); }
+    .belief-index { color: var(--gold); font-size: 10px; letter-spacing: .15em; }
+    .belief h3 { margin: 47px 0 0; font-family: var(--serif); font-size: 32px; font-weight: 500; }
+    .belief p { max-width: 280px; margin: 17px 0 0; color: var(--mist); font-size: 13px; line-height: 1.9; }
+    .belief-tag {
+      display: inline-flex;
+      margin-top: 28px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--cyan-soft);
+      font-size: 10px;
+      letter-spacing: .08em;
+    }
+
+    .blueprint { background: #eef0ea; color: #14242a; }
+    .blueprint .section-kicker { color: #347d78; }
+    .blueprint .section-kicker .index { color: #9a7633; }
+    .blueprint .section-title em { color: #916d2f; }
+    .blueprint .section-intro { color: #617074; }
+    .blueprint-grid {
+      display: grid;
+      grid-template-columns: .74fr 1.26fr;
+      gap: 8vw;
+      align-items: start;
+      margin-top: 78px;
+    }
+    .journey-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 12px;
+      border: 1px solid rgba(20,36,42,.16);
+      border-radius: 999px;
+      color: #456166;
+      font-size: 10px;
+      letter-spacing: .12em;
+    }
+    .journey-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #3b9d93; }
+    .journey-quote {
+      margin: 26px 0 0;
+      font-family: var(--serif);
+      font-size: clamp(28px, 3.5vw, 46px);
+      line-height: 1.35;
+      letter-spacing: -.03em;
+    }
+    .journey-note {
+      margin: 22px 0 0;
+      padding-left: 16px;
+      border-left: 2px solid #caa65e;
+      color: #617074;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+    .journey {
+      position: relative;
+      border-top: 1px solid rgba(20,36,42,.16);
+    }
+    .journey-step {
+      display: grid;
+      grid-template-columns: 68px 1fr auto;
+      gap: 20px;
+      align-items: center;
+      min-height: 112px;
+      border-bottom: 1px solid rgba(20,36,42,.16);
+    }
+    .journey-step .num { color: #9a7633; font-family: var(--serif); font-size: 13px; }
+    .journey-step h3 { margin: 0; font-size: 19px; letter-spacing: -.01em; font-weight: 650; }
+    .journey-step p { margin: 7px 0 0; color: #6d797c; font-size: 12px; line-height: 1.6; }
+    .journey-step .verb {
+      min-width: 54px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      color: #276f68;
+      background: rgba(59,157,147,.1);
+      font-size: 10px;
+      font-weight: 700;
+      text-align: center;
+      letter-spacing: .08em;
+    }
+
+    .path { overflow: hidden; }
+    .path::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 42%;
+      height: 100%;
+      background: linear-gradient(135deg, rgba(97,230,209,.045), transparent 55%);
+      pointer-events: none;
+    }
+    .path-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 40px;
+    }
+    .path-note { max-width: 340px; color: var(--mist); font-size: 12px; line-height: 1.8; text-align: right; }
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin-top: 76px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .phase {
+      min-height: 330px;
+      position: relative;
+      padding: 34px 28px 30px;
+      transition: background-color .25s ease;
+    }
+    .phase + .phase { border-left: 1px solid var(--line); }
+    .phase:hover { background: rgba(255,255,255,.02); }
+    .phase::before {
+      content: "";
+      position: absolute;
+      top: -5px;
+      left: 26px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid var(--night);
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 0 1px var(--cyan);
+    }
+    .phase-time { color: var(--gold); font-size: 10px; letter-spacing: .12em; }
+    .phase h3 { margin: 32px 0 0; font-family: var(--serif); font-size: 25px; font-weight: 500; }
+    .phase p { margin: 15px 0 0; color: var(--mist); font-size: 12px; line-height: 1.8; }
+    .phase ul { margin: 25px 0 0; padding: 0; list-style: none; }
+    .phase li {
+      position: relative;
+      margin-top: 11px;
+      padding-left: 14px;
+      color: #d4ddda;
+      font-size: 11px;
+    }
+    .phase li::before { content: ""; position: absolute; left: 0; top: .55em; width: 4px; height: 4px; border-radius: 50%; background: var(--cyan); }
+
+    .roles { padding-top: 0; }
+    .roles-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1px solid var(--line);
+    }
+    .role {
+      min-height: 385px;
+      padding: 44px;
+      background: linear-gradient(150deg, rgba(20,51,63,.5), rgba(7,20,28,.3));
+    }
+    .role + .role { border-left: 1px solid var(--line); }
+    .role-brand { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .role-brand h3 { margin: 0; font-family: var(--serif); font-size: 28px; font-weight: 500; }
+    .role-brand span { color: var(--gold); font-size: 10px; letter-spacing: .16em; }
+    .role-lead { max-width: 430px; margin: 19px 0 0; color: var(--mist); font-size: 13px; line-height: 1.85; }
+    .role-items {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 35px;
+    }
+    .role-item { padding: 15px 16px; border: 1px solid var(--line); color: #dce5e2; font-size: 12px; }
+    .role-item span { display: block; margin-bottom: 5px; color: var(--cyan); font-size: 9px; letter-spacing: .12em; }
+
+    .agenda { background: var(--panel); overflow: hidden; }
+    .agenda::before {
+      content: "AGENDA";
+      position: absolute;
+      right: -22px;
+      top: 80px;
+      color: rgba(244,247,245,.025);
+      font-size: clamp(90px, 18vw, 260px);
+      font-weight: 800;
+      letter-spacing: -.07em;
+      line-height: 1;
+    }
+    .agenda-layout {
+      display: grid;
+      grid-template-columns: .72fr 1.28fr;
+      gap: 8vw;
+      margin-top: 72px;
+      align-items: start;
+    }
+    .agenda-sticky { position: sticky; top: 120px; }
+    .agenda-sticky p { margin: 23px 0 0; color: var(--mist); font-size: 13px; line-height: 1.9; }
+    .agenda-total {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 30px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--gold-soft);
+      font-size: 10px;
+      letter-spacing: .1em;
+    }
+    .agenda-list { border-top: 1px solid var(--line); }
+    .agenda-item {
+      display: grid;
+      grid-template-columns: 68px 1fr 32px;
+      gap: 22px;
+      align-items: center;
+      min-height: 106px;
+      border-bottom: 1px solid var(--line);
+      transition: padding-left .25s var(--ease), background-color .25s ease;
+    }
+    .agenda-item:hover { padding-left: 12px; background: rgba(255,255,255,.018); }
+    .agenda-item time { color: var(--cyan); font-family: var(--serif); font-size: 16px; }
+    .agenda-item h3 { margin: 0; font-size: 17px; font-weight: 600; }
+    .agenda-item p { margin: 7px 0 0; color: var(--mist); font-size: 11px; line-height: 1.6; }
+    .agenda-item .arrow { color: var(--gold); font-size: 18px; }
+
+    .closing {
+      min-height: 82vh;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      overflow: hidden;
+    }
+    .closing::before, .closing::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      border: 1px solid rgba(97,230,209,.13);
+      border-radius: 50%;
+      transform: translate(-50%,-50%);
+    }
+    .closing::before { width: min(70vw, 820px); aspect-ratio: 1; }
+    .closing::after { width: min(46vw, 520px); aspect-ratio: 1; border-color: rgba(217,184,117,.13); }
+    .closing-inner { position: relative; z-index: 2; }
+    .closing .section-kicker { justify-content: center; }
+    .closing h2 {
+      max-width: 900px;
+      margin: 0 auto;
+      font-family: var(--serif);
+      font-size: clamp(42px, 7vw, 96px);
+      line-height: 1.08;
+      letter-spacing: -.055em;
+      font-weight: 500;
+      text-wrap: balance;
+    }
+    .closing h2 em { color: var(--gold-soft); font-style: normal; }
+    .closing p { margin: 24px auto 0; color: var(--mist); font-size: 14px; line-height: 1.8; }
+    .closing-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+    footer {
+      min-height: 92px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      border-top: 1px solid var(--line);
+      color: rgba(244,247,245,.42);
+      font-size: 10px;
+      letter-spacing: .1em;
+    }
+
+    .reveal { opacity: 1; transform: none; }
+    .js .reveal {
+      opacity: 0;
+      transform: translateY(26px);
+      transition: opacity .75s ease, transform .75s var(--ease);
+    }
+    .js .reveal.in { opacity: 1; transform: translateY(0); }
+    .delay-1 { transition-delay: .08s; }
+    .delay-2 { transition-delay: .16s; }
+    .delay-3 { transition-delay: .24s; }
+
+    .dialog-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 150;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(3,11,16,.72);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .22s ease;
+    }
+    .dialog-backdrop.open { opacity: 1; pointer-events: auto; }
+    .dialog {
+      width: min(620px, 100%);
+      max-height: min(720px, calc(100vh - 40px));
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 30px 100px rgba(0,0,0,.45);
+      transform: translateY(18px) scale(.98);
+      transition: transform .3s var(--ease);
+    }
+    .dialog-backdrop.open .dialog { transform: translateY(0) scale(1); }
+    .dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 26px 28px; border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin: 0; font-family: var(--serif); font-size: 24px; font-weight: 500; }
+    .close-button {
+      width: 40px;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+    }
+    .checklist { margin: 0; padding: 12px 28px 30px; list-style: none; }
+    .checklist li { display: grid; grid-template-columns: 26px 1fr; gap: 13px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+    .checklist li:last-child { border-bottom: 0; }
+    .check-num { color: var(--gold); font-family: var(--serif); font-size: 13px; }
+    .checklist strong { display: block; font-size: 14px; }
+    .checklist p { margin: 7px 0 0; color: var(--mist); font-size: 11px; line-height: 1.7; }
+
+    @media (max-width: 980px) {
+      .shell { width: min(100% - 40px, var(--max-width)); }
+      .nav-links { flex-wrap: wrap; justify-content: flex-end; gap: 14px 20px; }
+      .js .nav-links { display: none; }
+      .js .menu-button { display: block; }
+      .js .nav-links.open {
+        position: fixed;
+        inset: 86px 20px auto;
+        display: grid;
+        gap: 0;
+        padding: 12px 22px;
+        border: 1px solid var(--line);
+        background: rgba(8,25,34,.97);
+        box-shadow: 0 24px 60px rgba(0,0,0,.35);
+      }
+      .nav-links.open a { padding: 16px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+      .nav-links.open a:last-child { border-bottom: 0; }
+      .hero-grid { grid-template-columns: 1fr; gap: 64px; }
+      .hero-side { min-height: 340px; }
+      .kickoff-card { margin-left: 0; }
+      .orbit { right: 7%; }
+      .belief-grid { grid-template-columns: 1fr; }
+      .belief { min-height: 270px; }
+      .blueprint-grid, .agenda-layout { grid-template-columns: 1fr; gap: 56px; }
+      .roadmap { grid-template-columns: 1fr 1fr; }
+      .phase:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+      .phase:nth-child(4) { border-top: 1px solid var(--line); }
+      .roles-grid { grid-template-columns: 1fr; }
+      .role + .role { border-left: 0; border-top: 1px solid var(--line); }
+      .agenda-sticky { position: static; }
+      .closing::before { width: 90vw; }
+      .closing::after { width: 64vw; }
+    }
+
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 28px, var(--max-width)); }
+      .topbar { height: 72px; }
+      .cobrand { gap: 8px; }
+      .brand { gap: 6px; font-size: 11px; letter-spacing: .02em; }
+      .brand-mark { width: 25px; height: 25px; font-size: 9px; }
+      .nav-links.open { inset: 72px 14px auto; }
+      .hero { padding: 124px 0 82px; }
+      .hero h1 { font-size: clamp(43px, 15vw, 66px); }
+      .hero-lead { font-size: 13px; }
+      .hero-side { min-height: 355px; }
+      .orbit { width: 210px; right: -4%; }
+      .kickoff-card { width: calc(100% - 28px); }
+      .hero-scroll { display: none; }
+      section { padding: 88px 0; }
+      .section-title { font-size: 38px; }
+      .belief-grid { margin-top: 52px; }
+      .belief { padding: 29px 26px; }
+      .blueprint-grid { margin-top: 54px; }
+      .journey-step { grid-template-columns: 42px 1fr; gap: 12px; padding: 16px 0; }
+      .journey-step .verb { display: none; }
+      .path-head { display: block; }
+      .path-note { margin-top: 24px; text-align: left; }
+      .roadmap { grid-template-columns: 1fr; margin-top: 52px; }
+      .phase { min-height: 285px; }
+      .phase + .phase { border-left: 0; border-top: 1px solid var(--line); }
+      .roles { padding-top: 0; }
+      .role { min-height: auto; padding: 31px 25px; }
+      .role-items { grid-template-columns: 1fr; }
+      .agenda-layout { margin-top: 52px; }
+      .agenda-item { grid-template-columns: 51px 1fr 20px; gap: 12px; min-height: 118px; }
+      .agenda-item h3 { font-size: 15px; }
+      .agenda-item:hover { padding-left: 0; }
+      .closing { min-height: 75vh; }
+      .closing h2 { font-size: 44px; }
+      footer { align-items: flex-start; flex-direction: column; justify-content: center; line-height: 1.8; }
+      .dialog-head { padding: 22px 20px; }
+      .checklist { padding: 8px 20px 22px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+      .reveal { opacity: 1; transform: none; }
+    }
+
+    @media print {
+      .topbar, .hero-scroll, .noise, .progress, .hero-actions, .closing-actions { display: none !important; }
+      body { color: #112127; background: white; }
+      body::before { display: none; }
+      .hero { min-height: 80vh; color: white; background: var(--night); print-color-adjust: exact; }
+      section { break-inside: avoid; padding: 64px 0; }
+      .consensus, .path, .roles, .closing { color: white; background: var(--night); print-color-adjust: exact; }
+      .agenda { color: white; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+  <div class="noise" aria-hidden="true"></div>
+
+  <header class="topbar" id="topbar">
+    <nav class="nav shell" aria-label="主导航">
+      <a class="cobrand" href="#top" aria-label="千蜂AI与鹏利海景一号联合项目">
+        <span class="brand"><span class="brand-mark">QF</span>千蜂AI</span>
+        <span class="brand-cross">×</span>
+        <span class="brand secondary"><span class="brand-mark">PL</span>鹏利海景一号</span>
+      </a>
+      <div class="nav-links" id="navLinks">
+        <a href="#consensus">项目共识</a>
+        <a href="#blueprint">服务蓝图</a>
+        <a href="#path">实施路径</a>
+        <a href="#agenda">启动议程</a>
+      </div>
+      <button class="menu-button" id="menuButton" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="navLinks">
+        <span></span><span></span>
+      </button>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-grid shell">
+        <div>
+          <div class="eyebrow reveal">Project Kickoff · 2026</div>
+          <h1 class="reveal delay-1">
+            <span class="line"><span class="accent">AI</span>智能客服</span>
+            <span class="line project-name">项目启动会</span>
+          </h1>
+          <p class="hero-lead reveal delay-2">
+            以千蜂AI的智能交互能力，融合鹏利海景一号的高品质服务标准，共同打造更敏捷、更懂客户、更有温度的服务新体验。
+          </p>
+          <div class="hero-actions reveal delay-3">
+            <a class="button primary" href="#agenda">查看启动议程 <span class="button-arrow" aria-hidden="true">→</span></a>
+            <button class="button" type="button" data-open-checklist>会前准备清单 <span class="button-arrow" aria-hidden="true">＋</span></button>
+          </div>
+        </div>
+
+        <aside class="hero-side reveal delay-2" aria-label="启动会概要">
+          <div class="orbit" aria-hidden="true"><span class="orbit-dot"></span></div>
+          <div class="kickoff-card">
+            <div class="card-head">
+              <span>KICKOFF / 01</span>
+              <span class="status"><span class="status-dot"></span>READY</span>
+            </div>
+            <div class="card-body">
+              <span class="card-index">共同目标</span>
+              <strong>从今天，<br />共创服务新标准</strong>
+              <p>战略对齐 · 场景共创 · 敏捷落地</p>
+            </div>
+            <div class="card-foot">
+              <div><strong>01</strong><span>共识</span></div>
+              <div><strong>04</strong><span>阶段</span></div>
+              <div><strong>06</strong><span>议题</span></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <div class="hero-scroll" aria-hidden="true">SCROLL TO EXPLORE</div>
+    </section>
+
+    <section class="consensus" id="consensus">
+      <div class="shell">
+        <div class="section-kicker reveal"><span class="index">01</span>Project Consensus</div>
+        <h2 class="section-title reveal delay-1">让AI不只会回答，<br />更要<em>理解、连接与转化</em></h2>
+        <p class="section-intro reveal delay-2">
+          项目首期围绕高频咨询场景，建立统一知识底座与智能服务闭环；在提升响应效率的同时，延续鹏利海景一号专业、细致、有温度的客户体验。
+        </p>
+
+        <div class="belief-grid">
+          <article class="belief reveal" data-cn="识">
+            <span class="belief-index">01 / RECOGNIZE</span>
+            <h3>识客</h3>
+            <p>快速识别访客意图与所处服务阶段，让每一次沟通从“知道客户是谁”开始。</p>
+            <span class="belief-tag">意图识别 · 客群洞察</span>
+          </article>
+          <article class="belief reveal delay-1" data-cn="懂">
+            <span class="belief-index">02 / UNDERSTAND</span>
+            <h3>懂客</h3>
+            <p>融合项目知识与服务规则，给出准确、统一、符合品牌标准的专业回应。</p>
+            <span class="belief-tag">知识问答 · 语义理解</span>
+          </article>
+          <article class="belief reveal delay-2" data-cn="达">
+            <span class="belief-index">03 / ENGAGE</span>
+            <h3>达客</h3>
+            <p>在恰当时机完成线索承接与人工协同，把有效对话自然转化为下一步行动。</p>
+            <span class="belief-tag">线索承接 · 人机协同</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="blueprint" id="blueprint">
+      <div class="shell">
+        <div class="section-kicker reveal"><span class="index">02</span>Service Blueprint</div>
+        <h2 class="section-title reveal delay-1">围绕客户旅程，<br />构建<em>全时段服务触点</em></h2>
+        <p class="section-intro reveal delay-2">
+          从首次了解，到持续跟进，再到服务反馈，AI客服将连接每个关键触点，为客户提供连贯一致的沟通体验。
+        </p>
+
+        <div class="blueprint-grid">
+          <div class="reveal">
+            <span class="journey-label">首期场景蓝图</span>
+            <p class="journey-quote">一条连续的服务链，<br />一次有温度的品牌表达。</p>
+            <p class="journey-note">启动会共同确认业务边界、优先级与验收口径，形成可执行的首期场景清单。</p>
+          </div>
+          <div class="journey">
+            <article class="journey-step reveal">
+              <span class="num">01</span>
+              <div><h3>初次咨询</h3><p>项目基础信息、服务内容与常见问题即时响应</p></div>
+              <span class="verb">看见</span>
+            </article>
+            <article class="journey-step reveal delay-1">
+              <span class="num">02</span>
+              <div><h3>需求识别</h3><p>理解咨询重点，识别客户意向与潜在需求</p></div>
+              <span class="verb">理解</span>
+            </article>
+            <article class="journey-step reveal delay-1">
+              <span class="num">03</span>
+              <div><h3>专业解答</h3><p>基于统一知识库，提供准确一致的品牌化回答</p></div>
+              <span class="verb">回应</span>
+            </article>
+            <article class="journey-step reveal delay-2">
+              <span class="num">04</span>
+              <div><h3>线索承接</h3><p>收集关键信息并按业务规则流转至对应团队</p></div>
+              <span class="verb">连接</span>
+            </article>
+            <article class="journey-step reveal delay-2">
+              <span class="num">05</span>
+              <div><h3>持续优化</h3><p>沉淀真实对话反馈，持续完善知识与服务策略</p></div>
+              <span class="verb">进化</span>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="path" id="path">
+      <div class="shell">
+        <div class="path-head">
+          <div>
+            <div class="section-kicker reveal"><span class="index">03</span>Delivery Path</div>
+            <h2 class="section-title reveal delay-1">四阶段协同，<br />把蓝图变成<em>可用成果</em></h2>
+          </div>
+          <p class="path-note reveal delay-2">以下为启动会建议节奏，具体周期将根据场景复杂度与素材完备度共同确认。</p>
+        </div>
+
+        <div class="roadmap">
+          <article class="phase reveal">
+            <span class="phase-time">PHASE 01 · W1—W2</span>
+            <h3>业务对齐</h3>
+            <p>梳理客户旅程、场景边界与服务标准，确定首期优先级。</p>
+            <ul><li>场景调研</li><li>目标与口径确认</li><li>素材清单建立</li></ul>
+          </article>
+          <article class="phase reveal delay-1">
+            <span class="phase-time">PHASE 02 · W3—W4</span>
+            <h3>知识共建</h3>
+            <p>完成知识清洗、结构化与问答策略设计，构建品牌知识底座。</p>
+            <ul><li>知识库搭建</li><li>话术策略设计</li><li>敏感边界配置</li></ul>
+          </article>
+          <article class="phase reveal delay-2">
+            <span class="phase-time">PHASE 03 · W5—W6</span>
+            <h3>联调试运行</h3>
+            <p>在真实业务链路中验证回答质量、人机协同与线索流转。</p>
+            <ul><li>多轮场景测试</li><li>业务团队验收</li><li>问题闭环优化</li></ul>
+          </article>
+          <article class="phase reveal delay-3">
+            <span class="phase-time">PHASE 04 · W7+</span>
+            <h3>上线运营</h3>
+            <p>正式上线并建立数据复盘机制，让AI客服持续学习与进化。</p>
+            <ul><li>运营看板</li><li>知识持续更新</li><li>月度效果复盘</li></ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="roles" aria-labelledby="roles-title">
+      <div class="shell">
+        <div class="roles-grid">
+          <article class="role reveal">
+            <div class="role-brand">
+              <h3 id="roles-title">千蜂AI</h3>
+              <span>TECH PARTNER</span>
+            </div>
+            <p class="role-lead">提供从能力搭建到上线运营的技术与方法支持，确保智能客服真正融入业务。</p>
+            <div class="role-items">
+              <div class="role-item"><span>01</span>平台搭建与配置</div>
+              <div class="role-item"><span>02</span>知识工程与训练</div>
+              <div class="role-item"><span>03</span>系统联调与优化</div>
+              <div class="role-item"><span>04</span>培训与运营陪跑</div>
+            </div>
+          </article>
+          <article class="role reveal delay-1">
+            <div class="role-brand">
+              <h3>鹏利海景一号</h3>
+              <span>BUSINESS OWNER</span>
+            </div>
+            <p class="role-lead">提供真实业务场景、服务标准与一线反馈，共同定义高品质智能服务体验。</p>
+            <div class="role-items">
+              <div class="role-item"><span>01</span>场景与规则确认</div>
+              <div class="role-item"><span>02</span>知识素材提供</div>
+              <div class="role-item"><span>03</span>业务测试与验收</div>
+              <div class="role-item"><span>04</span>运营反馈与共创</div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="agenda" id="agenda">
+      <div class="shell">
+        <div class="section-kicker reveal"><span class="index">04</span>Kickoff Agenda</div>
+        <div class="agenda-layout">
+          <div class="agenda-sticky reveal delay-1">
+            <h2 class="section-title">今天，<br />我们对齐<em>六件事</em></h2>
+            <p>用一场高密度启动会，统一项目目标、范围、责任、节奏和下一步行动。</p>
+            <span class="agenda-total">TOTAL · 60 MIN</span>
+          </div>
+          <div class="agenda-list">
+            <article class="agenda-item reveal">
+              <time>00′</time>
+              <div><h3>开场与团队介绍</h3><p>项目背景、双方团队与合作愿景</p></div>
+              <span class="arrow" aria-hidden="true">↗</span>
+            </article>
+            <article class="agenda-item reveal delay-1">
+              <time>05′</time>
+              <div><h3>项目目标对齐</h3><p>核心价值、业务期待与成功标准</p></div>
+              <span class="arrow" aria-hidden="true">↗</span>
+            </article>
+            <article class="agenda-item reveal delay-1">
+              <time>15′</time>
+              <div><h3>首期场景共识</h3><p>场景范围、优先级与服务边界</p></div>
+              <span class="arrow" aria-hidden="true">↗</span>
+            </article>
+            <article class="agenda-item reveal delay-2">
+              <time>30′</time>
+              <div><h3>解决方案与实施路径</h3><p>能力蓝图、项目阶段与关键交付物</p></div>
+              <span class="arrow" aria-hidden="true">↗</span>
+            </article>
+            <article class="agenda-item reveal delay-2">
+              <time>45′</time>
+              <div><h3>协作机制确认</h3><p>双方分工、沟通机制与验收方式</p></div>
+              <span class="arrow" aria-hidden="true">↗</span>
+            </article>
+            <article class="agenda-item reveal delay-3">
+              <time>55′</time>
+              <div><h3>行动项与答疑</h3><p>确认会后任务、负责人和时间节点</p></div>
+              <span class="arrow" aria-hidden="true">↗</span>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing">
+      <div class="closing-inner shell">
+        <div class="section-kicker reveal"><span class="index">05</span>Let’s Begin</div>
+        <h2 class="reveal delay-1">让每一次咨询，<br />都成为<em>信任的开始</em></h2>
+        <p class="reveal delay-2">千蜂AI × 鹏利海景一号 · AI智能客服项目正式启航</p>
+        <div class="closing-actions reveal delay-3">
+          <button class="button primary" type="button" data-open-checklist>查看会前清单 <span class="button-arrow" aria-hidden="true">→</span></button>
+          <button class="button" id="printButton" type="button">打印会议页 <span class="button-arrow" aria-hidden="true">↗</span></button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    <span>QIANFENG AI × PENGLI HAIJING NO.1</span>
+    <span>AI CUSTOMER SERVICE · PROJECT KICKOFF 2026</span>
+  </footer>
+
+  <div class="dialog-backdrop" id="dialogBackdrop" role="presentation">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+      <div class="dialog-head">
+        <div>
+          <div class="section-kicker" style="margin:0 0 6px"><span class="index">PRE</span>Meeting Checklist</div>
+          <h2 id="dialogTitle">会前准备清单</h2>
+        </div>
+        <button class="close-button" id="closeDialog" type="button" aria-label="关闭">×</button>
+      </div>
+      <ol class="checklist">
+        <li><span class="check-num">01</span><div><strong>确认核心业务场景</strong><p>准备最希望AI客服优先承接的咨询类型与典型案例。</p></div></li>
+        <li><span class="check-num">02</span><div><strong>整理现有知识素材</strong><p>包括项目介绍、服务规则、常见问答、标准话术与禁答边界。</p></div></li>
+        <li><span class="check-num">03</span><div><strong>明确项目协作团队</strong><p>确认业务负责人、技术对接人、内容维护人与验收人员。</p></div></li>
+        <li><span class="check-num">04</span><div><strong>收集成功口径建议</strong><p>准备对响应效率、回答质量、线索承接等维度的业务期待。</p></div></li>
+      </ol>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const topbar = document.getElementById('topbar');
+      const progress = document.getElementById('progress');
+      const menuButton = document.getElementById('menuButton');
+      const navLinks = document.getElementById('navLinks');
+      const backdrop = document.getElementById('dialogBackdrop');
+      const closeDialog = document.getElementById('closeDialog');
+      const openButtons = document.querySelectorAll('[data-open-checklist]');
+      const printButton = document.getElementById('printButton');
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let lastFocused = null;
+
+      const updateScroll = () => {
+        const y = window.scrollY;
+        const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+        topbar.classList.toggle('scrolled', y > 18);
+        progress.style.transform = `scaleX(${scrollable > 0 ? y / scrollable : 0})`;
+      };
+
+      const closeMenu = () => {
+        navLinks.classList.remove('open');
+        menuButton.setAttribute('aria-expanded', 'false');
+        menuButton.setAttribute('aria-label', '打开导航');
+      };
+
+      menuButton.addEventListener('click', () => {
+        const isOpen = navLinks.classList.toggle('open');
+        menuButton.setAttribute('aria-expanded', String(isOpen));
+        menuButton.setAttribute('aria-label', isOpen ? '关闭导航' : '打开导航');
+      });
+
+      navLinks.querySelectorAll('a').forEach((link) => link.addEventListener('click', closeMenu));
+
+      const showDialog = (trigger) => {
+        lastFocused = trigger;
+        backdrop.classList.add('open');
+        document.body.style.overflow = 'hidden';
+        requestAnimationFrame(() => closeDialog.focus());
+      };
+
+      const hideDialog = () => {
+        backdrop.classList.remove('open');
+        document.body.style.overflow = '';
+        if (lastFocused) lastFocused.focus();
+      };
+
+      openButtons.forEach((button) => button.addEventListener('click', () => showDialog(button)));
+      closeDialog.addEventListener('click', hideDialog);
+      backdrop.addEventListener('click', (event) => {
+        if (event.target === backdrop) hideDialog();
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          if (backdrop.classList.contains('open')) hideDialog();
+          closeMenu();
+        }
+        if (event.key === 'Tab' && backdrop.classList.contains('open')) {
+          const focusable = backdrop.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])');
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      });
+
+      printButton.addEventListener('click', () => window.print());
+      window.addEventListener('scroll', updateScroll, { passive: true });
+      updateScroll();
+
+      const revealItems = document.querySelectorAll('.reveal');
+      if (reducedMotion || !('IntersectionObserver' in window)) {
+        revealItems.forEach((item) => item.classList.add('in'));
+      } else {
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              entry.target.classList.add('in');
+              observer.unobserve(entry.target);
+            }
+          });
+        }, { threshold: .12, rootMargin: '0px 0px -40px' });
+        revealItems.forEach((item) => observer.observe(item));
+      }
+    })();
+  </script>
+</body>
+</html>
