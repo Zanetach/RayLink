@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { BbrManager } from "./bbr.js";
 import { RayLinkStore } from "./database.js";
 import { validateNodeEncryptionPublicKey } from "./node-secrets.js";
 import { CaddySetupAccessManager } from "./setup-access.js";
@@ -449,6 +450,10 @@ export async function createRayLinkApp(options) {
       || "/etc/caddy/raylink/control-plane.key",
     caddyBinary: options.caddyBinary || "caddy"
   });
+  const bbrManager = options.bbrManager || new BbrManager({
+    mode: options.runtimeMode || "dry-run",
+    configPath: options.bbrConfigPath
+  });
   const preserveAutomaticRecoveryOrigin = (input) => {
     if (
       input.certificate.mode === "caddy-auto"
@@ -477,6 +482,19 @@ export async function createRayLinkApp(options) {
     const accessChecks = automaticDomain
       ? await setupAccessManager.preflight(input)
       : {};
+    const bbr = await bbrManager.inspect();
+    if (
+      options.runtimeMode === "systemd"
+      && !["available", "enabled"].includes(bbr.status)
+    ) {
+      throw httpError(
+        "BBR_UNAVAILABLE",
+        bbr.status === "unsupported"
+          ? "当前 Linux 内核不支持 BBR，请升级内核后重试初始化"
+          : "无法检测 Linux BBR 网络加速能力",
+        409
+      );
+    }
     const installation = await installer.status();
     if (options.runtimeMode === "systemd") {
       if (!installation.installed) {
@@ -500,6 +518,7 @@ export async function createRayLinkApp(options) {
             ? "passed"
             : "development",
         runtime: options.runtimeMode === "systemd" ? "passed" : "development",
+        bbr: bbr.status,
         ...accessChecks
       }
     };
@@ -729,9 +748,16 @@ export async function createRayLinkApp(options) {
         let accessActivation = null;
         try {
           store.updateSetupProgress({
-            stage: "runtime",
+            stage: "network",
             current: 1,
-            total: 3,
+            total: 4,
+            message: "正在配置 fq 队列与 BBR 网络加速"
+          });
+          const bbr = await bbrManager.configure();
+          store.updateSetupProgress({
+            stage: "runtime",
+            current: 2,
+            total: 4,
             message: options.runtimeMode === "systemd"
               ? "正在发布本机 sing-box Runtime"
               : "正在准备本机 sing-box Runtime"
@@ -744,8 +770,8 @@ export async function createRayLinkApp(options) {
           }
           store.updateSetupProgress({
             stage: "access",
-            current: 2,
-            total: 3,
+            current: 3,
+            total: 4,
             message: input.certificate.mode === "caddy-auto"
               ? "正在配置 Caddy 并申请 HTTPS 证书"
               : "正在应用访问入口配置"
@@ -755,8 +781,8 @@ export async function createRayLinkApp(options) {
           }
           store.updateSetupProgress({
             stage: "account",
-            current: 3,
-            total: 3,
+            current: 4,
+            total: 4,
             message: "正在创建管理员并完成初始化"
           });
           const admin = store.completeSetup(input);
@@ -768,6 +794,7 @@ export async function createRayLinkApp(options) {
           sendJson(response, 201, {
             state: "READY",
             currentAdmin: admin,
+            bbr: bbr.status,
             redirectTo: sameOrigin ? "/" : new URL("/", finalOrigin).toString()
           }, sameOrigin ? {
             "set-cookie": sessionCookie(

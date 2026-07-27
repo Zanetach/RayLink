@@ -54,6 +54,9 @@ export function loadConfig(env = process.env) {
     caddyBinary: env.RAYLINK_CADDY_BIN || "caddy",
     caddyfilePath: resolve(env.RAYLINK_CADDYFILE || "/etc/caddy/Caddyfile"),
     environmentFilePath: resolve(env.RAYLINK_ENV_FILE || "/etc/raylink/raylink.env"),
+    bbrConfigPath: resolve(
+      env.RAYLINK_BBR_CONFIG || "/var/lib/raylink/managed/99-raylink-bbr.conf"
+    ),
     controlPlaneCertificatePath: resolve(
       env.RAYLINK_CONTROL_CERT || "/etc/caddy/raylink/control-plane.crt"
     ),

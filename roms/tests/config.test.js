@@ -83,6 +83,7 @@ test("first-run configuration exposes the managed Caddy access paths", () => {
     RAYLINK_CADDY_BIN: "/usr/bin/caddy",
     RAYLINK_CADDYFILE: "/etc/caddy/Caddyfile",
     RAYLINK_ENV_FILE: "/etc/raylink/raylink.env",
+    RAYLINK_BBR_CONFIG: "/var/lib/raylink/managed/99-raylink-bbr.conf",
     RAYLINK_CONTROL_CERT: "/etc/caddy/raylink/control-plane.crt",
     RAYLINK_CONTROL_KEY: "/etc/caddy/raylink/control-plane.key"
   });
@@ -91,12 +92,14 @@ test("first-run configuration exposes the managed Caddy access paths", () => {
     caddyBinary: config.caddyBinary,
     caddyfilePath: config.caddyfilePath,
     environmentFilePath: config.environmentFilePath,
+    bbrConfigPath: config.bbrConfigPath,
     controlPlaneCertificatePath: config.controlPlaneCertificatePath,
     controlPlanePrivateKeyPath: config.controlPlanePrivateKeyPath
   }, {
     caddyBinary: "/usr/bin/caddy",
     caddyfilePath: "/etc/caddy/Caddyfile",
     environmentFilePath: "/etc/raylink/raylink.env",
+    bbrConfigPath: "/var/lib/raylink/managed/99-raylink-bbr.conf",
     controlPlaneCertificatePath: "/etc/caddy/raylink/control-plane.crt",
     controlPlanePrivateKeyPath: "/etc/caddy/raylink/control-plane.key"
   });

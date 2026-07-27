@@ -442,8 +442,13 @@
   background: var(--canvas);
 }
 
-.setup-preflight span[data-state="passed"] {
+.setup-preflight span[data-state="passed"],
+.setup-preflight span[data-state="enabled"] {
   color: var(--accent);
+}
+
+.setup-preflight span[data-state="available"] {
+  color: var(--warning);
 }
 
 .setup-initialization-progress {

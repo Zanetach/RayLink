@@ -108,6 +108,8 @@ test("setup page exposes durable initialization progress instead of only disabli
   ]);
 
   assert.match(html, /id="setup-initialization-progress"/);
+  assert.match(html, /data-initialization-stage="network"/);
+  assert.match(html, /BBR 网络加速/);
   assert.match(html, /data-initialization-stage="runtime"/);
   assert.match(html, /data-initialization-stage="access"/);
   assert.match(html, /data-initialization-stage="account"/);
@@ -279,7 +281,18 @@ test("IPv6 literals remain IP access origins through setup preflight", async (t)
 });
 
 test("the one-time setup token initializes access, admin, and local runtime", async (t) => {
-  const testApp = await startSetupApp();
+  let bbrConfigurationCount = 0;
+  const testApp = await startSetupApp({
+    bbrManager: {
+      async inspect() {
+        return { status: "available" };
+      },
+      async configure() {
+        bbrConfigurationCount += 1;
+        return { status: "enabled" };
+      }
+    }
+  });
   t.after(() => testApp.close());
 
   const payload = {
@@ -334,7 +347,8 @@ test("the one-time setup token initializes access, admin, and local runtime", as
     setupToken: "passed",
     accessOrigin: "passed",
     https: "development",
-    runtime: "development"
+    runtime: "development",
+    bbr: "available"
   });
 
   const completed = await fetch(`${testApp.baseUrl}/api/setup/complete`, {
@@ -347,6 +361,8 @@ test("the one-time setup token initializes access, admin, and local runtime", as
   assert.equal(result.state, "READY");
   assert.equal(result.currentAdmin.username, "admin");
   assert.equal(result.redirectTo, "/");
+  assert.equal(result.bbr, "enabled");
+  assert.equal(bbrConfigurationCount, 1);
   assert.match(completed.headers.get("set-cookie"), /^raylink_session=/);
   const setupCookie = completed.headers.get("set-cookie").split(";")[0];
 
@@ -452,6 +468,7 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
     accessOrigin: "configuration-ready",
     https: "automatic",
     runtime: "development",
+    bbr: "development",
     dns: "passed",
     caddy: "passed"
   });
@@ -474,8 +491,8 @@ test("domain setup activates Caddy from the IP initialization entry point", asyn
     {
       state: "INITIALIZING",
       stage: "access",
-      current: 2,
-      total: 3
+      current: 3,
+      total: 4
     }
   );
   releaseActivation();
@@ -660,6 +677,11 @@ test("the control-plane installer emits a fragment setup URL and never persists 
     "public address validation must happen before the installation root is created"
   );
   assert.match(installer, /systemctl enable sing-box-raylink/);
+  assert.match(installer, /RAYLINK_BBR_CONFIG=\$\{managed_root\}\/99-raylink-bbr\.conf/);
+  assert.match(
+    installer,
+    /ln -sfn "\$managed_root\/99-raylink-bbr\.conf" \/etc\/sysctl\.d\/99-raylink-bbr\.conf/
+  );
   assert.match(
     installer,
     /web\/node\/runtime\/raylink-sing-box-\$\{runtime_version\}-linux-\$\{runtime_arch\}/

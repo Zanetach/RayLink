@@ -123,6 +123,13 @@ bash /opt/raylink/deploy/rotate-setup-token.sh
 4. 设置本机 Runtime 名称、节点连接地址和区域；
 5. 检查并进入控制台。
 
+提交最后一步后，RayLink 会先检测 Linux 内核的拥塞控制能力，再自动加载
+`tcp_bbr`、启用 `net.core.default_qdisc=fq` 和
+`net.ipv4.tcp_congestion_control=bbr`。配置会持久化到
+`/var/lib/raylink/managed/99-raylink-bbr.conf`，并通过
+`/etc/sysctl.d/99-raylink-bbr.conf` 在重启后继续生效。初始化界面会实时显示
+BBR 配置进度；内核不支持或配置验证失败时，初始化保持可重试状态并给出明确错误。
+
 没有域名时可以长期使用 IP HTTPS；浏览器需要信任安装器生成的本机证书。使用域名时
 必须先把 A/AAAA 记录直接解析到该 VPS（初始化时关闭 CDN 代理），并开放 TCP 80/443。
 Caddy 切换域名后仍保留 IP HTTPS 入口用于恢复。

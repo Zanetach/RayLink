@@ -172,7 +172,8 @@ function renderSummary() {
       : []),
     ["管理员", form.elements.username.value.trim()],
     ["本机 Runtime", `${form.elements.runtimeName.value.trim()} · ${form.elements.runtimeRegion.value.trim()}`],
-    ["主机地址", form.elements.runtimeAddress.value.trim()]
+    ["主机地址", form.elements.runtimeAddress.value.trim()],
+    ["网络加速", "自动启用 BBR + fq"]
   ];
   summary.replaceChildren(...rows.map(([term, value]) => {
     const row = document.createElement("div");
@@ -199,12 +200,17 @@ async function runPreflight() {
       accessOrigin: "当前访问入口",
       https: "HTTPS",
       runtime: "sing-box Runtime",
+      bbr: "BBR 网络加速",
       dns: "域名 DNS",
       caddy: "Caddy"
     };
     const states = {
       passed: "通过",
       development: "开发模式",
+      available: "将在初始化时启用",
+      enabled: "已启用",
+      unsupported: "内核不支持",
+      unavailable: "检测失败",
       automatic: "将自动配置",
       "configuration-ready": "配置就绪"
     };
@@ -245,7 +251,7 @@ function showStep(index, { runChecks = true } = {}) {
 }
 
 function renderInitializationProgress(progressState = {}, ready = false) {
-  const total = Math.max(1, Number(progressState.total) || 3);
+  const total = Math.max(1, Number(progressState.total) || 4);
   const current = ready ? total : Math.max(0, Math.min(total, Number(progressState.current) || 0));
   const percent = ready ? 100 : Math.round((current / total) * 100);
   const stage = ready ? "complete" : progressState.stage || "starting";
@@ -384,7 +390,7 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify(setupPayload())
     });
     stopInitializationMonitor();
-    renderInitializationProgress({ current: 3, total: 3 }, true);
+    renderInitializationProgress({ current: 4, total: 4 }, true);
     location.assign(result.redirectTo || "/");
   } catch (error) {
     stopInitializationMonitor();

@@ -81,6 +81,7 @@ if command -v apt-get >/dev/null 2>&1; then
     debian-archive-keyring \
     debian-keyring \
     gnupg \
+    kmod \
     openssl \
     tar \
     xz-utils
@@ -230,6 +231,7 @@ umask 077
     'RAYLINK_CADDY_BIN=/usr/bin/caddy' \
     "RAYLINK_CADDYFILE=${managed_root}/Caddyfile" \
     "RAYLINK_ENV_FILE=${managed_root}/raylink.env" \
+    "RAYLINK_BBR_CONFIG=${managed_root}/99-raylink-bbr.conf" \
     'RAYLINK_CONTROL_CERT=/etc/caddy/raylink/control-plane.crt' \
     'RAYLINK_CONTROL_KEY=/etc/caddy/raylink/control-plane.key' \
     'SING_BOX_BIN=/usr/local/bin/raylink-sing-box' \
@@ -237,6 +239,8 @@ umask 077
 } > "$managed_root/raylink.env"
 chmod 0600 "$managed_root/raylink.env"
 ln -sfn "$managed_root/raylink.env" "$config_root/raylink.env"
+install -m 0644 /dev/null "$managed_root/99-raylink-bbr.conf"
+ln -sfn "$managed_root/99-raylink-bbr.conf" /etc/sysctl.d/99-raylink-bbr.conf
 
 cp "$install_root/deploy/raylink.service" /etc/systemd/system/raylink.service
 cp "$install_root/deploy/sing-box-raylink.service" /etc/systemd/system/sing-box-raylink.service

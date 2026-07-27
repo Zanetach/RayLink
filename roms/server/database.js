@@ -797,7 +797,7 @@ export class RayLinkStore {
     const progress = {
       stage: "starting",
       current: 0,
-      total: 3,
+      total: 4,
       message: "正在准备初始化",
       updatedAt: timestamp
     };
@@ -830,7 +830,7 @@ export class RayLinkStore {
     const progress = {
       stage: String(stage || "starting"),
       current: Math.max(0, Number.parseInt(current, 10) || 0),
-      total: Math.max(1, Number.parseInt(total, 10) || 3),
+      total: Math.max(1, Number.parseInt(total, 10) || 4),
       message: String(message || "正在初始化"),
       updatedAt: timestamp
     };
