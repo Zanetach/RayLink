@@ -66,7 +66,7 @@ flowchart LR
 | 管理员登录、用户 CRUD | 已实现 | 可用 |
 | User Entitlement：到期、流量额度、Host 范围 | 已实现 | 真实字节计量、跨 Host 累计和超额撤权已贯通 |
 | 多 Host 接入与一次性令牌 | 已实现 | 需干净 VPS 验收 |
-| RayLink Node 心跳和远程任务 | 已实现 | 0.5.0 支持任务租约和 Runtime 在线升级；旧版暂停领任务并提示升级 |
+| RayLink Node 心跳和远程任务 | 已实现 | 0.6.0 支持协议端口、防火墙、监听和公网检查；旧版暂停领任务并提示升级 |
 | CPU、内存、网络、服务遥测 | 已实现 | 需长期稳定性验收 |
 | sing-box 固定版本安装 | 已修正为 1.13.14 | 需 Ubuntu/Debian 实机验收 |
 | sing-box 在线升级 | 已实现 | 官方稳定版检查、同系列兼容门禁、二进制备份、配置校验、健康检查和自动回滚 |
@@ -151,33 +151,34 @@ POST /api/portal/subscription/rotate
 
 界面不把 sing-box 的所有类型平铺成同等难度，而分三层：
 
-### 推荐模板
-
-- VLESS + Reality
-- Trojan + TLS
-- Hysteria2
-- AnyTLS
-- Naive
-
-### 高级协议
+### 一键启用
 
 - Shadowsocks
-- VMess
-- ShadowTLS
-- TUIC
-- Hysteria
+- VMess + Reality
+- VLESS + Reality
+- Trojan / AnyTLS + Reality
+- Naive + 自动 TLS
+- Hysteria / TUIC / Hysteria2 + 自动 TLS 和 UDP 防火墙
+
+### 仅本机服务
+
 - SOCKS
 - HTTP
 - Mixed
 
-### 系统接入
+这些入口固定监听 `127.0.0.1`，不会自动开放公网端口，也不会加入远程用户订阅。
 
+### 高级协议
+
+- ShadowTLS
 - TUN
 - Redirect
 - TProxy
 - Direct
 
-正式版协议页需支持同一协议创建多个实例，实例标识作为 inbound tag，端口必须做跨协议、跨实例冲突校验。保存前按目标 Host 校验：
+一键启用事务自动选择空闲端口、生成 Runtime Credential/Reality 密钥、绑定节点域名证书、配置 TCP/UDP 防火墙、运行 `sing-box check`、原子发布、检查监听和公网连接，并在任何失败时恢复配置与 RayLink 新增的防火墙规则。远程节点发现系统端口冲突时会在本机扫描并回报下一个空闲候选端口，控制面只重试该端口。
+
+后续增强需支持同一协议创建多个实例，实例标识作为 inbound tag，端口必须做跨协议、跨实例冲突校验。保存前按目标 Host 校验：
 
 - sing-box 版本；
 - 平台与架构；
@@ -199,7 +200,7 @@ WireGuard 在 1.13 应使用 endpoint，不得生成已移除的 WireGuard outbo
 6. 发布成功后只保留当前配置与上一份回滚配置引用的 TLS 版本，清理更旧私钥。
 7. API、日志和任务结果只展示资产数量、证书指纹/有效期元数据和错误摘要。
 
-后续增强项是 ACME 自动签发、续期和到期告警，不再阻断手工证书的安全生产发布。
+本机节点域名由 Caddy 自动签发和续期，远程节点使用 sing-box `with_acme`。RayLink Node 会同时维护协议端口，以及 ACME HTTP-01 / TLS-ALPN-01 所需的 TCP 80/443 防火墙规则；证书到期告警仍是后续增强项。
 
 Reality 私钥同样按敏感资产处理，控制面 API 默认不回显。
 
@@ -256,7 +257,7 @@ pending → validating → publishing → active
 |---|---|---:|
 | A | 当前遥测、版本修正、安装服务冲突修复、发布审查 | 已完成 |
 | B | 正式配置 URL/吊销、TUN + DNS + 智能路由生成 | 主链路已完成；二维码与离线规则集待完成 |
-| C | 证书资产安全分发 | 已完成；ACME 和同协议多实例待增强 |
+| C | 证书资产安全分发 | 已完成；本机 Caddy 与远程 ACME 自动签发已接通，同协议多实例待增强 |
 | D | 多 Host Deployment 聚合、灰度、远程版本回滚、告警 | 5–7 人日 |
 | E | 干净 VPS、各协议、各客户端、故障与安全验收 | 5–8 人日 |
 | F | 自建 `with_v2ray_api` 构建与按用户持久计量 | 已完成主链路；待长期压力与故障验收 |

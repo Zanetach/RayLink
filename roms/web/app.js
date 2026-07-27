@@ -1,7 +1,7 @@
 const users = [];
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
-const requiredNodeAgentVersion = "0.5.0";
+const requiredNodeAgentVersion = "0.6.0";
 
 const clientCatalog = {
   "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "下载配置" }
@@ -1037,6 +1037,31 @@ function openNewUser() {
   openDrawer({ title: "新建用户", eyebrow: "访问控制", content: userDrawerMarkup(), saveLabel: "创建用户" });
 }
 
+const protocolStatePresentation = {
+  configuring: ["配置中", "warning"],
+  "pending-publish": ["待发布", "warning"],
+  deploying: ["正在部署", "warning"],
+  "port-listening": ["端口已监听", "good"],
+  "public-ready": ["公网可用", "good"],
+  failed: ["启用失败", "danger"]
+};
+
+function protocolState(host, profile, applied) {
+  const activation = host.protocolActivations?.find((item) => item.type === profile.type);
+  if (activation && protocolStatePresentation[activation.state]) {
+    const [label, className] = protocolStatePresentation[activation.state];
+    return { label, className, activation };
+  }
+  const pending = applied
+    ? JSON.stringify(profile) !== JSON.stringify(applied)
+    : profile.enabled;
+  return {
+    label: pending ? "待发布" : profile.enabled ? "端口已监听" : "未启用",
+    className: pending ? "warning" : profile.enabled ? "good" : "neutral",
+    activation: null
+  };
+}
+
 function hostDrawerMarkup(hostId) {
   const host = controlPlane.hosts.find((item) => item.id === hostId);
   const isRemote = host.kind === "remote";
@@ -1080,16 +1105,36 @@ function hostDrawerMarkup(hostId) {
     const name = catalog?.name || profile.type;
     const port = profile.port ? `:${profile.port}` : "无固定端口";
     const applied = host.appliedProtocols?.find((item) => item.type === profile.type);
-    const pending = applied
-      ? JSON.stringify(profile) !== JSON.stringify(applied)
-      : profile.enabled;
-    const stateLabel = pending ? "待发布" : profile.enabled ? "运行配置" : "未启用";
-    const stateClass = pending ? "warning" : profile.enabled ? "good" : "neutral";
-    return `
+    const state = protocolState(host, profile, applied);
+    return {
+      group: catalog?.activationPolicy?.group || "advanced",
+      html: `
       <button type="button" class="switch-row protocol-host-row" data-host-protocol="${escapeHtml(profile.type)}" data-host-id="${escapeHtml(host.id)}">
-        <div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(profile.listen)}${escapeHtml(port)} · ${profile.tls?.mode === "reality" ? "Reality" : profile.tls?.mode === "certificate" ? "TLS" : "标准入口"}</small></div>
-        <span class="status-badge ${stateClass}"><i></i>${stateLabel}</span>
-      </button>`;
+        <div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(profile.listen)}${escapeHtml(port)} · ${profile.tls?.mode === "reality" ? "Reality" : ["certificate", "acme"].includes(profile.tls?.mode) ? "TLS" : "标准入口"}</small></div>
+        <span class="status-badge ${state.className}"><i></i>${state.label}</span>
+      </button>`
+    };
+  });
+  const groupMarkup = [
+    {
+      key: ["one-click", "tls", "udp-tls"],
+      label: "一键启用",
+      hint: "自动端口、密钥或证书、防火墙、发布与可用性检查"
+    },
+    {
+      key: ["private"],
+      label: "仅本机服务",
+      hint: "固定监听 127.0.0.1，不暴露公网"
+    },
+    {
+      key: ["advanced"],
+      label: "高级协议",
+      hint: "涉及系统网络或协议编排，需要手动配置"
+    }
+  ].map((group) => {
+    const rows = protocolRows.filter((row) => group.key.includes(row.group));
+    if (!rows.length) return "";
+    return `<div class="protocol-group"><div class="protocol-group-heading"><strong>${group.label}</strong><small>${group.hint}</small></div>${rows.map((row) => row.html).join("")}</div>`;
   }).join("");
   return `
     <form class="drawer-form" id="host-drawer-form" data-host-id="${escapeHtml(host.id)}">
@@ -1099,8 +1144,8 @@ function hostDrawerMarkup(hostId) {
       <label class="field"><span>节点连接地址（每台 Host 独立）</span><input name="address" value="${escapeHtml(host.address)}" placeholder="node.example.com" required><small class="field-hint">每台 Host 可以使用不同的域名或公网 IP，订阅会使用这里的地址连接该节点。</small></label>
       <label class="field"><span>区域标识</span><input name="region" value="${escapeHtml(host.region)}" pattern="[A-Za-z0-9-]{2,32}" placeholder="tokyo" required></label>
       <p class="drawer-section-label">入口协议</p>
-      <p class="field-hint">协议属于当前主机。启用后请在“运维”中发布配置，用户订阅会自动聚合可用主机上的入口。</p>
-      <div class="host-protocol-list">${protocolRows}</div>
+      <p class="field-hint">协议属于当前主机。一键启用会完成配置、校验、发布、端口检查，并在成功后自动进入用户订阅。</p>
+      <div class="host-protocol-list">${groupMarkup}</div>
       <div class="switch-row"><div><strong>${isRemote ? "RayLink Node" : "Runtime 模式"}</strong><small>${escapeHtml(runtimeCopy)}</small></div><span class="status-badge neutral"><i></i>${escapeHtml(isRemote ? host.status : controlPlane.runtime?.state || "unknown")}</span></div>
       ${!isRemote && !controlPlane.installation?.installed
         ? `<button type="button" class="button primary" id="install-sing-box">${icon("terminal")}一键安装 sing-box</button><p class="field-hint">安装完成后即可在当前主机启用入口协议。</p>`
@@ -1191,12 +1236,15 @@ function protocolDrawerMarkup(hostId, type) {
     .find((item) => item.type === type);
   const profile = host?.protocols?.find((item) => item.type === type);
   const applied = host?.appliedProtocols?.find((item) => item.type === type);
-  const pending = applied
-    ? JSON.stringify(profile) !== JSON.stringify(applied)
-    : profile.enabled;
+  const state = protocolState(host, profile, applied);
+  const policy = protocol.activationPolicy || { group: "advanced", network: "tcp", exposure: "advanced" };
+  const oneClick = !profile.enabled && policy.group !== "advanced";
   const tlsModes = [
     ["none", "不启用 TLS"],
     ["certificate", "证书 TLS"],
+    ...(protocol.requiredTags?.includes("with_quic") || protocol.type === "naive"
+      ? [["acme", "自动证书（ACME）"]]
+      : []),
     ...(protocol.realityAvailable ? [["reality", "Reality"]] : [])
   ];
   const transportOptions = [
@@ -1208,15 +1256,21 @@ function protocolDrawerMarkup(hostId, type) {
     "httpupgrade"
   ];
   return `
-    <form class="drawer-form" id="protocol-drawer-form" data-host-id="${escapeHtml(hostId)}" data-protocol-type="${escapeHtml(type)}">
+    <form class="drawer-form ${oneClick ? "protocol-one-click" : ""}" id="protocol-drawer-form" data-host-id="${escapeHtml(hostId)}" data-protocol-type="${escapeHtml(type)}">
       <div class="drawer-profile">
         <span class="avatar">${escapeHtml(type.slice(0, 2).toUpperCase())}</span>
         <div><strong>${escapeHtml(protocol.name)}</strong><small>${escapeHtml(protocol.description)}</small></div>
-        <span class="status-badge ${pending ? "warning" : profile.enabled ? "good" : "neutral"}"><i></i>${pending ? "待发布" : profile.enabled ? "运行配置" : "未启用"}</span>
+        <span class="status-badge ${state.className}"><i></i>${state.label}</span>
       </div>
+      ${oneClick ? `<div class="protocol-activation-card">
+        <strong>开启后即可使用</strong>
+        <small>RayLink 将自动选择空闲 ${escapeHtml(policy.network.toUpperCase())} 端口，生成凭据${policy.tls === "reality" ? "和 Reality 密钥" : policy.tls === "acme" ? "并为节点域名申请 TLS 证书" : ""}，配置防火墙，校验并发布 sing-box，检查可用后加入用户订阅。</small>
+        ${state.activation?.state === "failed" ? `<small class="activation-error">上次启用失败：${escapeHtml(state.activation.error || "节点未返回错误详情")}${state.activation.rolledBack === false ? "；自动回滚未完整完成，请先检查节点。" : "；已自动回滚，可直接重试。"}</small>` : ""}
+        <div class="activation-flow"><span>配置</span><i></i><span>发布</span><i></i><span>监听</span><i></i><span>${policy.exposure === "private" ? "本机可用" : "公网可用"}</span></div>
+      </div>` : ""}
       <div class="switch-row">
-        <div><strong>在 ${escapeHtml(host.name)} 启用</strong><small>该设置只影响当前主机；保存后进入待发布状态。</small></div>
-        <button type="button" class="switch ${profile.enabled ? "on" : ""}" data-protocol-enabled role="switch" aria-checked="${profile.enabled}"></button>
+        <div><strong>在 ${escapeHtml(host.name)} 启用</strong><small>${oneClick ? "点击底部“一键启用”后自动完成全部部署步骤。" : "手动修改会保存为待发布配置。"}</small></div>
+        <button type="button" class="switch ${profile.enabled || oneClick ? "on" : ""}" data-protocol-enabled role="switch" aria-checked="${profile.enabled || oneClick}"></button>
       </div>
       <p class="drawer-section-label">监听设置</p>
       <label class="field"><span>监听地址</span><input name="listen" value="${escapeHtml(profile.listen)}" required><small class="field-hint">公网服务通常使用 ::，仅本机使用 127.0.0.1。</small></label>
@@ -1225,6 +1279,10 @@ function protocolDrawerMarkup(hostId, type) {
         <p class="drawer-section-label">TLS 与 Reality</p>
         <label class="field"><span>TLS 模式</span><select name="tlsMode">${tlsModes.map(([value, label]) => `<option value="${value}" ${profile.tls.mode === value ? "selected" : ""}>${label}</option>`).join("")}</select><small class="field-hint">${protocol.tls === "required" ? "此协议启用时必须选择证书 TLS 或 Reality。" : "可按部署环境选配。"}</small></label>
         <label class="field"><span>服务器名称（SNI）</span><input name="serverName" value="${escapeHtml(profile.tls.serverName)}" placeholder="node.example.com"></label>
+        <div class="quota-input">
+          <label class="field"><span>ACME 通知邮箱</span><input name="acmeEmail" type="email" value="${escapeHtml(profile.tls.acmeEmail || "")}" placeholder="ops@example.com"></label>
+          <label class="field"><span>ACME 数据目录</span><input name="acmeDataDirectory" value="${escapeHtml(profile.tls.acmeDataDirectory || "/var/lib/raylink/acme")}"></label>
+        </div>
         <div class="quota-input">
           <label class="field"><span>证书路径</span><input name="certificatePath" value="${escapeHtml(profile.tls.certificatePath)}" placeholder="/etc/letsencrypt/live/node/fullchain.pem"></label>
           <label class="field"><span>私钥路径</span><input name="keyPath" value="${escapeHtml(profile.tls.keyPath)}" placeholder="/etc/letsencrypt/live/node/privkey.pem"></label>
@@ -1262,12 +1320,15 @@ function openProtocol(hostId, type) {
   const host = controlPlane.hosts.find((item) => item.id === hostId);
   const protocol = (host?.protocolCatalog || controlPlane.protocolCatalog)
     .find((item) => item.type === type);
+  const profile = host?.protocols?.find((item) => item.type === type);
   if (!protocol || !host) return;
   openDrawer({
     title: protocol.name,
     eyebrow: `${host.name} · 入口协议`,
     content: protocolDrawerMarkup(hostId, type),
-    saveLabel: "保存协议"
+    saveLabel: !profile?.enabled && protocol.activationPolicy?.group !== "advanced"
+      ? "一键启用"
+      : "保存协议"
   });
 }
 
@@ -1477,6 +1538,34 @@ async function saveNewHostForm(form) {
 }
 
 async function saveProtocolForm(form) {
+  const host = controlPlane.hosts.find((item) => item.id === form.dataset.hostId);
+  const existing = host?.protocols?.find((item) => item.type === form.dataset.protocolType);
+  const catalog = (host?.protocolCatalog || controlPlane.protocolCatalog)
+    .find((item) => item.type === form.dataset.protocolType);
+  if (
+    existing
+    && !existing.enabled
+    && catalog?.activationPolicy?.group !== "advanced"
+    && form.querySelector("[data-protocol-enabled]").classList.contains("on")
+  ) {
+    const phases = ["配置中…", "待发布…", "正在部署…", "检查端口…"];
+    let phase = 0;
+    elements.drawerSave.textContent = phases[phase];
+    const phaseTimer = setInterval(() => {
+      phase = Math.min(phase + 1, phases.length - 1);
+      elements.drawerSave.textContent = phases[phase];
+    }, 900);
+    try {
+      const result = await api(
+        `/api/hosts/${encodeURIComponent(form.dataset.hostId)}/protocols/${encodeURIComponent(form.dataset.protocolType)}/activate`,
+        { method: "POST" }
+      );
+      await loadBootstrap();
+      return { ...result, oneClick: true };
+    } finally {
+      clearInterval(phaseTimer);
+    }
+  }
   let advancedOptions;
   try {
     advancedOptions = JSON.parse(form.elements.options.value || "{}");
@@ -1490,7 +1579,7 @@ async function saveProtocolForm(form) {
     error.code = "INVALID_PROTOCOL_JSON";
     throw error;
   }
-  const protocol = controlPlane.protocolCatalog.find((item) => item.type === form.dataset.protocolType);
+  const protocol = catalog;
   const fieldValue = (name, fallback = "") => form.elements[name]?.value?.trim() ?? fallback;
   if (protocol.type === "hysteria") {
     advancedOptions = {
@@ -1514,7 +1603,9 @@ async function saveProtocolForm(form) {
         handshakePort: Number(fieldValue("handshakePort", "443")),
         privateKey: fieldValue("privateKey"),
         publicKey: fieldValue("publicKey"),
-        shortId: fieldValue("shortId")
+        shortId: fieldValue("shortId"),
+        acmeEmail: fieldValue("acmeEmail"),
+        acmeDataDirectory: fieldValue("acmeDataDirectory", "/var/lib/raylink/acme")
       },
       transport: {
         type: fieldValue("transportType", "none"),
@@ -1525,6 +1616,7 @@ async function saveProtocolForm(form) {
     })
   });
   await loadBootstrap();
+  return { oneClick: false };
 }
 
 async function saveDrawer() {
@@ -1564,6 +1656,7 @@ async function saveDrawer() {
   const previousLabel = elements.drawerSave.textContent;
   elements.drawerSave.textContent = "保存中…";
   let userSaveResult = null;
+  let protocolSaveResult = null;
   try {
     if (form.id === "user-drawer-form") userSaveResult = await saveUserForm(form);
     if (form.id === "host-drawer-form") await saveHostForm(form);
@@ -1578,7 +1671,7 @@ async function saveDrawer() {
       showToast("主机已创建", "请在新 VPS 上执行一次性安装命令。");
       return;
     }
-    if (form.id === "protocol-drawer-form") await saveProtocolForm(form);
+    if (form.id === "protocol-drawer-form") protocolSaveResult = await saveProtocolForm(form);
   } catch (error) {
     if (form) showDrawerFormError(form, error);
     showToast("保存失败", error.message);
@@ -1587,19 +1680,36 @@ async function saveDrawer() {
     return;
   }
 
+  const activatedProtocol = protocolSaveResult?.profile
+    ? controlPlane.protocolCatalog.find((item) => item.type === protocolSaveResult.profile.type)
+    : null;
+  const activationIsPrivate = activatedProtocol?.activationPolicy?.exposure === "private";
   const message = userSaveResult?.runtimeSync?.status === "pending"
     ? userSaveResult.runtimeSync.message
     : form?.id === "host-drawer-form"
       ? "Runtime 主机已更新，用户配置将使用新的公网地址。"
     : form?.id === "protocol-drawer-form"
-      ? "协议草稿已保存，请在配置发布页校验并发布。"
+      ? protocolSaveResult?.oneClick
+        ? protocolSaveResult.activation?.state === "deploying"
+          ? activationIsPrivate
+            ? "协议已完成配置并发送到远程节点，节点确认后仅在该主机本机提供服务。"
+            : "协议已完成配置并发送到远程节点，节点确认监听后会自动进入用户订阅。"
+          : activationIsPrivate
+            ? "协议已完成配置、校验和发布，仅可由该主机本机访问。"
+            : "协议已完成配置、校验和发布，并已自动进入用户订阅。"
+        : "协议草稿已保存，请在配置发布页校验并发布。"
     : form?.id === "user-drawer-form" && previousLabel.includes("创建")
       ? "用户已创建，独立权益已经保存。"
       : previousLabel.includes("添加")
         ? "主机连接信息已通过本地校验。"
         : "更改已经写入当前草稿。";
   closeDrawer();
-  showToast(userSaveResult?.runtimeSync?.status === "pending" ? "已保存，等待同步" : "已保存", message);
+  showToast(
+    protocolSaveResult?.oneClick
+      ? protocolSaveResult.activation?.state === "deploying" ? "正在远程部署" : "协议已启用"
+      : userSaveResult?.runtimeSync?.status === "pending" ? "已保存，等待同步" : "已保存",
+    message
+  );
   elements.drawerSave.disabled = false;
 }
 

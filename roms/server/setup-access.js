@@ -1,7 +1,8 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { access, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { connect as tlsConnect } from "node:tls";
 import { promisify } from "node:util";
@@ -85,6 +86,22 @@ async function waitForTrustedHttps(origin) {
   throw lastError;
 }
 
+async function locateCaddyCertificate(dataDirectory, domain) {
+  const issuers = await readdir(dataDirectory, { withFileTypes: true }).catch(() => []);
+  for (const issuer of issuers) {
+    if (!issuer.isDirectory()) continue;
+    const base = join(dataDirectory, issuer.name, domain);
+    const certificatePath = join(base, `${domain}.crt`);
+    const keyPath = join(base, `${domain}.key`);
+    try {
+      await access(certificatePath);
+      await access(keyPath);
+      return { certificatePath, keyPath };
+    } catch {}
+  }
+  return null;
+}
+
 function caddyfileForDomains({
   consoleDomain,
   subscriptionDomain,
@@ -143,6 +160,8 @@ export class CaddySetupAccessManager {
     caddyBinary = "caddy",
     lookup = (hostname) => dnsLookup(hostname, { all: true, verbatim: true }),
     verifyHttps = waitForTrustedHttps,
+    caddyDataDirectory = "/var/lib/caddy/.local/share/caddy/certificates",
+    locateCertificate = (domain) => locateCaddyCertificate(caddyDataDirectory, domain),
     replaceFile = rename,
     runCommand = (command, args) => execFile(command, args, {
       timeout: 30_000,
@@ -157,8 +176,144 @@ export class CaddySetupAccessManager {
     this.caddyBinary = caddyBinary;
     this.lookup = lookup;
     this.verifyHttps = verifyHttps;
+    this.locateCertificate = locateCertificate;
     this.replaceFile = replaceFile;
     this.runCommand = runCommand;
+    this.caddyMutation = Promise.resolve();
+  }
+
+  async mutateCaddy(callback) {
+    const previous = this.caddyMutation;
+    let release;
+    this.caddyMutation = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await callback();
+    } finally {
+      release();
+    }
+  }
+
+  async ensureNodeCertificate(domain) {
+    const hostname = String(domain || "").trim().toLowerCase();
+    if (isIP(hostname) || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(hostname)) {
+      throw setupAccessError("NODE_DOMAIN_REQUIRED", "节点自动证书需要有效域名", 422);
+    }
+    const addresses = await this.lookup(hostname).catch((error) => {
+      throw setupAccessError(
+        "NODE_DOMAIN_DNS_NOT_READY",
+        `节点域名 ${hostname} 尚未解析`,
+        422,
+        error
+      );
+    });
+    const initialHostname = normalizedIp(new URL(this.initialOrigin).hostname);
+    if (
+      isIP(initialHostname)
+      && !addresses.some(({ address }) => normalizedIp(address) === initialHostname)
+    ) {
+      throw setupAccessError(
+        "NODE_DOMAIN_DNS_MISMATCH",
+        `节点域名 ${hostname} 必须解析到本机公网 IP ${initialHostname}`,
+        422
+      );
+    }
+    const marker = `# RayLink managed node certificate: ${hostname}`;
+    const block = `${marker}\nhttps://${hostname} {\n\trespond 204\n}\n`;
+    let inserted = false;
+    const removeManagedBlock = async () => {
+      if (!inserted) return;
+      await this.mutateCaddy(async () => {
+        const current = await readFile(this.caddyfilePath, "utf8");
+        const escaped = hostname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const withoutBlock = current.replace(
+          new RegExp(
+            `\\n*# RayLink managed node certificate: ${escaped}\\nhttps:\\/\\/${escaped} \\{\\n\\trespond 204\\n\\}\\n?`
+          ),
+          "\n"
+        );
+        await writeFile(this.caddyfilePath, `${withoutBlock.trimEnd()}\n`, { mode: 0o644 });
+        await this.runCommand(this.caddyBinary, [
+          "reload",
+          "--config",
+          this.caddyfilePath,
+          "--adapter",
+          "caddyfile"
+        ]);
+        inserted = false;
+      });
+    };
+    await this.mutateCaddy(async () => {
+      const current = await readFile(this.caddyfilePath, "utf8");
+      if (current.includes(marker)) return;
+      const candidate = `${this.caddyfilePath}.node-certificate.candidate`;
+      await writeFile(candidate, `${current.trimEnd()}\n\n${block}`, { mode: 0o644 });
+      try {
+        await this.runCommand(this.caddyBinary, [
+          "adapt",
+          "--config",
+          candidate,
+          "--adapter",
+          "caddyfile"
+        ]);
+        await this.replaceFile(candidate, this.caddyfilePath);
+        inserted = true;
+        await this.runCommand(this.caddyBinary, [
+          "reload",
+          "--config",
+          this.caddyfilePath,
+          "--adapter",
+          "caddyfile"
+        ]);
+      } catch (error) {
+        await unlink(candidate).catch(() => {});
+        if (inserted) {
+          await writeFile(this.caddyfilePath, current, { mode: 0o644 });
+          await this.runCommand(this.caddyBinary, [
+            "reload",
+            "--config",
+            this.caddyfilePath,
+            "--adapter",
+            "caddyfile"
+          ]).catch(() => {});
+        }
+        throw setupAccessError(
+          "NODE_CERTIFICATE_ACTIVATION_FAILED",
+          `Caddy 无法为节点域名 ${hostname} 启用证书`,
+          502,
+          error
+        );
+      } finally {
+        await unlink(candidate).catch(() => {});
+      }
+    });
+    let certificate = null;
+    const deadline = Date.now() + 90_000;
+    while (!certificate && Date.now() < deadline) {
+      certificate = await this.locateCertificate(hostname);
+      if (!certificate) await delay(1_000);
+    }
+    if (!certificate) {
+      const error = setupAccessError(
+        "NODE_CERTIFICATE_NOT_READY",
+        `Caddy 未能在 90 秒内签发 ${hostname} 的证书`,
+        502
+      );
+      try {
+        await removeManagedBlock();
+      } catch (rollbackError) {
+        error.rollbackError = rollbackError.message;
+      }
+      throw error;
+    }
+    return {
+      ...certificate,
+      serverName: hostname,
+      managedBy: "caddy",
+      rollback: removeManagedBlock
+    };
   }
 
   async preflight(input) {

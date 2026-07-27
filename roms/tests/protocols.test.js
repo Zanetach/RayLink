@@ -75,6 +75,35 @@ test("managed protocol profiles compile separate user credentials into server in
   }]);
 });
 
+test("ACME TLS profiles compile a node-bound certificate request for sing-box 1.13", () => {
+  const profile = normalizeProtocolConfig({
+    ...defaultProtocolConfigs().find((item) => item.type === "hysteria2"),
+    enabled: true,
+    tls: {
+      mode: "acme",
+      serverName: "node.example.com",
+      acmeEmail: "ops@example.com"
+    }
+  });
+
+  const [inbound] = buildProtocolInbounds({
+    profiles: [profile],
+    users: eligibleUsers,
+    masterPassword: "c2VydmVyLWtleS0xNg=="
+  });
+
+  assert.deepEqual(inbound.tls, {
+    enabled: true,
+    server_name: "node.example.com",
+    acme: {
+      domain: ["node.example.com"],
+      default_server_name: "node.example.com",
+      email: "ops@example.com",
+      data_directory: "/var/lib/raylink/acme"
+    }
+  });
+});
+
 test("client configuration includes every enabled user-facing protocol", () => {
   const profiles = defaultProtocolConfigs(8388).map((profile) => {
     if (profile.type === "vless") {
@@ -118,6 +147,30 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.ok(config.route.rule_set.every((ruleSet) => ruleSet.type === "inline"));
   assert.ok(config.route.rule_set.every((ruleSet) => !Object.hasOwn(ruleSet, "url")));
   assert.equal(config.experimental.cache_file.enabled, true);
+});
+
+test("loopback-only proxy inbounds are never published in a remote user subscription", () => {
+  const profiles = defaultProtocolConfigs().map((profile) => ({
+    ...profile,
+    enabled: ["shadowsocks", "socks", "http", "mixed"].includes(profile.type),
+    listen: ["socks", "http", "mixed"].includes(profile.type) ? "127.0.0.1" : profile.listen
+  }));
+  const config = buildProtocolClientConfig({
+    profiles,
+    credential: {
+      email: eligibleUsers[0].email,
+      runtimeUuid: eligibleUsers[0].runtimeUuid,
+      runtimePassword: eligibleUsers[0].runtimePassword,
+      serverPassword: "c2VydmVyLWtleS0xNg=="
+    },
+    server: "node.example.com"
+  });
+
+  assert.deepEqual(
+    config.outbounds.filter((outbound) => !["urltest", "selector", "direct"].includes(outbound.type))
+      .map((outbound) => outbound.type),
+    ["shadowsocks"]
+  );
 });
 
 test("multi-host client configuration exposes each host's enabled protocols through one selector", () => {

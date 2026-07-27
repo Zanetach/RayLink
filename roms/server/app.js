@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 import { BbrManager } from "./bbr.js";
 import { RayLinkStore } from "./database.js";
 import { validateNodeEncryptionPublicKey } from "./node-secrets.js";
+import {
+  ProtocolActivationManager,
+  protocolActivationPolicy,
+  UfwFirewallManager
+} from "./protocol-activation.js";
 import { CaddySetupAccessManager } from "./setup-access.js";
 import { buildUserClientConfig } from "./singbox/client-config.js";
 import {
@@ -30,7 +35,7 @@ import {
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
-const REQUIRED_NODE_AGENT_VERSION = "0.5.0";
+const REQUIRED_NODE_AGENT_VERSION = "0.6.0";
 const defaultWebDir = fileURLToPath(new URL("../web", import.meta.url));
 
 const contentTypes = {
@@ -450,6 +455,23 @@ export async function createRayLinkApp(options) {
       || "/etc/caddy/raylink/control-plane.key",
     caddyBinary: options.caddyBinary || "caddy"
   });
+  const protocolActivationManager = options.protocolActivationManager
+    || new ProtocolActivationManager({
+      store,
+      runtimeManager,
+      installer,
+      ...(options.portManager ? { portManager: options.portManager } : {}),
+      firewallManager: options.firewallManager || new UfwFirewallManager({
+        enabled: options.runtimeMode === "systemd"
+      }),
+      ...(options.publicProbe ? { publicProbe: options.publicProbe } : {}),
+      certificateEmail: () => store.setupStatus().certificate?.email || "",
+      certificateProvider: async (domain) => {
+        if (store.setupStatus().certificate?.mode !== "caddy-auto") return null;
+        return setupAccessManager.ensureNodeCertificate(domain);
+      },
+      runtimeMode: options.runtimeMode || "dry-run"
+    });
   const bbrManager = options.bbrManager || new BbrManager({
     mode: options.runtimeMode || "dry-run",
     configPath: options.bbrConfigPath
@@ -1097,11 +1119,27 @@ export async function createRayLinkApp(options) {
         }
         const taskCompletionMatch = url.pathname.match(/^\/api\/node\/tasks\/([^/]+)\/complete$/);
         if (request.method === "POST" && taskCompletionMatch) {
-          sendJson(response, 200, store.completeNodeTask(
+          const completion = store.completeNodeTask(
             node.id,
             decodeURIComponent(taskCompletionMatch[1]),
             await readJson(request)
-          ));
+          );
+          if (completion.retryActivation) {
+            try {
+              await protocolActivationManager.enable({
+                hostId: completion.retryActivation.hostId,
+                type: completion.retryActivation.type,
+                adminId: null
+              });
+              completion.retryQueued = true;
+            } catch (error) {
+              console.warn(
+                `[RayLink] Remote protocol port retry failed: ${error.message}`
+              );
+              completion.retryQueued = false;
+            }
+          }
+          sendJson(response, 200, completion);
           return;
         }
         sendJson(response, 404, { error: { code: "NOT_FOUND", message: "节点接口不存在" } });
@@ -1166,7 +1204,10 @@ export async function createRayLinkApp(options) {
             return {
               ...host,
               protocolCatalog: protocolCatalog.map(
-                (protocol) => protocolAvailability(protocol, capabilities)
+                (protocol) => ({
+                  ...protocolAvailability(protocol, capabilities),
+                  activationPolicy: protocolActivationPolicy(protocol.type)
+                })
               )
             };
           });
@@ -1181,7 +1222,10 @@ export async function createRayLinkApp(options) {
             runtimeUpdate: typeof installer.releaseStatus === "function"
               ? installer.releaseStatus()
               : null,
-            protocolCatalog: protocolCatalog.map((protocol) => protocolAvailability(protocol, installation))
+            protocolCatalog: protocolCatalog.map((protocol) => ({
+              ...protocolAvailability(protocol, installation),
+              activationPolicy: protocolActivationPolicy(protocol.type)
+            }))
           });
           return;
         }
@@ -1302,6 +1346,22 @@ export async function createRayLinkApp(options) {
             }
           }
           sendJson(response, 200, store.updateHostProtocolConfig(hostId, protocolType, input));
+          return;
+        }
+
+        const protocolActivationMatch = url.pathname.match(
+          /^\/api\/hosts\/([^/]+)\/protocols\/([^/]+)\/activate$/
+        );
+        if (request.method === "POST" && protocolActivationMatch) {
+          const result = await runLocalRuntimeOperation(
+            "协议一键启用",
+            () => protocolActivationManager.enable({
+              hostId: decodeURIComponent(protocolActivationMatch[1]),
+              type: decodeURIComponent(protocolActivationMatch[2]),
+              adminId: admin.id
+            })
+          );
+          sendJson(response, result.activation?.asynchronous ? 202 : 200, result);
           return;
         }
 

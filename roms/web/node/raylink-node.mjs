@@ -26,12 +26,13 @@ import {
 } from "node:fs/promises";
 import { arch, cpus, freemem, hostname, platform, totalmem } from "node:os";
 import { connect as connectHttp2 } from "node:http2";
+import { connect as connectTcp } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
-const AGENT_VERSION = "0.5.0";
+const AGENT_VERSION = "0.6.0";
 const SECRET_ENVELOPE_ALGORITHM = "x25519-hkdf-sha256-aes-256-gcm";
 const SECRET_ENVELOPE_CONTEXT = Buffer.from("raylink-node-secret-v1", "utf8");
 
@@ -443,10 +444,108 @@ export class NodeRuntimeAdapter {
     this.preferMeteredRuntime = options.preferMeteredRuntime === true;
     this.commandRunner = options.commandRunner || runCommand;
     this.healthCheckDelayMs = Math.max(0, Number(options.healthCheckDelayMs ?? 2_000) || 0);
+    this.firewallManager = options.firewallManager || {
+      open: (activation) => this.openFirewall(activation)
+    };
+    this.portVerifier = options.portVerifier || {
+      assertAvailable: (activation) => this.assertPortAvailable(activation),
+      waitForListening: (activation) => this.waitForListening(activation)
+    };
+    this.publicProbe = options.publicProbe || {
+      verify: (activation) => this.verifyPublicConnectivity(activation)
+    };
   }
 
   get configPath() {
     return join(this.dataDir, "config.json");
+  }
+
+  async openFirewall({ port, network }) {
+    let status;
+    try {
+      status = await this.commandRunner("ufw", ["status"]);
+      if (!/^Status:\s+active/im.test(String(status.stdout || ""))) {
+        return { managed: false, rollback: async () => {} };
+      }
+    } catch (error) {
+      if (error.code === "ENOENT" || /not found/i.test(error.message)) {
+        return { managed: false, rollback: async () => {} };
+      }
+      throw error;
+    }
+    const rule = `${port}/${network}`;
+    if (
+      String(status.stdout || "").split("\n").some((line) => (
+        new RegExp(`^\\s*${port}\\/${network}\\s+ALLOW\\b`, "i").test(line)
+      ))
+    ) {
+      return { managed: false, preexisting: true, rollback: async () => {} };
+    }
+    await this.commandRunner("ufw", ["allow", rule, "comment", "RayLink managed"]);
+    return {
+      managed: true,
+      rollback: async () => {
+        await this.commandRunner("ufw", ["--force", "delete", "allow", rule]);
+      }
+    };
+  }
+
+  async waitForListening({ port, network }) {
+    const args = network === "udp" ? ["-H", "-lun"] : ["-H", "-ltn"];
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const { stdout } = await this.commandRunner("ss", args);
+      const listening = String(stdout || "").split("\n").some((line) => (
+        new RegExp(`(?:^|\\s|\\]|:)${port}(?=\\s|$)`).test(line)
+      ));
+      if (listening) return true;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const error = new Error(`端口 ${port}/${network} 未开始监听`);
+    error.code = "PROTOCOL_NOT_LISTENING";
+    throw error;
+  }
+
+  async assertPortAvailable({ port, network }) {
+    const args = network === "udp" ? ["-H", "-lun"] : ["-H", "-ltn"];
+    const { stdout } = await this.commandRunner("ss", args);
+    const occupiedPorts = new Set(
+      String(stdout || "").split("\n").flatMap((line) => (
+        [...line.matchAll(/:(\d+)(?=\s|$)/g)].map((match) => Number(match[1]))
+      ))
+    );
+    if (!occupiedPorts.has(port)) return true;
+    const error = new Error(`端口 ${port}/${network} 已被系统服务占用`);
+    error.code = "PROTOCOL_PORT_OCCUPIED";
+    for (let candidate = port + 1; candidate <= Math.min(port + 200, 65_535); candidate += 1) {
+      if (!occupiedPorts.has(candidate)) {
+        error.suggestedPort = candidate;
+        break;
+      }
+    }
+    throw error;
+  }
+
+  async verifyPublicConnectivity({ address, port, network }) {
+    if (network === "udp") {
+      return {
+        reachable: null,
+        reason: "UDP 公网握手需要协议级外部探针；已完成节点监听与防火墙验证"
+      };
+    }
+    await new Promise((resolve, reject) => {
+      const socket = connectTcp({ host: address, port });
+      socket.setTimeout(5_000);
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.once("timeout", () => {
+        socket.destroy();
+        reject(new Error(`公网端口 ${address}:${port} 连接超时`));
+      });
+      socket.once("error", reject);
+    });
+    return { reachable: true };
   }
 
   async installTlsBundle(task, privateKeyPem) {
@@ -548,13 +647,27 @@ export class NodeRuntimeAdapter {
     const backupPath = join(this.dataDir, "config.previous.json");
     let hadConfig = false;
     let published = false;
+    let configActivated = false;
+    const firewalls = [];
 
     try {
       hadConfig = await pathExists(this.configPath);
+      if (task.activation && this.portVerifier.assertAvailable) {
+        await this.portVerifier.assertAvailable(task.activation);
+      }
+      if (task.activation?.exposure === "public") {
+        for (const rule of [
+          task.activation,
+          ...(task.activation.challengePorts || [])
+        ]) {
+          firewalls.push(await this.firewallManager.open(rule));
+        }
+      }
       await writeFile(temporaryPath, `${task.configText.trim()}\n`, { mode: 0o640 });
       await this.commandRunner(this.binaryPath, ["check", "-c", temporaryPath]);
       if (hadConfig) await copyFile(this.configPath, backupPath);
       await rename(temporaryPath, this.configPath);
+      configActivated = true;
       if (this.runtimeMode === "systemd") {
         try {
           await this.commandRunner("systemctl", ["restart", this.systemdUnit]);
@@ -565,8 +678,20 @@ export class NodeRuntimeAdapter {
           } else {
             await rm(this.configPath, { force: true });
           }
+          configActivated = false;
           throw error;
         }
+      }
+      let activation = null;
+      if (task.activation) {
+        await this.portVerifier.waitForListening(task.activation);
+        const publicCheck = task.activation.exposure === "public"
+          ? await this.publicProbe.verify(task.activation)
+          : { reachable: null, reason: "仅本机协议不执行公网探测" };
+        activation = {
+          firewallManaged: firewalls.some((item) => item.managed === true),
+          publicCheck
+        };
       }
       let runtimeVersion = "unknown";
       try {
@@ -588,8 +713,39 @@ export class NodeRuntimeAdapter {
         configPath: this.configPath,
         version: task.version,
         checksum: task.checksum,
-        tlsAssetsInstalled: tlsInstallation.count
+        tlsAssetsInstalled: tlsInstallation.count,
+        ...(activation ? { activation } : {})
       };
+    } catch (error) {
+      let rolledBack = true;
+      if (configActivated) {
+        try {
+          if (hadConfig && await pathExists(backupPath)) {
+            await copyFile(backupPath, this.configPath);
+            if (this.runtimeMode === "systemd") {
+              await this.commandRunner("systemctl", ["restart", this.systemdUnit]);
+            }
+          } else {
+            await rm(this.configPath, { force: true });
+          }
+        } catch (rollbackError) {
+          rolledBack = false;
+          error.rollbackError = rollbackError.message;
+        }
+      }
+      for (const firewall of firewalls.reverse()) {
+        try {
+          await firewall.rollback();
+        } catch (rollbackError) {
+          rolledBack = false;
+          error.rollbackError = [
+            error.rollbackError,
+            `防火墙：${rollbackError.message}`
+          ].filter(Boolean).join("；");
+        }
+      }
+      error.rolledBack = rolledBack;
+      throw error;
     } finally {
       await rm(temporaryPath, { force: true });
       if (!published) await tlsInstallation.rollback();
@@ -1009,6 +1165,11 @@ export class RayLinkNode {
       await this.completeTask(task.id, task.attempt, "failed", {
         error: error.message,
         ...(error.previousVersion ? { previousVersion: error.previousVersion } : {}),
+        ...(error.code ? { code: error.code } : {}),
+        ...(Number.isInteger(error.suggestedPort)
+          ? { suggestedPort: error.suggestedPort }
+          : {}),
+        ...(error.rollbackError ? { rollbackError: error.rollbackError } : {}),
         ...(typeof error.rolledBack === "boolean" ? { rolledBack: error.rolledBack } : {}),
         ...(typeof error.packageMetadataRestored === "boolean"
           ? { packageMetadataRestored: error.packageMetadataRestored }

@@ -94,6 +94,44 @@ test("Caddy setup activates a domain and can restore the IP entry point", async 
   ]);
 });
 
+test("Caddy can provision and roll back a TLS certificate site for a node domain", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-caddy-node-cert-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const caddyfilePath = join(directory, "Caddyfile");
+  const environmentFilePath = join(directory, "raylink.env");
+  const originalCaddyfile = "{\n\temail ops@example.com\n}\npanel.example.com {}\n";
+  await writeFile(caddyfilePath, originalCaddyfile);
+  await writeFile(environmentFilePath, "");
+  const commands = [];
+  const manager = new CaddySetupAccessManager({
+    caddyfilePath,
+    environmentFilePath,
+    initialOrigin: "https://203.0.113.10",
+    certificatePath: "/etc/caddy/raylink/control-plane.crt",
+    privateKeyPath: "/etc/caddy/raylink/control-plane.key",
+    lookup: async () => [{ address: "203.0.113.10", family: 4 }],
+    locateCertificate: async (domain) => ({
+      certificatePath: `/var/lib/caddy/certificates/${domain}.crt`,
+      keyPath: `/var/lib/caddy/certificates/${domain}.key`
+    }),
+    runCommand: async (command, args) => commands.push([command, ...args])
+  });
+
+  const certificate = await manager.ensureNodeCertificate("node.example.com");
+
+  assert.equal(
+    certificate.certificatePath,
+    "/var/lib/caddy/certificates/node.example.com.crt"
+  );
+  assert.match(await readFile(caddyfilePath, "utf8"), /RayLink managed node certificate: node\.example\.com/);
+  assert.match(await readFile(caddyfilePath, "utf8"), /https:\/\/node\.example\.com/);
+  assert.deepEqual(commands.map((entry) => entry[1]), ["adapt", "reload"]);
+
+  await certificate.rollback();
+  assert.equal(await readFile(caddyfilePath, "utf8"), originalCaddyfile);
+  assert.equal(commands.at(-1)[1], "reload");
+});
+
 test("Caddy setup restores both files when the live reload fails", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-caddy-rollback-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

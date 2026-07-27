@@ -220,6 +220,174 @@ test("RayLink Node reports a failed task without swallowing the next poll cycle"
   });
 });
 
+test("remote protocol activation opens its firewall, verifies listening and reports readiness", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-activation-"));
+  const events = [];
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath: "sing-box",
+    runtimeMode: "dry-run",
+    commandRunner: async () => ({ stdout: "sing-box version 1.13.14\n", stderr: "" }),
+    firewallManager: {
+      open: async (activation) => {
+        events.push(["firewall", activation.network, activation.port]);
+        return { managed: true, rollback: async () => events.push(["firewall-rollback"]) };
+      }
+    },
+    portVerifier: {
+      waitForListening: async (activation) => events.push(["listening", activation.port])
+    },
+    publicProbe: {
+      verify: async (activation) => {
+        events.push(["public", activation.address, activation.port]);
+        return { reachable: true };
+      }
+    }
+  });
+
+  const result = await adapter.publish({
+    version: "v1",
+    checksum: "checksum",
+    configText: "{\"inbounds\":[]}",
+    activation: {
+      type: "vless",
+      exposure: "public",
+      network: "tcp",
+      address: "node.example.com",
+      listen: "::",
+      port: 18444
+    }
+  });
+
+  assert.deepEqual(events, [
+    ["firewall", "tcp", 18444],
+    ["listening", 18444],
+    ["public", "node.example.com", 18444]
+  ]);
+  assert.deepEqual(result.activation.publicCheck, { reachable: true });
+  assert.equal(result.activation.firewallManaged, true);
+});
+
+test("RayLink Node default UFW manager opens and rolls back only its own rule", async () => {
+  const calls = [];
+  const adapter = new NodeRuntimeAdapter({
+    runtimeMode: "dry-run",
+    commandRunner: async (command, args) => {
+      calls.push([command, ...args]);
+      if (command === "ufw" && args[0] === "status") {
+        return { stdout: "Status: active\n22/tcp ALLOW Anywhere\n", stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    }
+  });
+
+  const opened = await adapter.openFirewall({ port: 18_444, network: "tcp" });
+
+  assert.equal(opened.managed, true);
+  assert.deepEqual(calls, [
+    ["ufw", "status"],
+    ["ufw", "allow", "18444/tcp", "comment", "RayLink managed"]
+  ]);
+  await opened.rollback();
+  assert.deepEqual(calls.at(-1), [
+    "ufw",
+    "--force",
+    "delete",
+    "allow",
+    "18444/tcp"
+  ]);
+});
+
+test("remote protocol activation rolls config and firewall back after a failed port check", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-activation-rollback-"));
+  await writeFile(join(directory, "config.json"), "{\"previous\":true}\n");
+  const events = [];
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath: "sing-box",
+    runtimeMode: "dry-run",
+    commandRunner: async () => ({ stdout: "sing-box version 1.13.14\n", stderr: "" }),
+    firewallManager: {
+      open: async () => ({
+        managed: true,
+        rollback: async () => events.push("firewall-rollback")
+      })
+    },
+    portVerifier: {
+      waitForListening: async () => {
+        throw new Error("端口未监听");
+      }
+    },
+    publicProbe: { verify: async () => ({ reachable: true }) }
+  });
+
+  await assert.rejects(
+    adapter.publish({
+      version: "v1",
+      checksum: "checksum",
+      configText: "{\"next\":true}",
+      activation: {
+        type: "vless",
+        exposure: "public",
+        network: "tcp",
+        address: "node.example.com",
+        listen: "::",
+        port: 18444
+      }
+    }),
+    (error) => error.message.includes("端口未监听") && error.rolledBack === true
+  );
+
+  assert.equal(await readFile(join(directory, "config.json"), "utf8"), "{\"previous\":true}\n");
+  assert.deepEqual(events, ["firewall-rollback"]);
+});
+
+test("remote protocol activation rejects an occupied system port before changing firewall or config", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-node-port-conflict-"));
+  const configPath = join(directory, "config.json");
+  await writeFile(configPath, "{\"previous\":true}\n");
+  let firewallCalls = 0;
+  const adapter = new NodeRuntimeAdapter({
+    dataDir: directory,
+    binaryPath: "sing-box",
+    runtimeMode: "dry-run",
+    commandRunner: async (command, args) => {
+      if (command === "ss") {
+        return { stdout: "LISTEN 0 4096 *:18444 *:*\n", stderr: "" };
+      }
+      return { stdout: "sing-box version 1.13.14\n", stderr: "" };
+    },
+    firewallManager: {
+      open: async () => {
+        firewallCalls += 1;
+        return { managed: true, rollback: async () => {} };
+      }
+    }
+  });
+
+  await assert.rejects(
+    adapter.publish({
+      version: "v1",
+      checksum: "checksum",
+      configText: "{\"next\":true}",
+      activation: {
+        type: "vless",
+        exposure: "public",
+        network: "tcp",
+        address: "node.example.com",
+        listen: "::",
+        port: 18444
+      }
+    }),
+    (error) => error.code === "PROTOCOL_PORT_OCCUPIED"
+      && error.suggestedPort === 18_445
+      && error.rolledBack === true
+  );
+
+  assert.equal(firewallCalls, 0);
+  assert.equal(await readFile(configPath, "utf8"), "{\"previous\":true}\n");
+});
+
 test("RayLink Node applies a runtime upgrade task and reports the new version", async () => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-node-upgrade-task-"));
   const calls = [];

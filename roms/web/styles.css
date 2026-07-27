@@ -966,6 +966,16 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .protocol-subsection-heading strong { color: var(--text-soft); font-size: 11px; }
 .protocol-subsection-heading small { margin-top: 4px; color: var(--faint); font-size: 9px; }
 .host-protocol-list { display: grid; gap: 1px; background: var(--border-subtle); }
+.protocol-group { display: grid; gap: 1px; background: var(--border-subtle); }
+.protocol-group + .protocol-group { margin-top: 12px; }
+.protocol-group-heading {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--canvas);
+}
+.protocol-group-heading strong { color: var(--text-soft); font-size: 10px; }
+.protocol-group-heading small { color: var(--faint); font-size: 9px; line-height: 1.5; }
 .protocol-host-row {
   width: 100%;
   border: 0;
@@ -976,6 +986,23 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   cursor: pointer;
 }
 .protocol-host-row:hover { background: var(--surface-2); }
+.protocol-activation-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+  padding: 16px;
+}
+.protocol-activation-card strong { color: var(--text); font-size: 12px; }
+.protocol-activation-card small { color: var(--muted); font-size: 10px; line-height: 1.7; }
+.protocol-activation-card .activation-error { color: var(--danger); }
+.activation-flow { display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--text-soft); font-size: 9px; }
+.activation-flow i { width: 18px; height: 1px; background: var(--accent); opacity: .55; }
+.protocol-one-click > .drawer-section-label,
+.protocol-one-click > .field,
+.protocol-one-click > .quota-input,
+.protocol-one-click > .protocol-subsection,
+.protocol-one-click > .source-note { display: none; }
 .source-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: var(--canvas); color: var(--faint); font-size: 9px; }
 .source-note a { color: var(--muted); }
 .map-header { display: flex; height: 52px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0 20px; color: var(--muted); font-size: 10px; }

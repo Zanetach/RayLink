@@ -27,6 +27,18 @@ printf '%s' "$RAYLINK_ENROLL_TOKEN" | grep -Eq '^[A-Za-z0-9_-]{20,256}$' || fail
 command -v curl >/dev/null 2>&1 || fail "需要 curl"
 command -v tar >/dev/null 2>&1 || fail "需要 tar"
 command -v systemctl >/dev/null 2>&1 || fail "需要 systemd"
+if ! command -v ss >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y iproute2
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y iproute
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y iproute
+  else
+    fail "端口探测需要 iproute2（ss），当前系统无法自动安装"
+  fi
+fi
 
 if systemctl list-unit-files sing-box.service >/dev/null 2>&1 \
   && systemctl is-active --quiet sing-box.service; then

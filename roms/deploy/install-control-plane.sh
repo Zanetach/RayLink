@@ -81,6 +81,7 @@ if command -v apt-get >/dev/null 2>&1; then
     debian-archive-keyring \
     debian-keyring \
     gnupg \
+    iproute2 \
     kmod \
     openssl \
     tar \

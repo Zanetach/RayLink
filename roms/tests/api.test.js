@@ -76,6 +76,127 @@ async function enableHostShadowsocks(baseUrl, cookie, hostId, port = 8388) {
   assert.equal(response.status, 200);
 }
 
+test("admin can run the one-click protocol activation transaction", async (t) => {
+  const calls = [];
+  const testApp = await startTestApp({
+    protocolActivationManager: {
+      enable: async (input) => {
+        calls.push(input);
+        return {
+          profile: { type: input.type, enabled: true, port: 18444 },
+          deployment: { id: "deployment-activation", status: "active" },
+          activation: { state: "public-ready", port: 18444, network: "tcp" }
+        };
+      }
+    }
+  });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const response = await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/hosts/local/protocols/vless/activate",
+    { method: "POST" }
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).activation.state, "public-ready");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].hostId, "local");
+  assert.equal(calls[0].type, "vless");
+  assert.ok(calls[0].adminId);
+});
+
+test("remote one-click activation automatically retries the next port reported free by its Node", async (t) => {
+  const installer = {
+    async status() {
+      return {
+        installed: true,
+        version: "1.13.14",
+        platform: "linux",
+        architecture: "amd64",
+        tags: ["with_utls", "with_acme", "with_quic"]
+      };
+    },
+    async generateRealityKeypair() {
+      return { privateKey: "private-key", publicKey: "public-key" };
+    },
+    releaseStatus() {
+      return null;
+    }
+  };
+  const testApp = await startTestApp({ installer });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "远程端口重试节点",
+      address: "retry.example.com",
+      region: "tokyo"
+    })
+  })).json();
+  const enrolled = await (await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "retry-node",
+      platform: "linux",
+      architecture: "x64",
+      agentVersion: "0.6.0",
+      runtimeVersion: "1.13.14",
+      buildTags: ["with_utls", "with_acme", "with_quic"]
+    })
+  })).json();
+  const nodeHeaders = {
+    authorization: `Bearer ${enrolled.nodeSecret}`,
+    "x-raylink-host-id": enrolled.hostId
+  };
+
+  const activated = await api(
+    testApp.baseUrl,
+    cookie,
+    `/api/hosts/${encodeURIComponent(enrolled.hostId)}/protocols/vless/activate`,
+    { method: "POST" }
+  );
+  assert.equal(activated.status, 202);
+
+  const firstTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  assert.equal(firstTask.payload.activation.port, 8444);
+  const completion = await fetch(
+    `${testApp.baseUrl}/api/node/tasks/${encodeURIComponent(firstTask.id)}/complete`,
+    {
+      method: "POST",
+      headers: { ...nodeHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        attempt: firstTask.attempt,
+        status: "failed",
+        result: {
+          code: "PROTOCOL_PORT_OCCUPIED",
+          suggestedPort: 8445,
+          error: "端口 8444/tcp 已被系统服务占用",
+          rolledBack: true
+        }
+      })
+    }
+  );
+  assert.equal(completion.status, 200);
+  assert.equal((await completion.json()).retryQueued, true);
+
+  const secondTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  assert.equal(secondTask.payload.activation.port, 8445);
+  assert.equal(
+    secondTask.payload.protocols.find((profile) => profile.type === "vless").port,
+    8445
+  );
+});
+
 test("authenticated bootstrap returns users with independent entitlements", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
@@ -225,7 +346,7 @@ test("empty-database API workflow reaches a multi-Host client configuration", as
       hostname: "sg-vps-01",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.14",
       buildTags: ["with_quic", "with_utls", "with_v2ray_api"]
     })
@@ -665,7 +786,7 @@ test("protocol profiles belong to one host and never enable the same protocol on
       hostname: "sg-vps-01",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.12",
       buildTags: ["with_quic", "with_utls"]
     })
@@ -825,7 +946,7 @@ test("admin checks, upgrades the local Runtime and queues a remote Runtime upgra
     body: JSON.stringify({
       token: created.enrollmentToken,
       hostname: "upgrade-sg",
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.14",
       buildTags: ["with_quic"]
     })
@@ -1463,7 +1584,7 @@ test("user subscription includes every online host allowed by the user node scop
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "x64",
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1577,7 +1698,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
   assert.equal(blockedResponse.status, 426);
   const blocked = await blockedResponse.json();
   assert.equal(blocked.error.code, "NODE_UPGRADE_REQUIRED");
-  assert.equal(blocked.requiredVersion, "0.5.0");
+  assert.equal(blocked.requiredVersion, "0.6.0");
 
   const beforeUpgrade = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
   const waitingHost = beforeUpgrade.hosts.find((host) => host.id === enrolled.hostId);
@@ -1587,7 +1708,7 @@ test("old RayLink Nodes cannot claim tasks until their heartbeat reports the req
     method: "POST",
     headers: { ...nodeHeaders, "content-type": "application/json" },
     body: JSON.stringify({
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.12",
       telemetry: { serviceStatus: "running" }
     })
@@ -1631,7 +1752,7 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
       hostname: "fra-vps-02",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.12"
     })
   });
@@ -1705,7 +1826,7 @@ test("remote entitlement revocation is critical, retryable and visible until app
       hostname: "revoke-node",
       platform: "linux",
       architecture: "amd64",
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.12"
     })
   })).json();
@@ -1944,7 +2065,7 @@ test("RayLink Node reports real cumulative user counters idempotently and enforc
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       token: createdHost.enrollmentToken,
-      agentVersion: "0.5.0",
+      agentVersion: "0.6.0",
       runtimeVersion: "1.13.14",
       buildTags: ["with_v2ray_api"]
     })
@@ -2097,7 +2218,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(nodeRuntimeResponse.headers.get("content-type"), /javascript/);
   const nodeRuntime = await nodeRuntimeResponse.text();
   assert.match(nodeRuntime, /class RayLinkNode/);
-  assert.match(nodeRuntime, /AGENT_VERSION = "0\.5\.0"/);
+  assert.match(nodeRuntime, /AGENT_VERSION = "0\.6\.0"/);
   assert.match(nodeRuntime, /upgrade-runtime/);
 
   const portalResponse = await fetch(`${testApp.baseUrl}/portal/`);

@@ -383,6 +383,13 @@ export class RayLinkStore {
         updated_at TEXT NOT NULL,
         PRIMARY KEY(host_id, type)
       );
+      CREATE TABLE IF NOT EXISTS protocol_activations (
+        host_id TEXT NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(host_id, type)
+      );
       CREATE TABLE IF NOT EXISTS deployments (
         id TEXT PRIMARY KEY,
         version TEXT NOT NULL UNIQUE,
@@ -1195,7 +1202,11 @@ export class RayLinkStore {
       ORDER BY hosts.created_at
     `).all().map((row) => {
       const host = hostFromRow(row);
-      return { ...host, protocols: this.listHostProtocolConfigs(host.id) };
+      return {
+        ...host,
+        protocols: this.listHostProtocolConfigs(host.id),
+        protocolActivations: this.listProtocolActivations(host.id)
+      };
     });
   }
 
@@ -1418,7 +1429,11 @@ export class RayLinkStore {
     const row = this.db.prepare("SELECT * FROM hosts WHERE id = ?").get(id);
     if (!row) return null;
     const host = hostFromRow(row);
-    return { ...host, protocols: this.listHostProtocolConfigs(id) };
+    return {
+      ...host,
+      protocols: this.listHostProtocolConfigs(id),
+      protocolActivations: this.listProtocolActivations(id)
+    };
   }
 
   nodeEncryptionPublicKey(hostId) {
@@ -1831,8 +1846,14 @@ export class RayLinkStore {
       return { id: taskId, status: task.status, ignored: true };
     }
     const succeeded = input.status === "succeeded";
+    const payload = parseJson(task.payload_json, {});
+    const activationPortOccupied = input.result?.code === "PROTOCOL_PORT_OCCUPIED"
+      && payload.activation?.type;
+    const canRetryActivationPort = activationPortOccupied
+      && Number.isInteger(input.result?.suggestedPort);
     const retryable = !succeeded
       && task.kind === "publish-config"
+      && !activationPortOccupied
       && (Number(task.max_attempts) === 0 || Number(task.attempt_count) < Number(task.max_attempts));
     const status = succeeded ? "succeeded" : retryable ? "pending" : "failed";
     const timestamp = nowIso();
@@ -1875,14 +1896,67 @@ export class RayLinkStore {
       hostId
     );
     if (succeeded && task.kind === "publish-config") {
-      const payload = parseJson(task.payload_json, {});
       if (Array.isArray(payload.protocols)) {
         this.markHostProtocolsApplied(hostId, payload.protocols);
       }
+      if (payload.activation?.type) {
+        const publicCheck = input.result?.activation?.publicCheck;
+        this.setProtocolActivation(
+          hostId,
+          payload.activation.type,
+          {
+            state: publicCheck?.reachable === true ? "public-ready" : "port-listening",
+            progress: 100,
+            port: payload.activation.port,
+            network: payload.activation.network,
+            firewallManaged: input.result?.activation?.firewallManaged === true,
+            publicCheck: publicCheck || null,
+            updatedAt: timestamp
+          }
+        );
+      }
+    } else if (!succeeded && task.kind === "publish-config" && payload.activation?.type) {
+      if (!retryable && payload.activation.previousProfile) {
+        this.updateHostProtocolConfig(
+          hostId,
+          payload.activation.type,
+          payload.activation.previousProfile
+        );
+      }
+      this.setProtocolActivation(hostId, payload.activation.type, {
+        state: retryable ? "deploying" : "failed",
+        progress: retryable ? 60 : 100,
+        port: payload.activation.port,
+        network: payload.activation.network,
+        errorCode: input.result?.code || null,
+        ...(Number.isInteger(input.result?.suggestedPort)
+          ? { suggestedPort: input.result.suggestedPort }
+          : {}),
+        error: String(
+          [
+            input.result?.error || input.error || "远程节点部署失败",
+            input.result?.rollbackError
+              ? `回滚异常：${input.result.rollbackError}`
+              : ""
+          ].filter(Boolean).join("；")
+        ).slice(0, 500),
+        rolledBack: !retryable && input.result?.rolledBack !== false,
+        updatedAt: timestamp
+      });
     }
     return {
       id: taskId,
       status,
+      ...(canRetryActivationPort && status === "failed"
+        ? {
+            retryActivation: {
+              hostId,
+              type: payload.activation.type,
+              failedPort: payload.activation.port,
+              suggestedPort: input.result.suggestedPort
+            }
+          }
+        : {}),
       ...(retryAt ? { retryAt } : {})
     };
   }
@@ -2094,6 +2168,37 @@ export class RayLinkStore {
     const stored = new Map(rows.map((row) => [row.type, parseJson(row.config_json, null)]));
     const defaults = defaultProtocolConfigs().map((profile) => ({ ...profile, enabled: false }));
     return normalizeProtocolConfigs(defaults.map((profile) => stored.get(profile.type) || profile));
+  }
+
+  listProtocolActivations(hostId) {
+    return this.db.prepare(`
+      SELECT type, state_json
+      FROM protocol_activations
+      WHERE host_id = ?
+      ORDER BY type
+    `).all(hostId).map((row) => ({
+      type: row.type,
+      ...parseJson(row.state_json, { state: "disabled" })
+    }));
+  }
+
+  setProtocolActivation(hostId, type, activation) {
+    if (!this.db.prepare("SELECT 1 FROM hosts WHERE id = ?").get(hostId)) {
+      throw domainError("HOST_NOT_FOUND", "主机不存在", 404);
+    }
+    const value = {
+      state: String(activation?.state || "disabled"),
+      ...activation
+    };
+    const updatedAt = nowIso();
+    this.db.prepare(`
+      INSERT INTO protocol_activations (host_id, type, state_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(host_id, type) DO UPDATE SET
+        state_json = excluded.state_json,
+        updated_at = excluded.updated_at
+    `).run(hostId, type, JSON.stringify(value), updatedAt);
+    return { type, ...value, updatedAt: value.updatedAt || updatedAt };
   }
 
   prepareHostProtocolConfig(hostId, type, input) {

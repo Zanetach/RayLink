@@ -90,6 +90,21 @@ function realityProfile(type) {
   });
 }
 
+function acmeProfile(type) {
+  const fallback = defaultProtocolConfigs().find((profile) => profile.type === type);
+  return normalizeProtocolConfig({
+    ...fallback,
+    enabled: true,
+    tls: {
+      ...fallback.tls,
+      mode: "acme",
+      serverName: "node.example.com",
+      acmeEmail: "ops@example.com",
+      acmeDataDirectory: join(temporaryDirectory, `acme-${type}`)
+    }
+  });
+}
+
 async function checkConfig(name, config) {
   const configPath = join(temporaryDirectory, `${name}.json`);
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -184,6 +199,22 @@ try {
     checkedRealityProtocols.push(protocol.type);
   }
 
+  const checkedAcmeProtocols = [];
+  for (const type of ["naive", "hysteria", "tuic", "hysteria2"]) {
+    const profile = acmeProfile(type);
+    const serverConfig = buildSingBoxConfig({
+      host: {
+        region: "test",
+        buildTags: ["with_acme", "with_quic"]
+      },
+      users: [user],
+      protocols: [profile],
+      masterPassword
+    });
+    await checkConfig(`server-${type}-acme`, serverConfig);
+    checkedAcmeProtocols.push(type);
+  }
+
   const clientProfiles = protocolCatalog
     .filter((protocol) => protocol.clientCapable)
     .map((protocol) => enabledProfile(protocol.type));
@@ -204,7 +235,8 @@ try {
     singBoxVersion: singBoxVersionLine,
     serverProtocolsChecked: checkedProtocols,
     clientProtocolsChecked: clientProfiles.map((profile) => profile.type),
-    realityProtocolsChecked: checkedRealityProtocols
+    realityProtocolsChecked: checkedRealityProtocols,
+    acmeProtocolsChecked: checkedAcmeProtocols
   }));
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });

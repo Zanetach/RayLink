@@ -113,6 +113,9 @@ export class RuntimeManager {
         checksum: remote.checksum,
         configText: remote.configText,
         protocols: remote.protocols,
+        ...(options.activation?.hostId === host.id
+          ? { activation: options.activation }
+          : {}),
         ...(sealedTlsBundle ? { sealedTlsBundle, tlsAssets } : {}),
         reason: options.reason || "deployment"
       }, {

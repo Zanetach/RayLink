@@ -142,7 +142,9 @@ export function defaultProtocolConfigs(shadowsocksPort = 8388) {
       handshakePort: 443,
       privateKey: "",
       publicKey: "",
-      shortId: ""
+      shortId: "",
+      acmeEmail: "",
+      acmeDataDirectory: "/var/lib/raylink/acme"
     },
     transport: {
       type: "none",
@@ -184,7 +186,11 @@ export function normalizeProtocolConfig(input) {
       handshakePort: Number(input.tls?.handshakePort || 443),
       privateKey: String(input.tls?.privateKey || "").trim(),
       publicKey: String(input.tls?.publicKey || "").trim(),
-      shortId: String(input.tls?.shortId || "").trim()
+      shortId: String(input.tls?.shortId || "").trim(),
+      acmeEmail: String(input.tls?.acmeEmail || "").trim(),
+      acmeDataDirectory: String(
+        input.tls?.acmeDataDirectory || "/var/lib/raylink/acme"
+      ).trim()
     },
     transport: {
       type: String(input.transport?.type || "none"),
@@ -197,7 +203,7 @@ export function normalizeProtocolConfig(input) {
   if (!catalog.portless && (!Number.isInteger(profile.port) || profile.port < 1 || profile.port > 65_535)) {
     throw protocolError("INVALID_PROTOCOL_PORT", "协议端口必须在 1–65535 之间");
   }
-  if (!["none", "certificate", "reality"].includes(profile.tls.mode)) {
+  if (!["none", "certificate", "reality", "acme"].includes(profile.tls.mode)) {
     throw protocolError("INVALID_TLS_MODE", "TLS 模式不受支持");
   }
   if (profile.enabled && catalog.tls === "required" && profile.tls.mode === "none") {
@@ -205,6 +211,12 @@ export function normalizeProtocolConfig(input) {
   }
   if (profile.tls.mode === "certificate" && (!profile.tls.certificatePath || !profile.tls.keyPath)) {
     throw protocolError("TLS_CERTIFICATE_REQUIRED", "证书模式必须填写证书和私钥路径");
+  }
+  if (
+    profile.tls.mode === "acme"
+    && (!profile.tls.serverName || !profile.tls.acmeEmail || !profile.tls.acmeDataDirectory)
+  ) {
+    throw protocolError("TLS_ACME_REQUIRED", "ACME 模式必须填写节点域名、通知邮箱和数据目录");
   }
   if (profile.tls.mode === "reality") {
     if (!catalog.reality) throw protocolError("REALITY_NOT_SUPPORTED", `${catalog.name} 不支持 Reality`);
@@ -288,7 +300,10 @@ export function buildProtocolInbounds({ profiles, users, masterPassword }) {
 }
 
 export function buildProtocolClientConfig({ profiles, credential, server, ruleSetBaseUrl = null }) {
-  const managed = profiles.filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
+  const managed = profiles.filter((profile) => {
+    const catalog = protocolByType.get(profile.type);
+    return profile.enabled && catalog?.clientCapable && catalog.exposure === "public";
+  });
   const protocolOutbounds = managed.map((profile) => buildClientOutbound(profile, credential, server));
   return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl });
 }
@@ -300,7 +315,10 @@ export function buildMultiHostProtocolClientConfig({
 }) {
   const protocolOutbounds = hosts.flatMap((host) => {
     const managed = (host.protocols || [])
-      .filter((profile) => profile.enabled && protocolByType.get(profile.type)?.clientCapable);
+      .filter((profile) => {
+        const catalog = protocolByType.get(profile.type);
+        return profile.enabled && catalog?.clientCapable && catalog.exposure === "public";
+      });
     const hostTag = String(host.id || host.name || "node")
       .toLowerCase()
       .replace(/[^a-z0-9-]+/g, "-")
@@ -565,6 +583,18 @@ function buildServerTls(profile) {
       key_path: profile.tls.keyPath
     };
   }
+  if (profile.tls.mode === "acme") {
+    return {
+      enabled: true,
+      server_name: profile.tls.serverName,
+      acme: {
+        domain: [profile.tls.serverName],
+        default_server_name: profile.tls.serverName,
+        email: profile.tls.acmeEmail,
+        data_directory: profile.tls.acmeDataDirectory
+      }
+    };
+  }
   return {
     enabled: true,
     server_name: profile.tls.serverName,
@@ -582,7 +612,7 @@ function buildServerTls(profile) {
 
 function addClientTls(outbound, profile) {
   if (profile.tls.mode === "none") return outbound;
-  if (profile.tls.mode === "certificate") {
+  if (profile.tls.mode === "certificate" || profile.tls.mode === "acme") {
     outbound.tls = {
       enabled: true,
       server_name: profile.tls.serverName

@@ -193,7 +193,7 @@ test("rollback queues the matching historical protocol snapshot for remote Hosts
     hostname: "sg-01",
     platform: "linux",
     architecture: "amd64",
-    agentVersion: "0.5.0",
+    agentVersion: "0.6.0",
     runtimeVersion: "1.13.12"
   });
   const adapter = new RecordingRuntimeAdapter();
