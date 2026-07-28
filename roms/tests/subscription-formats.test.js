@@ -70,7 +70,13 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   assert.match(artifact.body, /name: "RayLink 智能"/);
   assert.match(artifact.body, /name: "TCP 稳定"/);
   assert.match(artifact.body, /name: "UDP 高速"/);
-  assert.match(artifact.body, /DOMAIN-SUFFIX,openai\.com,RayLink 智能/);
+  assert.match(artifact.body, /name: "AI 网站代理"/);
+  assert.match(
+    artifact.body,
+    /name: "AI 网站代理"[\s\S]*?proxies:[\s\S]*?- "RayLink 智能"/
+  );
+  assert.match(artifact.body, /DOMAIN-SUFFIX,openai\.com,AI 网站代理/);
+  assert.match(artifact.body, /DOMAIN-SUFFIX,chatgpt\.com,AI 网站代理/);
   assert.match(artifact.body, /GEOIP,CN,DIRECT/);
   assert.match(artifact.body, /MATCH,RayLink 代理/);
 });

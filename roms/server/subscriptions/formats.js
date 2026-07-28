@@ -189,11 +189,23 @@ function buildMihomoConfig(singBoxConfig) {
   const tcp = uniqueExisting(groupMembers(singBoxConfig, "raylink-tcp"), names);
   const udp = uniqueExisting(groupMembers(singBoxConfig, "raylink-udp"), names);
   const automatic = smart.length ? smart : names;
+  const policyChoices = [
+    "RayLink 智能",
+    "TCP 稳定",
+    ...(udp.length ? ["UDP 高速"] : []),
+    "故障回退",
+    "手动选择"
+  ];
   const proxyGroups = [
     {
       name: "RayLink 代理",
       type: "select",
-      proxies: ["RayLink 智能", "TCP 稳定", ...(udp.length ? ["UDP 高速"] : []), "故障回退", "手动选择"]
+      proxies: policyChoices
+    },
+    {
+      name: "AI 网站代理",
+      type: "select",
+      proxies: policyChoices
     },
     {
       name: "RayLink 智能",
@@ -264,9 +276,18 @@ function buildMihomoConfig(singBoxConfig) {
     proxies,
     "proxy-groups": proxyGroups,
     rules: [
-      "DOMAIN-SUFFIX,openai.com,RayLink 智能",
-      "DOMAIN-SUFFIX,anthropic.com,RayLink 智能",
-      "DOMAIN-SUFFIX,claude.ai,RayLink 智能",
+      "DOMAIN-SUFFIX,openai.com,AI 网站代理",
+      "DOMAIN-SUFFIX,chatgpt.com,AI 网站代理",
+      "DOMAIN-SUFFIX,oaistatic.com,AI 网站代理",
+      "DOMAIN-SUFFIX,oaiusercontent.com,AI 网站代理",
+      "DOMAIN-SUFFIX,anthropic.com,AI 网站代理",
+      "DOMAIN-SUFFIX,claude.ai,AI 网站代理",
+      "DOMAIN-SUFFIX,perplexity.ai,AI 网站代理",
+      "DOMAIN-SUFFIX,poe.com,AI 网站代理",
+      "DOMAIN-SUFFIX,x.ai,AI 网站代理",
+      "DOMAIN-SUFFIX,grok.com,AI 网站代理",
+      "DOMAIN-SUFFIX,gemini.google.com,AI 网站代理",
+      "DOMAIN-SUFFIX,generativelanguage.googleapis.com,AI 网站代理",
       "DOMAIN-SUFFIX,google.com,RayLink 智能",
       "DOMAIN-SUFFIX,youtube.com,RayLink 智能",
       "GEOSITE,CN,DIRECT",
