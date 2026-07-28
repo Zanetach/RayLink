@@ -353,12 +353,17 @@ export function buildProtocolClientConfig({ profiles, credential, server, ruleSe
 }
 
 const udpClientProtocolTypes = new Set(["hysteria", "hysteria2", "tuic"]);
+const adaptiveUdpProtocolTypes = new Set(["hysteria2", "tuic"]);
+const UDP_STABLE_JITTER_LIMIT_MS = 80;
 
-function protocolIsAvailableForSmartSelection(activation) {
+function protocolIsStableForSmartSelection(activation) {
   const check = activation?.publicCheck;
-  if (!check) return true;
-  if (check.availability === "unavailable") return false;
-  return check.reachable !== false;
+  return check?.availability === "available"
+    && check.reachable === true
+    && Number(check.consecutiveFailures || 0) === 0
+    && Number(check.samples?.successful || 0) >= 3
+    && Number.isFinite(Number(check.jitterMs))
+    && Number(check.jitterMs) <= UDP_STABLE_JITTER_LIMIT_MS;
 }
 
 export function buildMultiHostProtocolClientConfig({
@@ -383,8 +388,8 @@ export function buildMultiHostProtocolClientConfig({
     return managed.map((profile) => {
       const tag = `raylink-${hostTag}-${profile.type}`;
       if (
-        udpClientProtocolTypes.has(profile.type)
-        && !protocolIsAvailableForSmartSelection(activations.get(profile.type))
+        adaptiveUdpProtocolTypes.has(profile.type)
+        && !protocolIsStableForSmartSelection(activations.get(profile.type))
       ) {
         smartExcludedTags.add(tag);
       }
@@ -419,7 +424,7 @@ function clientConfigForOutbounds(
     .filter((outbound) => !udpClientProtocolTypes.has(outbound.type))
     .map((outbound) => outbound.tag);
   const udpTags = protocolOutbounds
-    .filter((outbound) => udpClientProtocolTypes.has(outbound.type))
+    .filter((outbound) => adaptiveUdpProtocolTypes.has(outbound.type))
     .map((outbound) => outbound.tag);
   const healthyUdpTags = udpTags.filter((tag) => !smartExcludedTags.has(tag));
   const smartTags = [...tcpTags, ...healthyUdpTags];

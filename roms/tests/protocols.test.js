@@ -310,7 +310,13 @@ test("client subscription separates TCP and UDP and excludes unhealthy UDP from 
       protocolActivations: [
         {
           type: "hysteria2",
-          publicCheck: { availability: "available", reachable: true }
+          publicCheck: {
+            availability: "available",
+            reachable: true,
+            jitterMs: 18,
+            consecutiveFailures: 0,
+            samples: { count: 5, successful: 5, failed: 0 }
+          }
         },
         {
           type: "tuic",
@@ -343,6 +349,65 @@ test("client subscription separates TCP and UDP and excludes unhealthy UDP from 
     "raylink-tcp",
     "raylink-udp"
   ]);
+});
+
+test("smart selection stays TCP-only until Hysteria 2 or TUIC proves stable", () => {
+  const profiles = defaultProtocolConfigs().map((profile) => ({
+    ...profile,
+    enabled: ["vless", "hysteria", "hysteria2", "tuic"].includes(profile.type),
+    tls: ["vless", "hysteria", "hysteria2", "tuic"].includes(profile.type)
+      ? { ...profile.tls, mode: "certificate", serverName: "node.example.com" }
+      : profile.tls
+  }));
+  const config = buildMultiHostProtocolClientConfig({
+    credential: {
+      email: eligibleUsers[0].email,
+      runtimeUuid: eligibleUsers[0].runtimeUuid,
+      runtimePassword: eligibleUsers[0].runtimePassword,
+      serverPassword: "c2VydmVyLWtleS0xNg=="
+    },
+    hosts: [{
+      id: "local",
+      name: "California",
+      address: "node.example.com",
+      protocols: profiles,
+      protocolActivations: [
+        {
+          type: "hysteria2",
+          publicCheck: {
+            availability: "available",
+            reachable: true,
+            jitterMs: 120,
+            consecutiveFailures: 0,
+            samples: { count: 5, successful: 5, failed: 0 }
+          }
+        },
+        {
+          type: "tuic",
+          publicCheck: {
+            availability: "degraded",
+            reachable: true,
+            jitterMs: 12,
+            consecutiveFailures: 1,
+            samples: { count: 5, successful: 0, failed: 5 }
+          }
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-smart").outbounds,
+    ["raylink-local-vless"]
+  );
+  assert.deepEqual(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-udp").outbounds,
+    ["raylink-local-tuic", "raylink-local-hysteria2"]
+  );
+  assert.equal(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-auto").default,
+    "raylink-smart"
+  );
 });
 
 test("Hysteria client inherits the managed bandwidth values required by sing-box", () => {

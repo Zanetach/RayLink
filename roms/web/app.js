@@ -612,10 +612,6 @@ function renderHostTopology(hosts, runtime) {
   status.innerHTML = `<i></i>${healthyCount}/${hosts.length} 个 Host 在线`;
 }
 
-function protocolConnectionPresentation(activation) {
-  return protocolHealth.present(activation);
-}
-
 function renderHosts() {
   if (!elements.hostBody) return;
   const hosts = controlPlane.hosts;
@@ -632,7 +628,7 @@ function renderHosts() {
         const activation = host.protocolActivations?.find((item) => item.type === profile.type);
         return {
           name: controlPlane.protocolCatalog.find((item) => item.type === profile.type)?.name || profile.type,
-          connection: protocolConnectionPresentation(activation)
+          connection: protocolHealth.present(activation)
         };
       });
     const isLocal = host.kind !== "remote";
@@ -1278,7 +1274,7 @@ function hostDrawerMarkup(hostId) {
     const port = profile.port ? `:${profile.port}` : "无固定端口";
     const applied = host.appliedProtocols?.find((item) => item.type === profile.type);
     const state = protocolState(host, profile, applied);
-    const connection = protocolConnectionPresentation(state.activation);
+    const connection = protocolHealth.present(state.activation);
     return {
       group: catalog?.activationPolicy?.group || "advanced",
       html: `

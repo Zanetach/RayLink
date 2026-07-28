@@ -2424,7 +2424,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.doesNotMatch(appScript, /protocolLabels\.slice\(0,\s*3\)/);
   assert.match(appScript, /class="host-protocol-tags"/);
   assert.match(appScript, /data-measure-host-latency/);
-  assert.match(appScript, /protocolConnectionPresentation/);
+  assert.match(appScript, /protocolHealth\.present/);
   assert.match(appScript, /protocol-latency-value/);
   const styleResponse = await fetch(`${testApp.baseUrl}/styles.css`);
   assert.equal(styleResponse.status, 200);

@@ -55,3 +55,47 @@ test("protocol health presentation shows a pending recheck before the third fail
   assert.match(result.summary, /最近成功 88 ms/);
   assert.doesNotMatch(result.summary, /^超时/);
 });
+
+test("legacy one-shot timeouts enter the first recheck instead of fabricating three failures", () => {
+  const presenter = loadPresenter();
+  const result = presenter.present({
+    publicCheck: {
+      reachable: false,
+      checkedAt: "2026-07-28T12:19:49.365Z",
+      error: "connection timed out"
+    }
+  });
+
+  assert.equal(result.label, "复检 1/3");
+  assert.equal(result.availabilityLabel, "复检中");
+  assert.doesNotMatch(result.summary, /连续失败 3\/3/);
+});
+
+test("confirmed timeout keeps last jitter visible and slow availability is never dangerous", () => {
+  const presenter = loadPresenter();
+  const unavailable = presenter.present({
+    publicCheck: {
+      availability: "unavailable",
+      reachable: false,
+      latencyMs: 188,
+      jitterMs: 31,
+      consecutiveFailures: 3,
+      checkedAt: "2026-07-28T12:19:49.365Z",
+      error: "connection timed out"
+    }
+  });
+  const slow = presenter.present({
+    publicCheck: {
+      availability: "available",
+      reachable: true,
+      latencyMs: 480,
+      jitterMs: 22,
+      checkedAt: "2026-07-28T12:19:49.365Z"
+    }
+  });
+
+  assert.match(unavailable.summary, /抖动 31 ms/);
+  assert.equal(unavailable.className, "danger");
+  assert.equal(slow.availabilityLabel, "可用");
+  assert.equal(slow.className, "warning");
+});
