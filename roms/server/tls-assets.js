@@ -1,9 +1,17 @@
 import {
   createPrivateKey,
   createPublicKey,
+  randomBytes,
   X509Certificate
 } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import { join } from "node:path";
 
 import { sealNodeSecret } from "./node-secrets.js";
@@ -28,6 +36,125 @@ function certificateMatchesPrivateKey(certificatePem, privateKeyPem) {
     throw error;
   }
   return certificate;
+}
+
+function validateCertificatePair(certificatePem, privateKeyPem, label) {
+  const certificate = certificateMatchesPrivateKey(certificatePem, privateKeyPem);
+  const validFrom = new Date(certificate.validFrom);
+  const validTo = new Date(certificate.validTo);
+  if (validFrom > new Date() || validTo <= new Date()) {
+    const error = new Error(`${label} 的 TLS 证书不在有效期内`);
+    error.code = "TLS_CERTIFICATE_INVALID_DATE";
+    error.statusCode = 422;
+    throw error;
+  }
+  return certificate;
+}
+
+async function readOptional(path) {
+  try {
+    return await readFile(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function atomicWrite(path, value, mode) {
+  const candidate = `${path}.${randomBytes(6).toString("hex")}.candidate`;
+  try {
+    await writeFile(candidate, value, { mode, flag: "wx" });
+    await chmod(candidate, mode);
+    await rename(candidate, path);
+  } finally {
+    await unlink(candidate).catch(() => {});
+  }
+}
+
+export class LocalTlsAssetStager {
+  constructor(options = {}) {
+    this.dataDir = options.dataDir || "/var/lib/raylink/sing-box";
+    this.readFile = options.readFile || readFile;
+  }
+
+  async stage({ domain, certificatePath, keyPath }) {
+    const assetName = safeAssetName(domain);
+    const targetDirectory = join(this.dataDir, "tls");
+    const targetCertificatePath = join(targetDirectory, `${assetName}.certificate.pem`);
+    const targetKeyPath = join(targetDirectory, `${assetName}.private-key.pem`);
+    let certificatePem;
+    let privateKeyPem;
+    try {
+      [certificatePem, privateKeyPem] = await Promise.all([
+        this.readFile(certificatePath, "utf8"),
+        this.readFile(keyPath, "utf8")
+      ]);
+    } catch {
+      const error = new Error(`${domain} 的 Caddy TLS 证书或私钥无法读取`);
+      error.code = "TLS_ASSET_UNREADABLE";
+      error.statusCode = 422;
+      throw error;
+    }
+    if (
+      Buffer.byteLength(certificatePem) > 1024 * 1024
+      || Buffer.byteLength(privateKeyPem) > 1024 * 1024
+    ) {
+      const error = new Error(`${domain} 的 TLS 资产超过 1 MiB 限制`);
+      error.code = "TLS_ASSET_TOO_LARGE";
+      error.statusCode = 422;
+      throw error;
+    }
+    const certificate = validateCertificatePair(certificatePem, privateKeyPem, domain);
+    await mkdir(targetDirectory, { recursive: true, mode: 0o700 });
+    await chmod(targetDirectory, 0o700);
+    const [previousCertificate, previousKey] = await Promise.all([
+      readOptional(targetCertificatePath),
+      readOptional(targetKeyPath)
+    ]);
+    const nextCertificate = Buffer.from(certificatePem);
+    const nextKey = Buffer.from(privateKeyPem);
+    const changed = !previousCertificate?.equals(nextCertificate)
+      || !previousKey?.equals(nextKey);
+    const restore = async () => {
+      if (!changed) return;
+      if (previousCertificate) {
+        await atomicWrite(targetCertificatePath, previousCertificate, 0o644);
+      } else {
+        await unlink(targetCertificatePath).catch((error) => {
+          if (error.code !== "ENOENT") throw error;
+        });
+      }
+      if (previousKey) {
+        await atomicWrite(targetKeyPath, previousKey, 0o600);
+      } else {
+        await unlink(targetKeyPath).catch((error) => {
+          if (error.code !== "ENOENT") throw error;
+        });
+      }
+    };
+    if (changed) {
+      try {
+        await atomicWrite(targetCertificatePath, nextCertificate, 0o644);
+        await atomicWrite(targetKeyPath, nextKey, 0o600);
+      } catch (error) {
+        await restore().catch(() => {});
+        throw error;
+      }
+    } else {
+      await Promise.all([
+        chmod(targetCertificatePath, 0o644),
+        chmod(targetKeyPath, 0o600)
+      ]);
+    }
+    return {
+      certificatePath: targetCertificatePath,
+      keyPath: targetKeyPath,
+      fingerprint256: certificate.fingerprint256,
+      validTo: certificate.validTo,
+      changed,
+      rollback: restore
+    };
+  }
 }
 
 export class RemoteTlsAssetPackager {
@@ -70,15 +197,11 @@ export class RemoteTlsAssetPackager {
         error.statusCode = 422;
         throw error;
       }
-      const certificate = certificateMatchesPrivateKey(certificatePem, privateKeyPem);
-      const validFrom = new Date(certificate.validFrom);
-      const validTo = new Date(certificate.validTo);
-      if (validFrom > new Date() || validTo <= new Date()) {
-        const error = new Error(`${inbound.tag || inbound.type} 的 TLS 证书不在有效期内`);
-        error.code = "TLS_CERTIFICATE_INVALID_DATE";
-        error.statusCode = 422;
-        throw error;
-      }
+      const certificate = validateCertificatePair(
+        certificatePem,
+        privateKeyPem,
+        inbound.tag || inbound.type
+      );
       const assetName = safeAssetName(inbound.tag || inbound.type);
       const releaseId = certificate.fingerprint256.toLowerCase().replace(/[^a-f0-9]/g, "");
       const targetDirectory = join(this.remoteDataDir, "tls", "releases", releaseId);

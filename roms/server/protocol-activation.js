@@ -240,6 +240,7 @@ export class ProtocolActivationManager {
     protocolProbe = null,
     certificateEmail = () => "",
     certificateProvider = null,
+    certificateStager = null,
     randomBytes = cryptoRandomBytes,
     runtimeMode = "systemd"
   }) {
@@ -252,6 +253,7 @@ export class ProtocolActivationManager {
     this.protocolProbe = protocolProbe;
     this.certificateEmail = certificateEmail;
     this.certificateProvider = certificateProvider;
+    this.certificateStager = certificateStager;
     this.randomBytes = randomBytes;
     this.runtimeMode = runtimeMode;
     this.activating = new Set();
@@ -299,6 +301,47 @@ export class ProtocolActivationManager {
       );
     }
     return { catalog, availability, installation };
+  }
+
+  async prepareLocalCertificate(domain) {
+    const source = await this.certificateProvider(domain);
+    if (!source || !this.certificateStager) return source;
+    let staged;
+    try {
+      staged = await this.certificateStager({
+        domain,
+        certificatePath: source.certificatePath,
+        keyPath: source.keyPath
+      });
+    } catch (error) {
+      if (source.rollback) {
+        try {
+          await source.rollback();
+        } catch (rollbackError) {
+          error.rollbackError = `证书签发：${rollbackError.message}`;
+        }
+      }
+      throw error;
+    }
+    return {
+      ...source,
+      ...staged,
+      rollback: async () => {
+        const failures = [];
+        for (const [label, action] of [
+          ["Runtime TLS 资产", staged.rollback],
+          ["Caddy 证书", source.rollback]
+        ]) {
+          if (!action) continue;
+          try {
+            await action();
+          } catch (error) {
+            failures.push(`${label}：${error.message}`);
+          }
+        }
+        if (failures.length) throw new Error(failures.join("；"));
+      }
+    };
   }
 
   async prepare(host, type, policy, catalog, profiles) {
@@ -361,7 +404,7 @@ export class ProtocolActivationManager {
         );
       }
       if (host.kind === "local" && this.certificateProvider) {
-        const certificate = await this.certificateProvider(host.address);
+        const certificate = await this.prepareLocalCertificate(host.address);
         if (certificate) {
           Object.assign(tls, {
             mode: "certificate",

@@ -28,7 +28,10 @@ import {
 } from "./singbox/protocol-catalog.js";
 import { RuntimeManager } from "./singbox/runtime-manager.js";
 import { LocalTelemetryCollector } from "./telemetry.js";
-import { RemoteTlsAssetPackager } from "./tls-assets.js";
+import {
+  LocalTlsAssetStager,
+  RemoteTlsAssetPackager
+} from "./tls-assets.js";
 import {
   systemdRuntimeInstanceId,
   V2RayStatsCollector
@@ -352,6 +355,9 @@ export async function createRayLinkApp(options) {
   const tlsAssetPackager = options.tlsAssetPackager || new RemoteTlsAssetPackager({
     remoteDataDir: options.remoteNodeDataDir
   });
+  const localTlsAssetStager = options.localTlsAssetStager || new LocalTlsAssetStager({
+    dataDir: join(options.dataDir || "./data", "sing-box")
+  });
   const runtimeManager = new RuntimeManager({
     store,
     adapter: runtimeAdapter,
@@ -474,6 +480,7 @@ export async function createRayLinkApp(options) {
         if (store.certificateSettings().mode !== "caddy-auto") return null;
         return setupAccessManager.ensureNodeCertificate(domain);
       },
+      certificateStager: (input) => localTlsAssetStager.stage(input),
       runtimeMode: options.runtimeMode || "dry-run"
     });
   const bbrManager = options.bbrManager || new BbrManager({

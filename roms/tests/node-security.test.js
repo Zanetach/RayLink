@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,7 +11,10 @@ import {
   openNodeSecret,
   sealNodeSecret
 } from "../server/node-secrets.js";
-import { RemoteTlsAssetPackager } from "../server/tls-assets.js";
+import {
+  LocalTlsAssetStager,
+  RemoteTlsAssetPackager
+} from "../server/tls-assets.js";
 import { NodeRuntimeAdapter } from "../web/node/raylink-node.mjs";
 
 const execFile = promisify(execFileCallback);
@@ -196,3 +199,37 @@ test("RayLink Node atomically installs a sealed TLS bundle with private-key perm
 function openedFingerprint(prepared) {
   return prepared.tlsAssets[0].fingerprint256.toLowerCase().replace(/[^a-f0-9]/g, "");
 }
+
+test("local TLS stager copies a Caddy certificate into the Runtime-owned directory", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-local-tls-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const caddyDirectory = join(directory, "caddy-private");
+  const runtimeDirectory = join(directory, "runtime");
+  await mkdir(caddyDirectory, { recursive: true, mode: 0o700 });
+  const sourceCertificate = join(caddyDirectory, "certificate.pem");
+  const sourceKey = join(caddyDirectory, "private-key.pem");
+  await execFile("openssl", [
+    "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+    "-keyout", sourceKey, "-out", sourceCertificate,
+    "-subj", "/CN=node.example.com", "-days", "1"
+  ]);
+  await Promise.all([
+    chmod(sourceCertificate, 0o600),
+    chmod(sourceKey, 0o600)
+  ]);
+
+  const staged = await new LocalTlsAssetStager({
+    dataDir: runtimeDirectory
+  }).stage({
+    domain: "node.example.com",
+    certificatePath: sourceCertificate,
+    keyPath: sourceKey
+  });
+
+  assert.equal(staged.certificatePath.startsWith(runtimeDirectory), true);
+  assert.equal(staged.keyPath.startsWith(runtimeDirectory), true);
+  assert.match(await readFile(staged.certificatePath, "utf8"), /BEGIN CERTIFICATE/);
+  assert.match(await readFile(staged.keyPath, "utf8"), /BEGIN PRIVATE KEY/);
+  assert.equal((await stat(staged.certificatePath)).mode & 0o777, 0o644);
+  assert.equal((await stat(staged.keyPath)).mode & 0o777, 0o600);
+});

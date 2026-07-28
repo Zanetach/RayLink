@@ -130,6 +130,8 @@ function fixture(type, overrides = {}) {
     publicProbe,
     protocolProbe,
     certificateEmail: () => "ops@example.com",
+    certificateProvider: overrides.certificateProvider,
+    certificateStager: overrides.certificateStager,
     randomBytes: () => Buffer.from("0011223344556677", "hex")
   });
   return { manager, events, profiles, original };
@@ -199,6 +201,68 @@ test("one-click Hysteria 2 binds node domain to ACME and opens UDP", async () =>
     [["protocol-probe", "hysteria2", 8448]]
   );
   assert.equal(events.some(([name]) => name === "public-probe"), false);
+});
+
+test("local Hysteria 2 stages a Caddy certificate before publishing", async () => {
+  const { manager, profiles } = fixture("hysteria2", {
+    certificateProvider: async () => ({
+      serverName: "node.example.com",
+      certificatePath: "/var/lib/caddy/private/node.crt",
+      keyPath: "/var/lib/caddy/private/node.key",
+      rollback: async () => {}
+    }),
+    certificateStager: async ({ domain, certificatePath, keyPath }) => {
+      assert.equal(domain, "node.example.com");
+      assert.equal(certificatePath, "/var/lib/caddy/private/node.crt");
+      assert.equal(keyPath, "/var/lib/caddy/private/node.key");
+      return {
+        certificatePath: "/var/lib/raylink/sing-box/tls/node.crt",
+        keyPath: "/var/lib/raylink/sing-box/tls/node.key",
+        rollback: async () => {}
+      };
+    }
+  });
+
+  await manager.enable({ hostId: "local", type: "hysteria2", adminId: "admin-1" });
+
+  const enabled = profiles.find((item) => item.type === "hysteria2");
+  assert.equal(
+    enabled.tls.certificatePath,
+    "/var/lib/raylink/sing-box/tls/node.crt"
+  );
+  assert.equal(
+    enabled.tls.keyPath,
+    "/var/lib/raylink/sing-box/tls/node.key"
+  );
+});
+
+test("failed local TLS activation rolls back both staged assets and Caddy", async () => {
+  const rollbacks = [];
+  const { manager, profiles, original } = fixture("hysteria2", {
+    protocolProbeError: true,
+    certificateProvider: async () => ({
+      serverName: "node.example.com",
+      certificatePath: "/var/lib/caddy/private/node.crt",
+      keyPath: "/var/lib/caddy/private/node.key",
+      rollback: async () => rollbacks.push("caddy")
+    }),
+    certificateStager: async () => ({
+      certificatePath: "/var/lib/raylink/sing-box/tls/node.crt",
+      keyPath: "/var/lib/raylink/sing-box/tls/node.key",
+      rollback: async () => rollbacks.push("staged-assets")
+    })
+  });
+
+  await assert.rejects(
+    manager.enable({ hostId: "local", type: "hysteria2", adminId: "admin-1" }),
+    /协议握手失败/
+  );
+
+  assert.deepEqual(
+    profiles.find((item) => item.type === "hysteria2"),
+    original
+  );
+  assert.deepEqual(rollbacks, ["staged-assets", "caddy"]);
 });
 
 test("advanced protocols cannot be one-click exposed", async () => {

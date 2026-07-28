@@ -1406,7 +1406,7 @@ function protocolDrawerMarkup(hostId, type) {
       </div>` : ""}
       <div class="switch-row">
         <div><strong>在 ${escapeHtml(host.name)} 启用</strong><small>${oneClick ? "点击底部“一键启用”后自动完成全部部署步骤。" : "手动修改会保存为待发布配置。"}</small></div>
-        <button type="button" class="switch ${profile.enabled || oneClick ? "on" : ""}" data-protocol-enabled role="switch" aria-checked="${profile.enabled || oneClick}"></button>
+        <button type="button" class="switch ${profile.enabled ? "on" : ""}" data-protocol-enabled role="switch" aria-checked="${profile.enabled}"></button>
       </div>
       <p class="drawer-section-label">监听设置</p>
       <label class="field"><span>监听地址</span><input name="listen" value="${escapeHtml(profile.listen)}" required><small class="field-hint">公网服务通常使用 ::，仅本机使用 127.0.0.1。</small></label>
@@ -1851,7 +1851,17 @@ async function saveDrawer() {
     }
     if (form.id === "protocol-drawer-form") protocolSaveResult = await saveProtocolForm(form);
   } catch (error) {
-    if (form) showDrawerFormError(form, error);
+    let errorForm = form;
+    if (form?.id === "protocol-drawer-form") {
+      const hostId = form.dataset.hostId;
+      const protocolType = form.dataset.protocolType;
+      try {
+        await loadBootstrap();
+        elements.drawerContent.innerHTML = protocolDrawerMarkup(hostId, protocolType);
+        errorForm = elements.drawerContent.querySelector("#protocol-drawer-form");
+      } catch {}
+    }
+    if (errorForm) showDrawerFormError(errorForm, error);
     showToast("保存失败", error.message);
     elements.drawerSave.disabled = false;
     elements.drawerSave.textContent = previousLabel;

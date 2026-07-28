@@ -2287,11 +2287,13 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /subscriptionQuick\.reveal/);
   assert.match(appScript, /subscriptionSession\.clear\(\)/);
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
+  assert.doesNotMatch(appScript, /profile\.enabled \|\| oneClick/);
+  assert.match(appScript, /protocolDrawerMarkup\(hostId, protocolType\)/);
   assert.match(indexHtml, /src="\.\/qrcode\.min\.js/);
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.8-quick-subscriptions/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.9-tls-activation/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
