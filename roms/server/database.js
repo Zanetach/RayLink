@@ -1926,6 +1926,12 @@ export class RayLinkStore {
       }
       if (payload.activation?.type) {
         const publicCheck = input.result?.activation?.publicCheck;
+        const persistedPublicCheck = publicCheck
+          ? {
+              ...publicCheck,
+              checkedAt: publicCheck.checkedAt || timestamp
+            }
+          : null;
         this.setProtocolActivation(
           hostId,
           payload.activation.type,
@@ -1935,7 +1941,7 @@ export class RayLinkStore {
             port: payload.activation.port,
             network: payload.activation.network,
             firewallManaged: input.result?.activation?.firewallManaged === true,
-            publicCheck: publicCheck || null,
+            publicCheck: persistedPublicCheck,
             updatedAt: timestamp
           }
         );

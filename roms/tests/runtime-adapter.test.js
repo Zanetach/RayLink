@@ -175,6 +175,8 @@ process.exit(2);
 
   assert.equal(result.reachable, true);
   assert.equal(result.protocol, "tuic");
+  assert.equal(Number.isInteger(result.latencyMs), true);
+  assert.ok(result.latencyMs >= 0);
   assert.deepEqual(JSON.parse(await readFile(probeRecord, "utf8")).outbounds, [{
     type: "tuic",
     tag: "raylink-probe",

@@ -332,7 +332,10 @@ test("Hysteria 2 activation completes a real sing-box protocol fetch before repo
     }
   });
 
-  assert.deepEqual(result.activation.publicCheck, {
+  const { latencyMs, ...publicCheck } = result.activation.publicCheck;
+  assert.equal(Number.isInteger(latencyMs), true);
+  assert.ok(latencyMs >= 0);
+  assert.deepEqual(publicCheck, {
     reachable: true,
     probe: "sing-box-tools-fetch",
     protocol: "hysteria2",

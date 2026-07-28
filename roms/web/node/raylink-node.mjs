@@ -28,6 +28,7 @@ import { arch, cpus, freemem, hostname, platform, totalmem } from "node:os";
 import { connect as connectHttp2 } from "node:http2";
 import { connect as connectTcp } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -612,6 +613,7 @@ export class NodeRuntimeAdapter {
         reason: "UDP 公网握手需要协议级外部探针；已完成节点监听与防火墙验证"
       };
     }
+    const startedAt = performance.now();
     await new Promise((resolve, reject) => {
       const socket = connectTcp({ host: address, port });
       socket.setTimeout(5_000);
@@ -625,7 +627,11 @@ export class NodeRuntimeAdapter {
       });
       socket.once("error", reject);
     });
-    return { reachable: true };
+    return {
+      reachable: true,
+      latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      probe: "tcp-connect"
+    };
   }
 
   async verifyUdpProtocol(activation) {
@@ -641,8 +647,10 @@ export class NodeRuntimeAdapter {
     try {
       await this.commandRunner(this.binaryPath, ["check", "-c", probePath]);
       let lastError = null;
+      let latencyMs = null;
       for (let attempt = 1; attempt <= this.protocolProbeAttempts; attempt += 1) {
         try {
+          const startedAt = performance.now();
           await this.commandRunner(this.binaryPath, [
             "tools",
             "fetch",
@@ -652,6 +660,7 @@ export class NodeRuntimeAdapter {
             "raylink-probe",
             this.protocolProbeUrl
           ]);
+          latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
           lastError = null;
           break;
         } catch (error) {
@@ -666,7 +675,8 @@ export class NodeRuntimeAdapter {
         reachable: true,
         probe: "sing-box-tools-fetch",
         protocol: activation.type,
-        target: this.protocolProbeUrl
+        target: this.protocolProbeUrl,
+        latencyMs
       };
     } catch (error) {
       const wrapped = new Error(

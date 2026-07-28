@@ -108,6 +108,79 @@ test("admin can run the one-click protocol activation transaction", async (t) =>
   assert.ok(calls[0].adminId);
 });
 
+test("admin can measure every enabled protocol on one Host", async (t) => {
+  const calls = [];
+  const testApp = await startTestApp({
+    protocolActivationManager: {
+      measureHost: async (input) => {
+        calls.push(input);
+        return {
+          hostId: input.hostId,
+          checkedAt: "2026-07-28T01:00:00.000Z",
+          results: [
+            { type: "shadowsocks", status: "available", latencyMs: 38 },
+            { type: "hysteria2", status: "timeout", latencyMs: null }
+          ]
+        };
+      }
+    }
+  });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const response = await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/hosts/local/protocols/latency",
+    { method: "POST" }
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.results[0].latencyMs, 38);
+  assert.equal(body.results[1].status, "timeout");
+  assert.deepEqual(calls, [{ hostId: "local" }]);
+});
+
+test("automatic protocol sampling also refreshes a pending remote Host", async (t) => {
+  const calls = [];
+  const testApp = await startTestApp({
+    protocolLatencyIntervalMs: 20,
+    protocolActivationManager: {
+      measureHost: async ({ hostId }) => {
+        calls.push(hostId);
+        return { hostId, checkedAt: new Date().toISOString(), results: [] };
+      }
+    }
+  });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "待接入 Host",
+      address: "pending.example.com",
+      region: "tokyo"
+    })
+  })).json();
+
+  await new Promise((resolve, reject) => {
+    const poll = setInterval(() => {
+      if (!calls.includes(created.host.id)) return;
+      clearInterval(poll);
+      clearTimeout(timeout);
+      resolve();
+    }, 10);
+    const timeout = setTimeout(() => {
+      clearInterval(poll);
+      reject(new Error("定时延迟测试未覆盖待接入 Host"));
+    }, 1_000);
+  });
+
+  assert.ok(calls.includes(created.host.id));
+});
+
 test("admin can configure the ACME notification email before one-click TLS activation", async (t) => {
   const installer = {
     async status() {
@@ -2291,6 +2364,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /protocolDrawerMarkup\(hostId, protocolType\)/);
   assert.doesNotMatch(appScript, /protocolLabels\.slice\(0,\s*3\)/);
   assert.match(appScript, /class="host-protocol-tags"/);
+  assert.match(appScript, /data-measure-host-latency/);
+  assert.match(appScript, /protocolLatencyPresentation/);
+  assert.match(appScript, /protocol-latency-value/);
   const styleResponse = await fetch(`${testApp.baseUrl}/styles.css`);
   assert.equal(styleResponse.status, 200);
   const styles = await styleResponse.text();
@@ -2300,7 +2376,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.10-host-protocols/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.11-protocol-latency/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`

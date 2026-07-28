@@ -6,8 +6,9 @@ function deploymentVersion(prefix = "v", now = new Date()) {
   return `${prefix}${now.toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
 }
 
-function compile(store, listenPort, hostId = "local") {
+function compile(store, listenPort, hostId = "local", protocols = null) {
   const snapshot = store.runtimeSnapshot(hostId);
+  if (protocols) snapshot.protocols = protocols;
   const config = buildSingBoxConfig(snapshot, { listenPort });
   const configText = `${JSON.stringify(config, null, 2)}\n`;
   const checksum = createHash("sha256").update(configText).digest("hex");
@@ -58,6 +59,10 @@ export class RuntimeManager {
       listenPort: compiled.config.inbounds[0]?.listen_port || null,
       protocols: compiled.config.inbounds.map((inbound) => inbound.type)
     };
+  }
+
+  compileHostRuntimeConfig(hostId = "local", protocols = null) {
+    return compile(this.store, this.listenPort, hostId, protocols).config;
   }
 
   async publish(publisherAdminId = null, options = {}) {

@@ -1,6 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 
 import {
@@ -161,13 +162,21 @@ export class LocalSingBoxAdapter {
     }
   }
 
-  async probeProtocol({ type, address, port }) {
-    const serverConfig = JSON.parse(await readFile(this.activePath, "utf8"));
+  async probeProtocol({
+    type,
+    address,
+    port,
+    serverConfig = null,
+    attempts = this.protocolProbeAttempts,
+    timeoutMs = 30_000
+  }) {
+    const sourceConfig = serverConfig
+      || JSON.parse(await readFile(this.activePath, "utf8"));
     const probeConfig = buildUdpProtocolProbeConfig({
       type,
       address,
       port,
-      serverConfig
+      serverConfig: sourceConfig
     });
     const probePath = join(
       this.runtimeDir,
@@ -180,8 +189,11 @@ export class LocalSingBoxAdapter {
         maxBuffer: 1024 * 1024
       });
       let lastError = null;
-      for (let attempt = 1; attempt <= this.protocolProbeAttempts; attempt += 1) {
+      let latencyMs = null;
+      const attemptCount = Math.max(1, Number(attempts || 1));
+      for (let attempt = 1; attempt <= attemptCount; attempt += 1) {
         try {
+          const startedAt = performance.now();
           await this.runner(this.binaryPath, [
             "tools",
             "fetch",
@@ -191,14 +203,15 @@ export class LocalSingBoxAdapter {
             "raylink-probe",
             this.protocolProbeUrl
           ], {
-            timeout: 30_000,
+            timeout: Math.max(1_000, Number(timeoutMs || 30_000)),
             maxBuffer: 1024 * 1024
           });
+          latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
           lastError = null;
           break;
         } catch (error) {
           lastError = error;
-          if (attempt < this.protocolProbeAttempts && this.protocolProbeDelayMs > 0) {
+          if (attempt < attemptCount && this.protocolProbeDelayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, this.protocolProbeDelayMs));
           }
         }
@@ -208,7 +221,8 @@ export class LocalSingBoxAdapter {
         reachable: true,
         probe: "sing-box-tools-fetch",
         protocol: type,
-        target: this.protocolProbeUrl
+        target: this.protocolProbeUrl,
+        latencyMs
       };
     } catch (error) {
       const wrapped = commandFailure(error, `${type} 协议握手或外部访问失败`);

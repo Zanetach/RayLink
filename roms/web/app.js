@@ -611,6 +611,39 @@ function renderHostTopology(hosts, runtime) {
   status.innerHTML = `<i></i>${healthyCount}/${hosts.length} 个 Host 在线`;
 }
 
+function protocolLatencyPresentation(activation) {
+  const check = activation?.publicCheck;
+  if (!check?.checkedAt) {
+    return { label: "待测速", className: "neutral", title: "尚未执行协议连接测试" };
+  }
+  if (check.unsupported) {
+    return {
+      label: "不适用",
+      className: "neutral",
+      title: `${check.reason || "该协议不提供独立节点延迟"} · ${new Date(check.checkedAt).toLocaleString("zh-CN")}`
+    };
+  }
+  const probeLabel = check.probe === "sing-box-tools-fetch"
+    ? "完整协议握手与外部访问"
+    : check.probe === "tcp-connect"
+      ? "TCP 连接"
+      : "协议连接";
+  if (check.reachable === true && Number.isFinite(Number(check.latencyMs))) {
+    const latencyMs = Math.max(0, Math.round(Number(check.latencyMs)));
+    return {
+      label: `${latencyMs} ms`,
+      className: latencyMs <= 120 ? "good" : latencyMs <= 300 ? "warning" : "danger",
+      title: `${probeLabel} · 最近测试：${new Date(check.checkedAt).toLocaleString("zh-CN")}`
+    };
+  }
+  const timedOut = /tim(?:e|ed)[ -]?out|超时/i.test(String(check.error || ""));
+  return {
+    label: timedOut ? "超时" : "不可达",
+    className: "danger",
+    title: `${check.error || "协议连接测试失败"} · ${new Date(check.checkedAt).toLocaleString("zh-CN")}`
+  };
+}
+
 function renderHosts() {
   if (!elements.hostBody) return;
   const hosts = controlPlane.hosts;
@@ -623,7 +656,13 @@ function renderHosts() {
   elements.hostBody.innerHTML = hosts.map((host) => {
     const protocolLabels = (host.protocols || [])
       .filter((profile) => profile.enabled)
-      .map((profile) => controlPlane.protocolCatalog.find((item) => item.type === profile.type)?.name || profile.type);
+      .map((profile) => {
+        const activation = host.protocolActivations?.find((item) => item.type === profile.type);
+        return {
+          name: controlPlane.protocolCatalog.find((item) => item.type === profile.type)?.name || profile.type,
+          latency: protocolLatencyPresentation(activation)
+        };
+      });
     const isLocal = host.kind !== "remote";
     const healthy = isLocal
       ? runtime.state === "running"
@@ -669,7 +708,7 @@ function renderHosts() {
       <td><button class="identity-link" data-open-host="${escapeHtml(host.id)}"><span class="flag">SB</span><span><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></span></button></td>
       <td><span class="status-badge ${statusClass}"><i></i>${status}</span></td>
       <td>${protocolLabels.length
-        ? `<div class="host-protocol-tags" aria-label="已启用 ${protocolLabels.length} 个入口协议">${protocolLabels.map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join("")}</div>`
+        ? `<div class="host-protocol-tags" aria-label="已启用 ${protocolLabels.length} 个入口协议">${protocolLabels.map(({ name, latency }) => `<span class="tag protocol-latency-tag"><span>${escapeHtml(name)}</span><em class="protocol-latency-value ${latency.className}" title="${escapeHtml(latency.title)}">${escapeHtml(latency.label)}</em></span>`).join("")}</div>`
         : '<span class="tag">尚未启用</span>'}</td>
       <td>${isLocal ? "控制面本机" : "RayLink Node"}</td>
       <td>${escapeHtml(isLocal ? runtime.platform || "local" : [host.platform, host.architecture].filter(Boolean).join(" / ") || "等待上报")}</td>
@@ -1242,11 +1281,12 @@ function hostDrawerMarkup(hostId) {
     const port = profile.port ? `:${profile.port}` : "无固定端口";
     const applied = host.appliedProtocols?.find((item) => item.type === profile.type);
     const state = protocolState(host, profile, applied);
+    const latency = protocolLatencyPresentation(state.activation);
     return {
       group: catalog?.activationPolicy?.group || "advanced",
       html: `
       <button type="button" class="switch-row protocol-host-row" data-host-protocol="${escapeHtml(profile.type)}" data-host-id="${escapeHtml(host.id)}">
-        <div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(profile.listen)}${escapeHtml(port)} · ${profile.tls?.mode === "reality" ? "Reality" : ["certificate", "acme"].includes(profile.tls?.mode) ? "TLS" : "标准入口"}</small></div>
+        <div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(profile.listen)}${escapeHtml(port)} · ${profile.tls?.mode === "reality" ? "Reality" : ["certificate", "acme"].includes(profile.tls?.mode) ? "TLS" : "标准入口"}${profile.enabled ? ` · 延迟 ${escapeHtml(latency.label)}` : ""}</small></div>
         <span class="status-badge ${state.className}"><i></i>${state.label}</span>
       </button>`
     };
@@ -1282,6 +1322,8 @@ function hostDrawerMarkup(hostId) {
       <p class="drawer-section-label">入口协议</p>
       <p class="field-hint">协议属于当前主机。一键启用会完成配置、校验、发布、端口检查，并在成功后自动进入用户订阅。</p>
       <div class="host-protocol-list">${groupMarkup}</div>
+      <button type="button" class="button secondary" data-measure-host-latency="${escapeHtml(host.id)}">${icon("refresh")}测试全部协议延迟</button>
+      <p class="field-hint">TCP 协议测量从控制面到当前 Host 的连接耗时；Hysteria、TUIC 和 Hysteria 2 使用 sing-box 完整协议握手与外部访问探针，本机及高级系统协议标记为不适用。</p>
       <div class="switch-row"><div><strong>${isRemote ? "RayLink Node" : "Runtime 模式"}</strong><small>${escapeHtml(runtimeCopy)}</small></div><span class="status-badge neutral"><i></i>${escapeHtml(isRemote ? host.status : controlPlane.runtime?.state || "unknown")}</span></div>
       ${!isRemote && !controlPlane.installation?.installed
         ? `<button type="button" class="button primary" id="install-sing-box">${icon("terminal")}一键安装 sing-box</button><p class="field-hint">安装完成后即可在当前主机启用入口协议。</p>`
@@ -2085,6 +2127,33 @@ async function upgradeRemoteRuntime(hostId) {
   }
 }
 
+async function measureHostProtocolLatency(hostId, button) {
+  if (button?.disabled) return;
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = `${icon("refresh")} 正在测试协议延迟`;
+  }
+  try {
+    const measured = await api(
+      `/api/hosts/${encodeURIComponent(hostId)}/protocols/latency`,
+      { method: "POST" }
+    );
+    await loadBootstrap();
+    if (elements.drawer.classList.contains("open")) openHost(hostId);
+    const available = measured.results.filter((result) => result.status === "available").length;
+    showToast(
+      "协议延迟测试完成",
+      `${available}/${measured.results.length} 个公网协议可用，结果已更新到主机列表。`
+    );
+  } catch (error) {
+    showToast("协议延迟测试失败", error.message);
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = `${icon("refresh")} 重新测试协议延迟`;
+    }
+  }
+}
+
 async function generateRealityKeypair(form) {
   const button = form.querySelector("[data-generate-reality]");
   button.disabled = true;
@@ -2178,6 +2247,15 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-new-host]")) {
     openNewHost();
+    return;
+  }
+
+  const latencyButton = event.target.closest("[data-measure-host-latency]");
+  if (latencyButton) {
+    await measureHostProtocolLatency(
+      latencyButton.dataset.measureHostLatency,
+      latencyButton
+    );
     return;
   }
 

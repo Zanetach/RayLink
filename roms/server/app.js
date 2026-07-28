@@ -387,6 +387,9 @@ export async function createRayLinkApp(options) {
   let runtimeUpdateTimer = null;
   let usageMeteringTimer = null;
   let usageMeteringPromise = null;
+  let protocolLatencyTimer = null;
+  let protocolLatencyStartupTimer = null;
+  let protocolLatencyPromise = null;
   let operationalMaintenanceTimer = null;
   let localRuntimeOperation = null;
   const operationalMaintenanceIntervalMs = Math.max(
@@ -483,6 +486,35 @@ export async function createRayLinkApp(options) {
       certificateStager: (input) => localTlsAssetStager.stage(input),
       runtimeMode: options.runtimeMode || "dry-run"
     });
+  const protocolLatencyIntervalMs = Math.max(
+    0,
+    Number(options.protocolLatencyIntervalMs ?? (
+      (options.runtimeMode || "dry-run") === "systemd" ? 5 * 60 * 1000 : 0
+    ))
+  );
+  const sampleProtocolLatencies = () => {
+    if (protocolLatencyPromise) return protocolLatencyPromise;
+    if (typeof protocolActivationManager.measureHost !== "function") {
+      return Promise.resolve(null);
+    }
+    protocolLatencyPromise = (async () => {
+      const hosts = store.listHosts();
+      for (const host of hosts) {
+        try {
+          await protocolActivationManager.measureHost({ hostId: host.id });
+        } catch (error) {
+          if (error.code !== "PROTOCOL_LATENCY_IN_PROGRESS") {
+            console.warn(
+              `[RayLink] ${host.name} protocol latency sample failed: ${error.message}`
+            );
+          }
+        }
+      }
+    })().finally(() => {
+      protocolLatencyPromise = null;
+    });
+    return protocolLatencyPromise;
+  };
   const bbrManager = options.bbrManager || new BbrManager({
     mode: options.runtimeMode || "dry-run",
     configPath: options.bbrConfigPath
@@ -1390,6 +1422,20 @@ export async function createRayLinkApp(options) {
           return;
         }
 
+        const protocolLatencyMatch = url.pathname.match(
+          /^\/api\/hosts\/([^/]+)\/protocols\/latency$/
+        );
+        if (request.method === "POST" && protocolLatencyMatch) {
+          sendJson(
+            response,
+            200,
+            await protocolActivationManager.measureHost({
+              hostId: decodeURIComponent(protocolLatencyMatch[1])
+            })
+          );
+          return;
+        }
+
         if (request.method === "GET" && url.pathname === "/api/deployments") {
           sendJson(response, 200, { deployments: store.listDeployments() });
           return;
@@ -1583,8 +1629,25 @@ export async function createRayLinkApp(options) {
         runtimeUpdateTimer = setInterval(refreshRuntimeUpdate, runtimeUpdateCheckIntervalMs);
         runtimeUpdateTimer.unref?.();
       }
+      if (protocolLatencyIntervalMs > 0) {
+        protocolLatencyStartupTimer = setTimeout(sampleProtocolLatencies, 2_000);
+        protocolLatencyStartupTimer.unref?.();
+        protocolLatencyTimer = setInterval(
+          sampleProtocolLatencies,
+          protocolLatencyIntervalMs
+        );
+        protocolLatencyTimer.unref?.();
+      }
     },
     async close() {
+      if (protocolLatencyStartupTimer) {
+        clearTimeout(protocolLatencyStartupTimer);
+        protocolLatencyStartupTimer = null;
+      }
+      if (protocolLatencyTimer) {
+        clearInterval(protocolLatencyTimer);
+        protocolLatencyTimer = null;
+      }
       if (operationalMaintenanceTimer) {
         clearInterval(operationalMaintenanceTimer);
         operationalMaintenanceTimer = null;
@@ -1611,6 +1674,7 @@ export async function createRayLinkApp(options) {
       }
       if (telemetrySamplePromise) await telemetrySamplePromise;
       if (usageMeteringPromise) await usageMeteringPromise;
+      if (protocolLatencyPromise) await protocolLatencyPromise;
       if (server.listening) {
         await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       }

@@ -1267,6 +1267,17 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   padding: 8px 0;
 }
 .host-protocol-tags .tag { margin: 0; }
+.protocol-latency-tag { gap: 7px; }
+.protocol-latency-value {
+  font-size: 8px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.protocol-latency-value.good { color: var(--accent); }
+.protocol-latency-value.warning { color: var(--warning); }
+.protocol-latency-value.danger { color: var(--danger); }
+.protocol-latency-value.neutral { color: var(--faint); }
 .flag { border-radius: 50%; font-size: 9px; }
 
 .release-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 15px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }

@@ -2,6 +2,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { randomBytes as cryptoRandomBytes } from "node:crypto";
 import dgram from "node:dgram";
 import net from "node:net";
+import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 
 import {
@@ -206,6 +207,7 @@ export class PublicConnectivityProbe {
         reason: "UDP 公网握手需要协议级外部探针；已完成本机监听与防火墙验证"
       };
     }
+    const startedAt = performance.now();
     await new Promise((resolve, reject) => {
       const socket = net.connect({ host: address, port });
       socket.setTimeout(timeoutMs);
@@ -225,7 +227,11 @@ export class PublicConnectivityProbe {
         ));
       });
     });
-    return { reachable: true };
+    return {
+      reachable: true,
+      latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      probe: "tcp-connect"
+    };
   }
 }
 
@@ -257,6 +263,7 @@ export class ProtocolActivationManager {
     this.randomBytes = randomBytes;
     this.runtimeMode = runtimeMode;
     this.activating = new Set();
+    this.measuring = new Set();
   }
 
   record(hostId, type, state, extra = {}) {
@@ -265,6 +272,29 @@ export class ProtocolActivationManager {
       updatedAt: new Date().toISOString(),
       ...extra
     });
+  }
+
+  async probePublicProtocol({
+    type,
+    address,
+    port,
+    network,
+    serverConfig = null,
+    attempts,
+    timeoutMs
+  }) {
+    if (network === "udp" && this.protocolProbe) {
+      return this.protocolProbe({
+        type,
+        address,
+        port,
+        network,
+        ...(serverConfig ? { serverConfig } : {}),
+        ...(attempts ? { attempts } : {}),
+        ...(timeoutMs ? { timeoutMs } : {})
+      });
+    }
+    return this.publicProbe.verify({ address, port, network });
   }
 
   async installationFor(host) {
@@ -342,6 +372,119 @@ export class ProtocolActivationManager {
         if (failures.length) throw new Error(failures.join("；"));
       }
     };
+  }
+
+  async measureHost({ hostId }) {
+    if (this.measuring.has(hostId)) {
+      throw activationError(
+        "PROTOCOL_LATENCY_IN_PROGRESS",
+        "该主机正在测试协议延迟",
+        409
+      );
+    }
+    this.measuring.add(hostId);
+    try {
+      const host = this.store.getHost(hostId);
+      if (!host) throw activationError("HOST_NOT_FOUND", "主机不存在", 404);
+      const configuredProfiles = this.store.listHostProtocolConfigs(hostId);
+      const appliedProfiles = host.appliedProtocols?.length
+        ? host.appliedProtocols
+        : configuredProfiles;
+      const profiles = appliedProfiles.filter((profile) => profile.enabled);
+      const serverConfig = typeof this.runtimeManager.compileHostRuntimeConfig === "function"
+        ? this.runtimeManager.compileHostRuntimeConfig(hostId, appliedProfiles)
+        : null;
+      const existingActivations = new Map(
+        (host.protocolActivations || []).map((activation) => [activation.type, activation])
+      );
+      const checkedAt = new Date().toISOString();
+      const results = [];
+      for (const profile of profiles) {
+        const policy = protocolActivationPolicy(profile.type);
+        if (policy.exposure !== "public" || !profile.port) {
+          const unsupportedReason = policy.exposure === "private"
+            ? "仅本机协议不执行公网延迟测试"
+            : policy.exposure === "advanced"
+              ? "高级系统协议不提供独立节点延迟"
+              : "协议没有可探测端口";
+          const publicCheck = {
+            reachable: null,
+            latencyMs: null,
+            checkedAt,
+            unsupported: true,
+            reason: unsupportedReason
+          };
+          const existing = existingActivations.get(profile.type);
+          this.store.setProtocolActivation(hostId, profile.type, {
+            ...(existing || {}),
+            state: existing?.state || "port-listening",
+            port: profile.port || null,
+            network: policy.network,
+            publicCheck,
+            updatedAt: checkedAt
+          });
+          results.push({
+            type: profile.type,
+            status: "unsupported",
+            latencyMs: null
+          });
+          continue;
+        }
+        let publicCheck;
+        try {
+          publicCheck = await this.probePublicProtocol({
+            type: profile.type,
+            address: host.address,
+            port: profile.port,
+            network: policy.network,
+            serverConfig,
+            attempts: 1,
+            timeoutMs: 10_000
+          });
+          const latencyMs = Number.isFinite(Number(publicCheck.latencyMs))
+            ? Math.max(0, Math.round(Number(publicCheck.latencyMs)))
+            : null;
+          publicCheck = {
+            ...publicCheck,
+            reachable: publicCheck.reachable === true,
+            latencyMs,
+            checkedAt
+          };
+          results.push({
+            type: profile.type,
+            status: publicCheck.reachable ? "available" : "unreachable",
+            latencyMs
+          });
+        } catch (error) {
+          const timedOut = /tim(?:e|ed)[ -]?out|超时/i.test(
+            `${error.code || ""} ${error.message || ""}`
+          );
+          publicCheck = {
+            reachable: false,
+            latencyMs: null,
+            checkedAt,
+            error: String(error.message || "协议探测失败").slice(0, 300)
+          };
+          results.push({
+            type: profile.type,
+            status: timedOut ? "timeout" : "unreachable",
+            latencyMs: null
+          });
+        }
+        const existing = existingActivations.get(profile.type);
+        this.store.setProtocolActivation(hostId, profile.type, {
+          ...(existing || {}),
+          state: existing?.state || "port-listening",
+          port: profile.port,
+          network: policy.network,
+          publicCheck,
+          updatedAt: checkedAt
+        });
+      }
+      return { hostId, checkedAt, results };
+    } finally {
+      this.measuring.delete(hostId);
+    }
   }
 
   async prepare(host, type, policy, catalog, profiles) {
@@ -544,21 +687,19 @@ export class ProtocolActivationManager {
       this.record(hostId, type, "port-listening", { progress: 85, port: saved.port });
       let publicCheck = { reachable: null, reason: "仅本机协议不执行公网探测" };
       if (policy.exposure === "public" && this.runtimeMode !== "dry-run") {
-        publicCheck = policy.network === "udp" && this.protocolProbe
-          ? await this.protocolProbe({
-              type,
-              address: host.address,
-              port: saved.port,
-              network: policy.network
-            })
-          : await this.publicProbe.verify({
-              address: host.address,
-              port: saved.port,
-              network: policy.network
-            });
+        publicCheck = await this.probePublicProtocol({
+          type,
+          address: host.address,
+          port: saved.port,
+          network: policy.network
+        });
       } else if (policy.exposure === "public") {
         publicCheck = { reachable: true, simulated: true };
       }
+      publicCheck = {
+        ...publicCheck,
+        checkedAt: publicCheck.checkedAt || new Date().toISOString()
+      };
       const state = publicCheck.reachable === true ? "public-ready" : "port-listening";
       const activation = this.record(hostId, type, state, {
         progress: 100,

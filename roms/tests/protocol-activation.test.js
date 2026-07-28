@@ -37,9 +37,17 @@ function profile(type, overrides = {}) {
 }
 
 function fixture(type, overrides = {}) {
-  const profiles = [profile("shadowsocks"), profile("vless"), profile("hysteria2"), profile("direct")];
+  const profiles = structuredClone(overrides.profiles || [
+    profile("shadowsocks"),
+    profile("vless"),
+    profile("hysteria2"),
+    profile("direct")
+  ]);
   const original = structuredClone(profiles.find((item) => item.type === type));
   const events = [];
+  const activations = new Map(
+    (overrides.protocolActivations || []).map((activation) => [activation.type, activation])
+  );
   const store = {
     getHost: () => ({
       id: "local",
@@ -48,7 +56,7 @@ function fixture(type, overrides = {}) {
       runtimeVersion: "1.13.14",
       platform: "linux",
       buildTags: ["with_utls", "with_acme", "with_quic"],
-      protocolActivations: overrides.protocolActivations || []
+      protocolActivations: [...activations.values()]
     }),
     listHostProtocolConfigs: () => structuredClone(profiles),
     updateHostProtocolConfig: (_hostId, protocolType, input) => {
@@ -64,7 +72,9 @@ function fixture(type, overrides = {}) {
     },
     setProtocolActivation: (_hostId, protocolType, activation) => {
       events.push(["state", protocolType, activation.state]);
-      return activation;
+      const value = { type: protocolType, ...structuredClone(activation) };
+      activations.set(protocolType, value);
+      return value;
     }
   };
   const portManager = {
@@ -91,7 +101,12 @@ function fixture(type, overrides = {}) {
     verify: async (input) => {
       events.push(["public-probe", input.network, input.port]);
       if (overrides.publicError) throw new Error("公网不可达");
-      return { reachable: true };
+      return {
+        reachable: true,
+        ...(Number.isFinite(overrides.publicLatencyMs)
+          ? { latencyMs: overrides.publicLatencyMs }
+          : {})
+      };
     }
   };
   const protocolProbe = async (input) => {
@@ -100,14 +115,18 @@ function fixture(type, overrides = {}) {
     return {
       reachable: true,
       probe: "sing-box-tools-fetch",
-      protocol: input.type
+      protocol: input.type,
+      ...(Number.isFinite(overrides.protocolLatencyMs)
+        ? { latencyMs: overrides.protocolLatencyMs }
+        : {})
     };
   };
   const runtimeManager = {
     publish: async (_adminId, options) => {
       events.push(["publish", options]);
       return { id: "deployment-1", status: "active", remoteQueued: 0 };
-    }
+    },
+    compileHostRuntimeConfig: () => ({ inbounds: [] })
   };
   const installer = {
     status: async () => ({
@@ -134,7 +153,7 @@ function fixture(type, overrides = {}) {
     certificateStager: overrides.certificateStager,
     randomBytes: () => Buffer.from("0011223344556677", "hex")
   });
-  return { manager, events, profiles, original };
+  return { manager, events, profiles, original, activations };
 }
 
 test("protocol policies separate public, TLS, private and advanced behavior", () => {
@@ -167,6 +186,53 @@ test("one-click Shadowsocks activation reserves a port, opens TCP, publishes and
   assert.equal(events.some(([name]) => name === "publish"), true);
   assert.equal(events.some(([name]) => name === "listening"), true);
   assert.equal(events.some(([name]) => name === "public-probe"), true);
+});
+
+test("Host latency measurement records TCP and UDP protocol results without changing profiles", async () => {
+  const { manager, profiles, activations } = fixture("shadowsocks", {
+    profiles: [
+      profile("shadowsocks", { enabled: true }),
+      profile("hysteria2", { enabled: true }),
+      profile("direct")
+    ],
+    publicLatencyMs: 24,
+    protocolLatencyMs: 61
+  });
+
+  const measured = await manager.measureHost({ hostId: "local" });
+
+  assert.deepEqual(
+    measured.results.map(({ type, status, latencyMs }) => ({ type, status, latencyMs })),
+    [
+      { type: "shadowsocks", status: "available", latencyMs: 24 },
+      { type: "hysteria2", status: "available", latencyMs: 61 }
+    ]
+  );
+  assert.equal(profiles.find((item) => item.type === "shadowsocks").enabled, true);
+  assert.equal(activations.get("shadowsocks").publicCheck.latencyMs, 24);
+  assert.equal(activations.get("hysteria2").publicCheck.latencyMs, 61);
+});
+
+test("Host latency measurement marks enabled local-only protocols as not applicable", async () => {
+  const { manager, activations } = fixture("shadowsocks", {
+    profiles: [
+      profile("shadowsocks", { enabled: true }),
+      profile("socks", { enabled: true, listen: "127.0.0.1", port: 1080 })
+    ],
+    publicLatencyMs: 24
+  });
+
+  const measured = await manager.measureHost({ hostId: "local" });
+
+  assert.deepEqual(
+    measured.results.map(({ type, status }) => ({ type, status })),
+    [
+      { type: "shadowsocks", status: "available" },
+      { type: "socks", status: "unsupported" }
+    ]
+  );
+  assert.equal(activations.get("socks").publicCheck.unsupported, true);
+  assert.match(activations.get("socks").publicCheck.reason, /仅本机/);
 });
 
 test("one-click VLESS uses generated Reality material", async () => {
