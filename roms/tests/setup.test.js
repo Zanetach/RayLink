@@ -745,7 +745,7 @@ test("the release package keeps every installer dependency executable", async ()
   }
 });
 
-test("the control-plane upgrader stops writers before backing up durable data", async (t) => {
+async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "raylink-upgrade-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const installRoot = join(directory, "installed");
@@ -764,7 +764,8 @@ test("the control-plane upgrader stops writers before backing up durable data", 
     JSON.stringify({ name: "raylink-control-plane", version: "0.2.12" })
   );
   await writeFile(join(dataRoot, "raylink.db"), "durable-state");
-  await writeFile(serviceUnit, "[Service]\nExecStart=/opt/raylink/server/index.js\n");
+  const previousServiceUnit = "[Service]\nExecStart=/opt/raylink/server/old-index.js\n";
+  await writeFile(serviceUnit, previousServiceUnit);
   const executables = {
     id: "#!/usr/bin/env bash\n[ \"${1:-}\" = '-u' ] && printf '0\\n' || /usr/bin/id \"$@\"\n",
     uname: "#!/usr/bin/env bash\n[ \"${1:-}\" = '-s' ] && printf 'Linux\\n' || /usr/bin/uname \"$@\"\n",
@@ -774,7 +775,13 @@ test("the control-plane upgrader stops writers before backing up durable data", 
       "exit 0",
       ""
     ].join("\n"),
-    curl: "#!/usr/bin/env bash\nprintf '{\"state\":\"INITIALIZED\"}'\n",
+    curl: [
+      "#!/usr/bin/env bash",
+      "[ \"${UPGRADE_HEALTH_FAIL:-false}\" = true ] && exit 22",
+      "printf '{\"state\":\"INITIALIZED\"}'",
+      ""
+    ].join("\n"),
+    sleep: "#!/usr/bin/env bash\nexit 0\n",
     chown: "#!/usr/bin/env bash\nexit 0\n",
     cp: [
       "#!/usr/bin/env bash",
@@ -793,30 +800,72 @@ test("the control-plane upgrader stops writers before backing up durable data", 
   );
   await chmod(join(nodeRoot, "bin", "node"), 0o755);
 
-  await execFile("bash", [
-    new URL("../deploy/upgrade-control-plane.sh", import.meta.url).pathname
-  ], {
-    env: {
-      ...process.env,
-      PATH: `${fakeBin}:${process.env.PATH}`,
-      ORDER_LOG: orderLog,
-      TEST_NODE_BIN: process.execPath,
-      RAYLINK_INSTALL_ROOT: installRoot,
-      RAYLINK_DATA_ROOT: dataRoot,
-      RAYLINK_BACKUP_ROOT: backupRoot,
-      RAYLINK_NODE_ROOT: nodeRoot,
-      RAYLINK_SERVICE_UNIT: serviceUnit,
-      RAYLINK_SOURCE_DIR: new URL("..", import.meta.url).pathname,
-      RAYLINK_PORT: "4173"
-    }
-  });
-
+  let error = null;
+  try {
+    await execFile("bash", [
+      new URL("../deploy/upgrade-control-plane.sh", import.meta.url).pathname
+    ], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        ORDER_LOG: orderLog,
+        TEST_NODE_BIN: process.execPath,
+        UPGRADE_HEALTH_FAIL: String(healthFails),
+        RAYLINK_INSTALL_ROOT: installRoot,
+        RAYLINK_DATA_ROOT: dataRoot,
+        RAYLINK_BACKUP_ROOT: backupRoot,
+        RAYLINK_NODE_ROOT: nodeRoot,
+        RAYLINK_SERVICE_UNIT: serviceUnit,
+        RAYLINK_SOURCE_DIR: new URL("..", import.meta.url).pathname,
+        RAYLINK_PORT: "4173"
+      }
+    });
+  } catch (upgradeError) {
+    error = upgradeError;
+  }
   const operations = (await readFile(orderLog, "utf8")).trim().split("\n");
+  return {
+    dataRoot,
+    error,
+    installRoot,
+    operations,
+    previousServiceUnit,
+    serviceUnit
+  };
+}
+
+test("the control-plane upgrader stops writers before backing up durable data", async (t) => {
+  const { error, operations, dataRoot } = await runControlPlaneUpgradeHarness(t);
+  assert.equal(error, null);
   const stopIndex = operations.indexOf("systemctl stop raylink");
   const dataBackupIndex = operations.findIndex((entry) => entry.startsWith(`cp -a ${dataRoot} `));
   assert.notEqual(stopIndex, -1);
   assert.notEqual(dataBackupIndex, -1);
   assert.ok(stopIndex < dataBackupIndex, "RayLink must stop SQLite writers before copying its data directory");
+});
+
+test("a failed control-plane health check restores application, data and service unit", async (t) => {
+  const {
+    dataRoot,
+    error,
+    installRoot,
+    operations,
+    previousServiceUnit,
+    serviceUnit
+  } = await runControlPlaneUpgradeHarness(t, { healthFails: true });
+
+  assert.ok(error);
+  assert.match(error.stderr, /新控制面在 30 秒内未通过本机健康检查/);
+  assert.equal(
+    JSON.parse(await readFile(join(installRoot, "package.json"), "utf8")).version,
+    "0.2.12"
+  );
+  assert.equal(await readFile(join(dataRoot, "raylink.db"), "utf8"), "durable-state");
+  assert.equal(await readFile(serviceUnit, "utf8"), previousServiceUnit);
+  assert.equal(
+    operations.filter((entry) => entry === "systemctl start raylink").length,
+    2
+  );
 });
 
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
