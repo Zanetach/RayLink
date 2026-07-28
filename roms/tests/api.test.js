@@ -2249,6 +2249,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexResponse.headers.get("content-type"), /text\/html/);
   const indexHtml = await indexResponse.text();
   assert.match(indexHtml, /用户管理/);
+  assert.match(indexHtml, /<th>订阅<\/th>/);
   assert.doesNotMatch(indexHtml, /方案管理/);
   assert.match(indexHtml, /网络流量趋势/);
   assert.match(indexHtml, /dashboard-network-trend/);
@@ -2281,6 +2282,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /data-topology-link=/);
   assert.match(appScript, /data-user-subscription-action/);
   assert.match(appScript, /data-user-subscription-qr/);
+  assert.match(appScript, /data-user-subscription-quick/);
+  assert.match(appScript, /openUserSubscriptionQuick/);
   assert.match(indexHtml, /src="\.\/qrcode\.min\.js/);
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
 

@@ -814,6 +814,22 @@ th:nth-last-child(2), td:nth-last-child(2) { text-align: right; }
 .identity-link strong, .identity-link small { display: block; }
 .identity-link strong { color: var(--text-soft); font-size: 12px; font-weight: 600; }
 .identity-link small { margin-top: 2px; color: var(--faint); font-size: 9px; }
+.subscription-quick-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: transform 120ms var(--ease-out), border-color 160ms ease, background-color 160ms ease;
+}
+.subscription-quick-button svg { width: 14px; height: 14px; color: var(--accent); }
 .usage-cell { min-width: 160px; }
 .usage-copy { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .usage-copy span:last-child { color: var(--faint); }
@@ -1365,6 +1381,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .subscription-access > .button { width: 100%; justify-content: center; }
 .subscription-result { display: grid; gap: 10px; }
 .subscription-result[hidden] { display: none; }
+.quick-subscription-panel { display: grid; gap: 20px; }
 .portal-login-help { display: grid; grid-template-columns: 28px 1fr; gap: 12px; padding: 16px; background: var(--canvas); }
 .portal-login-help svg { width: 18px; height: 18px; margin: 4px 0 0 4px; color: var(--muted); }
 .portal-login-help strong, .portal-login-help small { display: block; }
@@ -1628,6 +1645,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   .button.primary:hover { background-color: var(--accent-strong); }
   .button.secondary:hover, .command-button:hover { border-color: var(--border); background-color: var(--surface-3); }
   .text-button:hover, .identity-link:hover strong { color: var(--accent); }
+  .subscription-quick-button:hover { transform: translateY(-1px); border-color: var(--accent-border); background: var(--accent-soft); }
   .filter:hover { color: var(--text-soft); }
   .topology-node:hover {
     border-color: var(--accent);
@@ -1732,7 +1750,8 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   #user-table-body td:nth-child(3)::before { content: "已用 / 配额"; }
   #user-table-body td:nth-child(4)::before { content: "节点 / 客户端"; }
   #user-table-body td:nth-child(5)::before { content: "到期时间"; }
-  #user-table-body td:nth-child(6)::before { display: none; }
+  #user-table-body td:nth-child(6)::before { content: "订阅"; }
+  #user-table-body td:nth-child(7)::before { display: none; }
   .usage-cell { min-width: 0; }
   .table-footer { background: var(--surface-1); }
   .pagination { display: none; }

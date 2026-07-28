@@ -1,4 +1,5 @@
 const users = [];
+const generatedSubscriptionUrls = new Map();
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
 const requiredNodeAgentVersion = "0.7.0";
@@ -886,6 +887,14 @@ function renderUsers() {
         </td>
         <td><span class="entitlement-cell"><strong>${escapeHtml(scopeToLabel(user.nodeScope))}</strong><small>${user.clients.length} 种客户端格式</small></span></td>
         <td class="numeric">${formatDate(user.expires)}</td>
+        <td>
+          <button
+            class="subscription-quick-button"
+            type="button"
+            data-user-subscription-quick="${escapeHtml(user.id)}"
+            aria-label="${user.subscription?.configured ? "查看" : "生成"} ${escapeHtml(user.name)} 的订阅链接和二维码"
+          >${icon("link")}<span>${user.subscription?.configured ? "查看订阅" : "生成订阅"}</span></button>
+        </td>
         <td><button class="icon-button small" aria-label="编辑 ${escapeHtml(user.name)}" data-user="${escapeHtml(user.email)}">${icon("more")}</button></td>
       </tr>`;
   }).join("");
@@ -901,7 +910,7 @@ function renderUsers() {
     if (badge) badge.textContent = count;
   });
   if (!filtered.length) {
-    elements.userBody.innerHTML = `<tr><td colspan="6"><div class="empty-state">没有符合当前筛选条件的用户</div></td></tr>`;
+    elements.userBody.innerHTML = `<tr><td colspan="7"><div class="empty-state">没有符合当前筛选条件的用户</div></td></tr>`;
   }
 }
 
@@ -984,6 +993,7 @@ function showAdminLogin() {
   elements.appShell.hidden = true;
   elements.mobileNav.hidden = true;
   elements.toast.classList.remove("visible");
+  generatedSubscriptionUrls.clear();
   history.replaceState({}, "", location.pathname);
   elements.authForm.elements.username.focus();
 }
@@ -1035,12 +1045,57 @@ function closeDrawer({ restoreFocus = true, clearContent = false } = {}) {
   if (restoreFocus) focusTarget?.focus();
 }
 
-function userDrawerMarkup(user = {}) {
-  const isNew = !user.id;
-  const portalUrl = new URL(
+function userPortalUrl() {
+  return new URL(
     "/portal",
     controlPlane.access?.canonicalOrigin || window.location.origin
   ).toString();
+}
+
+function userSubscriptionAccessMarkup(user) {
+  const generatedUrl = generatedSubscriptionUrls.get(user.id) || "";
+  const configured = user.subscription?.configured === true;
+  const status = generatedUrl
+    ? "订阅地址已生成，可在本次浏览器会话中再次查看。"
+    : configured
+      ? "订阅已启用。完整地址不会长期保存；遗失时请重新生成。"
+      : "尚未生成。生成后可复制链接或让用户扫描二维码。";
+  return `
+    <section class="user-access-card" data-user-subscription-panel>
+      <div>
+        <strong>用户中心登录</strong>
+        <small>用户访问下面的地址，使用邮箱 ${escapeHtml(user.email)} 和管理员设置的密码登录。</small>
+      </div>
+      <div class="secure-link-row">
+        <input id="user-portal-url" type="url" value="${escapeHtml(userPortalUrl())}" readonly spellcheck="false">
+        <button type="button" class="button secondary" data-copy-target="user-portal-url">${icon("copy")}复制</button>
+      </div>
+      <div class="subscription-access">
+        <div>
+          <strong>订阅地址</strong>
+          <small data-user-subscription-status>${status}</small>
+        </div>
+        <div class="subscription-result" data-user-subscription-result ${generatedUrl ? "" : "hidden"}>
+          <div class="subscription-qr" data-user-subscription-qr aria-label="用户订阅地址二维码"></div>
+          <div class="secure-link-row">
+            <input id="user-subscription-url" type="url" value="${escapeHtml(generatedUrl)}" readonly spellcheck="false">
+            <button type="button" class="button secondary" data-copy-target="user-subscription-url">${icon("copy")}复制</button>
+          </div>
+          <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付；刷新页面或退出登录后不再显示。</small>
+        </div>
+        <button
+          type="button"
+          class="button primary"
+          data-user-subscription-action
+          data-user-id="${escapeHtml(user.id)}"
+          data-subscription-configured="${configured ? "true" : "false"}"
+        >${configured ? "重新生成订阅地址" : "生成订阅地址"}</button>
+      </div>
+    </section>`;
+}
+
+function userDrawerMarkup(user = {}) {
+  const isNew = !user.id;
   const selectedNodeGroup = user.nodeScope?.length ? scopeToLabel(user.nodeScope) : "全部节点";
   const currentHostRegion = controlPlane.hosts[0]?.region;
   const standardNodeGroups = [
@@ -1074,46 +1129,41 @@ function userDrawerMarkup(user = {}) {
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
       ${isNew ? "" : `
         <p class="drawer-section-label">用户中心与订阅访问</p>
-        <section class="user-access-card">
-          <div>
-            <strong>用户中心登录</strong>
-            <small>用户访问下面的地址，使用邮箱 ${escapeHtml(user.email)} 和管理员设置的密码登录。</small>
-          </div>
-          <div class="secure-link-row">
-            <input id="user-portal-url" type="url" value="${escapeHtml(portalUrl)}" readonly spellcheck="false">
-            <button type="button" class="button secondary" data-copy-target="user-portal-url">${icon("copy")}复制</button>
-          </div>
-          <div class="subscription-access">
-            <div>
-              <strong>订阅地址</strong>
-              <small data-user-subscription-status>${user.subscription?.configured
-                ? "订阅已启用。完整地址不会长期保存；遗失时请重新生成。"
-                : "尚未生成。生成后可复制链接或让用户扫描二维码。"}</small>
-            </div>
-            <div class="subscription-result" data-user-subscription-result hidden>
-              <div class="subscription-qr" data-user-subscription-qr aria-label="用户订阅地址二维码"></div>
-              <div class="secure-link-row">
-                <input id="user-subscription-url" type="url" readonly spellcheck="false">
-                <button type="button" class="button secondary" data-copy-target="user-subscription-url">${icon("copy")}复制</button>
-              </div>
-              <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付；本次关闭详情后不再显示。</small>
-            </div>
-            <button
-              type="button"
-              class="button primary"
-              data-user-subscription-action
-              data-user-id="${escapeHtml(user.id)}"
-              data-subscription-configured="${user.subscription?.configured ? "true" : "false"}"
-            >${user.subscription?.configured ? "重新生成订阅地址" : "生成订阅地址"}</button>
-          </div>
-        </section>`}
+        ${userSubscriptionAccessMarkup(user)}`}
     </form>`;
+}
+
+function hydrateUserSubscriptionPanel(scope, userId) {
+  const generatedUrl = generatedSubscriptionUrls.get(userId);
+  if (!generatedUrl) return;
+  const qr = scope.querySelector("[data-user-subscription-qr]");
+  window.RayLinkSubscriptionQr?.render(qr, generatedUrl);
 }
 
 function openUser(email) {
   const user = users.find((item) => item.email === email);
   if (!user) return;
   openDrawer({ title: user.name, eyebrow: "用户详情", content: userDrawerMarkup(user) });
+  hydrateUserSubscriptionPanel(elements.drawerContent, user.id);
+}
+
+function openUserSubscriptionQuick(userId) {
+  const user = users.find((item) => item.id === userId);
+  if (!user) return;
+  openDrawer({
+    title: `${user.name} · 订阅`,
+    eyebrow: "快捷访问",
+    content: `
+      <div class="quick-subscription-panel">
+        <div class="drawer-profile">
+          <span class="avatar">${escapeHtml(user.initials)}</span>
+          <div><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></div>
+        </div>
+        ${userSubscriptionAccessMarkup(user)}
+      </div>`,
+    saveLabel: "关闭"
+  });
+  hydrateUserSubscriptionPanel(elements.drawerContent, user.id);
 }
 
 function openNewUser() {
@@ -1491,11 +1541,11 @@ async function rotateAdminUserSubscription(button) {
     && !window.confirm("重新生成后，用户已经导入客户端的旧订阅地址会立即失效。确定继续吗？")
   ) return;
 
-  const form = button.closest("#user-drawer-form");
-  const status = form.querySelector("[data-user-subscription-status]");
-  const resultPanel = form.querySelector("[data-user-subscription-result]");
-  const urlInput = form.querySelector("#user-subscription-url");
-  const qr = form.querySelector("[data-user-subscription-qr]");
+  const panel = button.closest("[data-user-subscription-panel]");
+  const status = panel.querySelector("[data-user-subscription-status]");
+  const resultPanel = panel.querySelector("[data-user-subscription-result]");
+  const urlInput = panel.querySelector("#user-subscription-url");
+  const qr = panel.querySelector("[data-user-subscription-qr]");
   const previousText = button.textContent;
   button.disabled = true;
   button.textContent = isReset ? "正在重新生成…" : "正在生成…";
@@ -1504,6 +1554,7 @@ async function rotateAdminUserSubscription(button) {
       `/api/users/${encodeURIComponent(button.dataset.userId)}/subscription/rotate`,
       { method: "POST" }
     );
+    generatedSubscriptionUrls.set(button.dataset.userId, result.subscriptionUrl);
     urlInput.value = result.subscriptionUrl;
     resultPanel.hidden = false;
     const qrReady = window.RayLinkSubscriptionQr?.render(
@@ -1517,6 +1568,7 @@ async function rotateAdminUserSubscription(button) {
     button.textContent = "重新生成订阅地址";
     const user = users.find((item) => item.id === button.dataset.userId);
     if (user) user.subscription = { ...(user.subscription || {}), configured: true };
+    renderUsers();
     showToast("订阅地址已生成", "链接和二维码只在本次生成后完整显示。");
   } catch (error) {
     status.textContent = error.message;
@@ -2222,6 +2274,12 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-open-portal]")) {
     openPortal();
+    return;
+  }
+
+  const userSubscriptionQuick = event.target.closest("[data-user-subscription-quick]");
+  if (userSubscriptionQuick) {
+    openUserSubscriptionQuick(userSubscriptionQuick.dataset.userSubscriptionQuick);
     return;
   }
 
