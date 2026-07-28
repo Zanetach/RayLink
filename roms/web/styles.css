@@ -117,6 +117,18 @@ body {
   padding: 12px;
 }
 .portal-subscription-value > .subscription-qr { grid-template-columns: none; }
+.portal-subscription-value > .subscription-client-actions,
+.subscription-client-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.subscription-client-actions .button {
+  min-height: 40px;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+}
 .subscription-qr canvas,
 .subscription-qr img { display: block; width: 184px; height: 184px; image-rendering: pixelated; }
 .subscription-qr.unavailable {
@@ -1723,6 +1735,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   .page-heading .button { width: 100%; }
   .heading-actions { width: 100%; }
   .heading-actions .button { flex: 1; }
+  .subscription-client-actions { grid-template-columns: 1fr; }
   .status-band { grid-template-columns: 1fr 1fr; }
   .status-band article { min-height: 96px; padding: 15px 16px; }
   .status-band article:nth-child(3)::before { inset: 0 14px auto; width: auto; height: 1px; }

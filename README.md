@@ -12,7 +12,7 @@
 
 ![RayLink 控制面总览](roms/docs/assets/readme/dashboard.png)
 
-RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制台创建用户、设置流量与到期时间、接入 VPS、配置 Host 入口协议并发布；用户登录独立用户中心，获取包含多个 Host 和协议的专属 sing-box 客户端配置。国内目标直连，其他流量进入自动测速与故障切换策略。
+RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制台创建用户、设置流量与到期时间、接入 VPS、配置 Host 入口协议并发布；用户登录独立用户中心，通过同一个专属订阅地址导入 Clash/Mihomo、Egern 或 sing-box。国内目标直连，其他流量进入自动测速与故障切换策略。
 
 > [!IMPORTANT]
 > RayLink 是网络基础设施管理软件。请只在你有权管理的服务器和网络中部署，并遵守所在地法律、云服务商条款及目标服务的使用政策。
@@ -23,9 +23,9 @@ RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制�
 |---|---|
 | 一台控制面管理多台 VPS | 本机 Runtime 与远程 RayLink Node 使用同一套 Host、协议和 Deployment 模型 |
 | User Entitlement 与客户端配置 | 创建用户时直接设置流量、到期时间和 Host 范围；订阅地址加密保存，可随时查看或显式重新生成 |
-| 一个客户端配置包含多个 Host | 按 User Entitlement 编译全部可用 Host 和协议，并生成 URLTest、Selector 与故障切换 |
+| 一个订阅地址支持多个客户端 | 按 User Entitlement 编译全部可用 Host 和协议，并按客户端自动输出 Mihomo YAML、Egern YAML/Profile 或 sing-box JSON |
 | Host 入口协议 | 协议绑定到具体 Host，按需启用；一键启用默认使用 Host 域名证书 TLS，并经过能力、端口与语法校验 |
-| 智能路由 | sing-box 客户端通过 TUN、DNS 分流、CN 规则直连和境外自动代理执行 |
+| 智能路由 | Mihomo、Egern 与 sing-box 配置均包含 CN 直连、境外代理、自动选择和故障回退 |
 | 安全发布 | `sing-box check`、原子替换、版本快照、失败恢复和历史回滚 |
 | 真实流量计量 | 使用 sing-box 用户级统计，不以 Host 网卡总流量估算用户配额 |
 | Host 可观测性 | 汇总 CPU、内存、上下行速率、服务状态、心跳和 Runtime 版本 |
@@ -61,7 +61,7 @@ flowchart LR
   NodeA --> SingB["sing-box"]
   NodeB --> SingC["sing-box"]
 
-  Control -->|"专属 sing-box JSON"| Client["用户客户端"]
+  Control -->|"一个专属订阅 URL<br/>动态输出三种格式"| Client["Mihomo / Egern / sing-box"]
   Client --> Route{"智能路由"}
   Route -->|"中国大陆规则"| Direct["DIRECT"]
   Route -->|"其他目标"| Auto["URLTest / Selector"]
@@ -142,7 +142,7 @@ sequenceDiagram
   participant A as 管理员
   participant R as RayLink
   participant U as 用户
-  participant C as sing-box 客户端
+  participant C as Mihomo / Egern / sing-box
 
   A->>R: 创建用户并设置配额、到期日、Host 范围
   A->>R: 发布 Deployment
@@ -154,6 +154,12 @@ sequenceDiagram
 ```
 
 配置 URL 的密钥按密码处理：服务端只保存 SHA-256 哈希，重置后旧地址立即失效；响应使用私有缓存策略和 ETag。用户停用、到期、超额或 Host 范围变化后，下一次更新会取得新的有效配置。
+
+同一个通用地址会根据客户端 User-Agent 返回对应格式，浏览器打开时显示客户端选择页；
+也可以显式使用 `?format=mihomo`、`?format=egern`、`?format=egern-profile` 或
+`?format=singbox`。用户中心和管理员用户详情同时提供订阅二维码、复制链接、Mihomo
+一键导入、Egern 一键导入及 sing-box JSON 下载。重新生成地址会让所有格式的旧地址一起
+失效，不需要分别管理多个密钥。
 
 ## 协议与路由
 
@@ -226,10 +232,9 @@ npm run check:production
 
 ## 当前边界
 
-v0.2.12 已覆盖单控制面、多 Host、用户客户端配置、安全发布、真实流量计量，以及由 Caddy 管理的首次初始化与域名配置。以下功能仍在后续范围：
+当前代码已覆盖单控制面、多 Host、用户客户端配置、安全发布、真实流量计量，以及由 Caddy 管理的首次初始化与域名配置。以下功能仍在后续范围：
 
 - TLS 证书到期告警与 DNS 提供商 API 集成
-- 配置 URL 二维码与 Mihomo 格式转换
 - 财务账单、周期重置、退款和人工调账
 - 多 Host 灰度升级与维护窗口
 - 同一种协议的多个独立 inbound 实例

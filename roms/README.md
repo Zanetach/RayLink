@@ -54,3 +54,14 @@ npm run check:production
 该命令不替代干净 VPS、真实客户端和长时间故障验收。
 
 生产安装与发布包构建见 [deploy/README.md](deploy/README.md)。
+
+## 通用订阅
+
+用户订阅使用一个稳定地址，并按客户端自动返回兼容配置：
+
+- Clash/Mihomo：完整 YAML，包含智能选择、TCP/UDP 分组、故障回退、CN 直连和 DNS。
+- Egern：节点订阅 YAML，或带智能策略、规则和 DNS 的完整 Profile。
+- sing-box：完整 JSON，保留 TUN、规则集与多 Host selector/urltest。
+
+可使用 `?format=mihomo`、`?format=egern`、`?format=egern-profile` 和
+`?format=singbox` 显式选择格式。浏览器打开通用地址时会显示安全的客户端选择页。

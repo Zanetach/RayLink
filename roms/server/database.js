@@ -22,6 +22,8 @@ import {
   normalizeProtocolConfigs
 } from "./singbox/protocol-catalog.js";
 
+export const DEFAULT_CLIENT_FORMATS = Object.freeze(["mihomo", "egern", "sing-box"]);
+
 const seedPlans = [
   {
     id: "standard",
@@ -29,7 +31,7 @@ const seedPlans = [
     quotaGb: 120,
     legacyDeviceLimit: 3,
     nodeScope: ["tokyo", "singapore"],
-    clientFormats: ["sing-box"],
+    clientFormats: [...DEFAULT_CLIENT_FORMATS],
     description: "适合日常办公和开发",
     tone: "standard"
   },
@@ -39,7 +41,7 @@ const seedPlans = [
     quotaGb: 320,
     legacyDeviceLimit: 5,
     nodeScope: ["all"],
-    clientFormats: ["sing-box"],
+    clientFormats: [...DEFAULT_CLIENT_FORMATS],
     description: "面向高流量研发团队",
     tone: "premium"
   },
@@ -49,7 +51,7 @@ const seedPlans = [
     quotaGb: 36,
     legacyDeviceLimit: 1,
     nodeScope: ["tokyo"],
-    clientFormats: ["sing-box"],
+    clientFormats: [...DEFAULT_CLIENT_FORMATS],
     description: "外部协作和短期项目",
     tone: "temporary"
   }
@@ -88,7 +90,7 @@ function domainError(code, message, statusCode = 422) {
   return error;
 }
 
-function validateUserEntitlement({ quotaGb, nodeScope, clientFormats }) {
+function validateUserEntitlement({ quotaGb, nodeScope }) {
   if (!Number.isFinite(quotaGb) || quotaGb <= 0) {
     throw domainError("INVALID_QUOTA", "流量额度必须大于 0");
   }
@@ -99,13 +101,10 @@ function validateUserEntitlement({ quotaGb, nodeScope, clientFormats }) {
   ) {
     throw domainError("INVALID_NODE_SCOPE", "节点范围必须使用有效的区域标识");
   }
-  if (
-    !Array.isArray(clientFormats)
-    || clientFormats.length !== 1
-    || clientFormats[0] !== "sing-box"
-  ) {
-    throw domainError("INVALID_CLIENT_FORMATS", "RayLink 当前仅下发 sing-box 客户端配置");
-  }
+}
+
+function normalizeClientFormats() {
+  return [...DEFAULT_CLIENT_FORMATS];
 }
 
 function userFromRow(row) {
@@ -574,12 +573,12 @@ export class RayLinkStore {
       SET quota_gb = COALESCE(quota_gb, (SELECT quota_gb FROM plans WHERE plans.id = users.plan_id), 120),
           device_limit = COALESCE(device_limit, (SELECT device_limit FROM plans WHERE plans.id = users.plan_id), 3),
           node_scope_json = COALESCE(node_scope_json, (SELECT node_scope_json FROM plans WHERE plans.id = users.plan_id), '["all"]'),
-          client_formats_json = COALESCE(client_formats_json, (SELECT client_formats_json FROM plans WHERE plans.id = users.plan_id), '["sing-box"]')
+          client_formats_json = COALESCE(client_formats_json, (SELECT client_formats_json FROM plans WHERE plans.id = users.plan_id), '["mihomo","egern","sing-box"]')
     `);
     this.db.prepare(`
       UPDATE users
-      SET client_formats_json = '["sing-box"]'
-      WHERE client_formats_json IS NULL OR client_formats_json <> '["sing-box"]'
+      SET client_formats_json = '["mihomo","egern","sing-box"]'
+      WHERE client_formats_json IS NULL OR client_formats_json <> '["mihomo","egern","sing-box"]'
     `).run();
   }
 
@@ -595,7 +594,7 @@ export class RayLinkStore {
       INSERT OR IGNORE INTO plans (
         id, name, quota_gb, device_limit, node_scope_json, client_formats_json,
         description, tone, created_at, updated_at
-      ) VALUES (?, '用户独立权益兼容记录', 1, 1, '["all"]', '["sing-box"]', '仅用于旧数据库外键兼容', 'standard', ?, ?)
+      ) VALUES (?, '用户独立权益兼容记录', 1, 1, '["all"]', '["mihomo","egern","sing-box"]', '仅用于旧数据库外键兼容', 'standard', ?, ?)
     `).run(LEGACY_ENTITLEMENT_PLAN_ID, createdAt, createdAt);
 
     if (seedDemoData) {
@@ -2076,7 +2075,7 @@ export class RayLinkStore {
     const entitlement = {
       quotaGb: Number(input.quotaGb),
       nodeScope: input.nodeScope,
-      clientFormats: input.clientFormats
+      clientFormats: normalizeClientFormats(input.clientFormats)
     };
     if (!name) throw domainError("INVALID_USER_NAME", "用户名称不能为空");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -2163,7 +2162,9 @@ export class RayLinkStore {
       email: input.email === undefined ? current.email : String(input.email).trim().toLowerCase(),
       quotaGb: input.quotaGb === undefined ? current.quotaGb : Number(input.quotaGb),
       nodeScope: input.nodeScope === undefined ? current.nodeScope : input.nodeScope,
-      clientFormats: input.clientFormats === undefined ? current.clientFormats : input.clientFormats,
+      clientFormats: input.clientFormats === undefined
+        ? [...DEFAULT_CLIENT_FORMATS]
+        : normalizeClientFormats(input.clientFormats),
       expiresAt: input.expiresAt === undefined ? current.expiresAt : String(input.expiresAt),
       state: input.state === undefined ? current.state : String(input.state),
       portalStatus: input.portalStatus === undefined ? current.portalStatus : String(input.portalStatus),

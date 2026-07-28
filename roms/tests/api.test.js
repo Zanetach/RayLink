@@ -364,7 +364,7 @@ test("authenticated bootstrap returns users with independent entitlements", asyn
   assert.equal(user.quotaGb, 120);
   assert.equal("deviceLimit" in user, false);
   assert.deepEqual(user.nodeScope, ["tokyo", "singapore"]);
-  assert.deepEqual(user.clientFormats, ["sing-box"]);
+  assert.deepEqual(user.clientFormats, ["mihomo", "egern", "sing-box"]);
   assert.equal("planId" in user, false);
   assert.equal("passwordHash" in body.users[0], false);
   assert.equal("runtimeCredential" in body.users[0], false);
@@ -612,9 +612,11 @@ test("empty-database API workflow reaches a multi-Host client configuration", as
     { method: "POST" }
   );
   assert.equal(rotateResponse.status, 201);
-  const { subscriptionUrl } = await rotateResponse.json();
-  const subscriptionPath = new URL(subscriptionUrl).pathname;
-  const subscriptionResponse = await fetch(`${testApp.baseUrl}${subscriptionPath}`);
+  const { formats } = await rotateResponse.json();
+  const subscriptionPath = new URL(formats.singbox).pathname;
+  const subscriptionResponse = await fetch(
+    `${testApp.baseUrl}${subscriptionPath}?format=singbox`
+  );
   assert.equal(subscriptionResponse.status, 200);
   assert.deepEqual(await subscriptionResponse.json(), clientConfig);
 });
@@ -664,7 +666,6 @@ test("admin creates and updates a user-owned entitlement", async (t) => {
       email: "qingyang.xu@example.cn",
       quotaGb: 86,
       nodeScope: ["tokyo"],
-      clientFormats: ["sing-box"],
       state: "disabled",
       expiresAt: "2027-01-31"
     })
@@ -674,7 +675,7 @@ test("admin creates and updates a user-owned entitlement", async (t) => {
   assert.equal(user.quotaGb, 86);
   assert.equal("deviceLimit" in user, false);
   assert.deepEqual(user.nodeScope, ["tokyo"]);
-  assert.deepEqual(user.clientFormats, ["sing-box"]);
+  assert.deepEqual(user.clientFormats, ["mihomo", "egern", "sing-box"]);
   assert.equal(user.state, "disabled");
   assert.equal("planId" in user, false);
   assert.equal("runtimePassword" in user, false);
@@ -1015,7 +1016,7 @@ test("client delivery keeps using the applied host protocols until the next depl
   );
 });
 
-test("admin surface keeps protocols on hosts and exposes only sing-box client delivery", async (t) => {
+test("admin surface keeps protocols on hosts and exposes universal client delivery", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());
   const response = await fetch(`${testApp.baseUrl}/`);
@@ -1024,7 +1025,9 @@ test("admin surface keeps protocols on hosts and exposes only sing-box client de
 
   assert.doesNotMatch(html, /data-view="services"/);
   assert.doesNotMatch(html, /data-view-target="services"/);
-  assert.doesNotMatch(script, /Mihomo|mihomo|Clash/);
+  assert.match(script, /Clash \/ Mihomo/);
+  assert.match(script, /Egern/);
+  assert.match(script, /sing-box/);
   assert.match(html, /入口协议/);
 });
 
@@ -1302,7 +1305,7 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   const first = await firstRotate.json();
   assert.equal(new URL(first.subscriptionUrl).origin, "https://sub.example.com");
   const firstSubscriptionPath = new URL(first.subscriptionUrl).pathname;
-  assert.match(firstSubscriptionPath, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/sing-box\.json$/);
+  assert.match(firstSubscriptionPath, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/);
   const currentSubscription = await fetch(
     `${testApp.baseUrl}/api/portal/subscription`,
     { headers: { cookie: portalCookie } }
@@ -1318,7 +1321,8 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   });
   assert.equal(isolatedControlPlane.status, 404);
 
-  const subscriptionResponse = await fetch(`${testApp.baseUrl}${firstSubscriptionPath}`, {
+  const firstSingBoxPath = `${firstSubscriptionPath}?format=singbox`;
+  const subscriptionResponse = await fetch(`${testApp.baseUrl}${firstSingBoxPath}`, {
     headers: { "x-forwarded-host": "sub.example.com" }
   });
   assert.equal(subscriptionResponse.status, 200);
@@ -1330,7 +1334,7 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   const subscriptionConfig = await subscriptionResponse.json();
   assert.equal(subscriptionConfig.inbounds[0].type, "tun");
   assert.equal(subscriptionConfig.route.final, "raylink-auto");
-  const notModifiedResponse = await fetch(`${testApp.baseUrl}${firstSubscriptionPath}`, {
+  const notModifiedResponse = await fetch(`${testApp.baseUrl}${firstSingBoxPath}`, {
     headers: { "if-none-match": subscriptionEtag }
   });
   assert.equal(notModifiedResponse.status, 304);
@@ -1346,6 +1350,91 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   assert.equal(revokedResponse.status, 401);
   assert.equal((await revokedResponse.json()).error.code, "SUBSCRIPTION_INVALID");
   assert.equal((await fetch(`${testApp.baseUrl}${secondSubscriptionPath}`)).status, 200);
+});
+
+test("one universal subscription URL negotiates Mihomo, Egern and sing-box formats", async (t) => {
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    subscriptionOrigin: "https://sub.example.com"
+  });
+  t.after(() => testApp.close());
+  const loginResponse = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  const portalCookie = loginResponse.headers.getSetCookie()[0].split(";")[0];
+  const created = await (await fetch(`${testApp.baseUrl}/api/portal/subscription/rotate`, {
+    method: "POST",
+    headers: { cookie: portalCookie }
+  })).json();
+  const subscription = new URL(created.subscriptionUrl);
+
+  assert.match(subscription.pathname, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/);
+  assert.equal(created.formats.mihomo, `${created.subscriptionUrl}?format=mihomo`);
+  assert.equal(created.formats.egern, `${created.subscriptionUrl}?format=egern`);
+  assert.equal(created.formats.singbox, `${created.subscriptionUrl}?format=singbox`);
+
+  const mihomo = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
+    headers: { "user-agent": "clash-verge/v2.5.2" }
+  });
+  assert.equal(mihomo.status, 200);
+  assert.match(mihomo.headers.get("content-type"), /application\/yaml/);
+  assert.match(mihomo.headers.get("content-disposition"), /raylink-mihomo\.yaml/);
+  assert.match(await mihomo.text(), /^mixed-port: 7890/m);
+
+  const egern = await fetch(`${testApp.baseUrl}${subscription.pathname}?format=egern`);
+  assert.equal(egern.status, 200);
+  assert.match(egern.headers.get("content-disposition"), /raylink-egern\.yaml/);
+  assert.match(await egern.text(), /^proxies:/m);
+
+  const egernDetected = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
+    headers: { "user-agent": "Egern/1.26" }
+  });
+  assert.equal(egernDetected.status, 200);
+  assert.match(egernDetected.headers.get("content-disposition"), /raylink-egern\.yaml/);
+
+  const profile = await fetch(`${testApp.baseUrl}${subscription.pathname}?format=egern-profile`);
+  assert.equal(profile.status, 200);
+  assert.match(profile.headers.get("content-disposition"), /raylink-egern-profile\.yaml/);
+  assert.match(await profile.text(), /^policy_groups:/m);
+
+  const singBox = await fetch(`${testApp.baseUrl}${subscription.pathname}?format=singbox`);
+  assert.equal(singBox.status, 200);
+  assert.match(singBox.headers.get("content-type"), /application\/json/);
+  assert.equal((await singBox.json()).route.final, "raylink-auto");
+
+  const legacySingBox = await fetch(
+    `${testApp.baseUrl}${subscription.pathname}/sing-box.json`
+  );
+  assert.equal(legacySingBox.status, 200);
+  assert.equal((await legacySingBox.json()).route.final, "raylink-auto");
+
+  const unsupported = await fetch(
+    `${testApp.baseUrl}${subscription.pathname}?format=unknown`
+  );
+  assert.equal(unsupported.status, 400);
+  assert.equal(
+    (await unsupported.json()).error.code,
+    "SUBSCRIPTION_FORMAT_UNSUPPORTED"
+  );
+
+  const landing = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
+    headers: {
+      accept: "text/html",
+      "user-agent": "Mozilla/5.0"
+    }
+  });
+  assert.equal(landing.status, 200);
+  assert.match(landing.headers.get("content-type"), /text\/html/);
+  const landingHtml = await landing.text();
+  assert.match(landingHtml, /Clash Verge Rev/);
+  assert.match(landingHtml, /Egern/);
+  assert.match(landingHtml, /sing-box/);
+  assert.doesNotMatch(landingHtml, /raylink-demo/);
 });
 
 test("administrator can generate a user's subscription URL and rotating it revokes the old URL", async (t) => {
@@ -2419,6 +2508,10 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /\/api\/users\/\$\{encodeURIComponent\(userId\)\}\/subscription/);
   assert.match(appScript, /subscriptionSession\.clear\(\)/);
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
+  assert.match(appScript, /data-subscription-format="mihomo"/);
+  assert.match(appScript, /data-subscription-format="egern-profile"/);
+  assert.match(appScript, /Clash \/ Mihomo/);
+  assert.match(appScript, /Egern/);
   assert.doesNotMatch(appScript, /profile\.enabled \|\| oneClick/);
   assert.match(appScript, /protocolDrawerMarkup\(hostId, protocolType\)/);
   assert.doesNotMatch(appScript, /protocolLabels\.slice\(0,\s*3\)/);
@@ -2436,7 +2529,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
   assert.match(indexHtml, /src="\.\/protocol-health\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.12-connection-health/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.12-universal-subscription/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
@@ -2454,6 +2547,17 @@ test("control plane serves the RayLink web application on the same origin", asyn
     subscriptionQuickResponse.headers.get("content-type"),
     /javascript/
   );
+  const universalPortalResponse = await fetch(`${testApp.baseUrl}/portal`);
+  assert.equal(universalPortalResponse.status, 200);
+  const universalPortalHtml = await universalPortalResponse.text();
+  assert.match(universalPortalHtml, /id="portal-import-mihomo"/);
+  assert.match(universalPortalHtml, /id="portal-import-egern"/);
+  assert.match(universalPortalHtml, /id="portal-download-singbox"/);
+  const portalScriptResponse = await fetch(`${testApp.baseUrl}/portal.js`);
+  assert.equal(portalScriptResponse.status, 200);
+  const portalScript = await portalScriptResponse.text();
+  assert.match(portalScript, /clash:\/\/install-config/);
+  assert.match(portalScript, /egern:\/profiles\/new/);
   const protocolHealthResponse = await fetch(
     `${testApp.baseUrl}/protocol-health.js`
   );

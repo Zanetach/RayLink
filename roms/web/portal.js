@@ -9,6 +9,9 @@ const subscriptionValue = document.querySelector("#portal-subscription-value");
 const subscriptionUrl = document.querySelector("#portal-subscription-url");
 const copySubscription = document.querySelector("#portal-copy-subscription");
 const subscriptionQr = document.querySelector("#portal-subscription-qr");
+const importMihomo = document.querySelector("#portal-import-mihomo");
+const importEgern = document.querySelector("#portal-import-egern");
+const downloadSingBox = document.querySelector("#portal-download-singbox");
 let subscriptionLoadRequest = 0;
 
 async function portalApi(path, options = {}) {
@@ -46,7 +49,7 @@ function renderAccount(profile) {
     ? user.subscription?.recoverable
       ? "正在读取现有订阅地址…"
       : "现有地址由旧版本生成，需要重新生成一次；之后可随时查看。"
-    : "生成后粘贴到 sing-box 客户端；地址保持有效，直到你主动重置。";
+    : "生成后可导入 Clash/Mihomo、Egern 或 sing-box；地址保持有效，直到你主动重置。";
   loginPanel.hidden = true;
   accountPanel.hidden = false;
   if (configured && user.subscription?.recoverable) {
@@ -59,6 +62,10 @@ function renderAccount(profile) {
 function revealSubscription(url, existing = false) {
   subscriptionUrl.value = url;
   subscriptionValue.hidden = false;
+  const formatUrl = (format) => `${url}?format=${encodeURIComponent(format)}`;
+  importMihomo.href = `clash://install-config?url=${encodeURIComponent(formatUrl("mihomo"))}&name=RayLink`;
+  importEgern.href = `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(formatUrl("egern-profile"))}`;
+  downloadSingBox.href = formatUrl("singbox");
   const qrReady = window.RayLinkSubscriptionQr?.render(subscriptionQr, url) === true;
   subscriptionStatus.textContent = existing
     ? qrReady
@@ -129,7 +136,7 @@ downloadButton.addEventListener("click", async () => {
     document.querySelector("#portal-download-note").textContent = error.message;
   } finally {
     downloadButton.disabled = false;
-    downloadButton.textContent = "下载 sing-box 配置";
+    downloadButton.textContent = "下载 sing-box 高级配置";
   }
 });
 

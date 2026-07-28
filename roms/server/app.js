@@ -36,6 +36,7 @@ import {
   systemdRuntimeInstanceId,
   V2RayStatsCollector
 } from "./usage/v2ray-stats.js";
+import { buildSubscriptionArtifact } from "./subscriptions/formats.js";
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
@@ -116,14 +117,17 @@ function versionIsOlder(currentVersion, targetVersion) {
   return false;
 }
 
-function sendSubscriptionJson(request, response, body) {
-  const payload = JSON.stringify(body);
+function sendSubscriptionArtifact(request, response, artifact) {
+  const payload = artifact.body;
   const etag = `"${createHash("sha256").update(payload).digest("hex")}"`;
   const headers = {
     "cache-control": "private, no-cache",
-    "content-disposition": 'attachment; filename="raylink-sing-box.json"',
+    "content-type": artifact.contentType,
+    "content-length": Buffer.byteLength(payload),
+    "content-disposition": `attachment; filename="${artifact.filename}"`,
     etag,
     "referrer-policy": "no-referrer",
+    vary: "User-Agent, Accept",
     "x-content-type-options": "nosniff",
     "x-robots-tag": "noindex, nofollow"
   };
@@ -132,7 +136,104 @@ function sendSubscriptionJson(request, response, body) {
     response.end();
     return;
   }
-  sendJson(response, 200, body, headers);
+  response.writeHead(200, headers);
+  response.end(payload);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function sendSubscriptionLanding(response, subscriptionUrl) {
+  const formatUrl = (format) => {
+    const target = new URL(subscriptionUrl);
+    target.searchParams.set("format", format);
+    return target.toString();
+  };
+  const mihomoUrl = formatUrl("mihomo");
+  const egernUrl = formatUrl("egern");
+  const egernProfileUrl = formatUrl("egern-profile");
+  const singBoxUrl = formatUrl("singbox");
+  const egernImport = `egern:/subscriptions/new?url=${encodeURIComponent(egernUrl)}`;
+  const egernProfileImport = `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(egernProfileUrl)}`;
+  const clashImport = `clash://install-config?url=${encodeURIComponent(mihomoUrl)}&name=RayLink`;
+  const payload = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>RayLink 客户端订阅</title>
+  <style>
+    :root{color-scheme:dark;font-family:Bahnschrift,"DIN Alternate","Avenir Next","PingFang SC",system-ui,sans-serif;background:#050907;color:#edf7f1}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:32px}
+    main{width:min(820px,100%);border:1px solid #20342a;border-radius:12px;background:#0a100d;padding:34px}
+    h1{margin:8px 0 10px;font-size:32px}p{color:#99aaa1;line-height:1.7}.eyebrow{color:#7ee2a5;font-size:12px;letter-spacing:.14em}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:28px 0}
+    a{display:block;min-height:40px;border:1px solid #263d31;border-radius:8px;padding:16px;color:#edf7f1;text-decoration:none;background:#0e1712}
+    a:hover{border-color:#75d99b;background:#122218}a strong{display:block;margin-bottom:4px}a small{color:#91a49a}
+    footer{border-top:1px solid #1b2b23;padding-top:18px;color:#718278;font-size:13px}
+    @media(max-width:650px){.grid{grid-template-columns:1fr}main{padding:24px}}
+  </style>
+</head>
+<body>
+  <main>
+    <span class="eyebrow">RAYLINK UNIVERSAL SUBSCRIPTION</span>
+    <h1>选择你的客户端</h1>
+    <p>这是通用订阅入口。RayLink 会为不同客户端生成兼容配置；订阅地址包含访问凭据，请勿转发。</p>
+    <div class="grid">
+      <a href="${escapeHtml(clashImport)}"><strong>Clash Verge Rev / Mihomo</strong><small>Windows、macOS、Linux · 一键导入</small></a>
+      <a href="${escapeHtml(egernProfileImport)}"><strong>Egern 智能配置</strong><small>iPhone、iPad · 智能选择、分流和 DNS</small></a>
+      <a href="${escapeHtml(egernImport)}"><strong>Egern 节点订阅</strong><small>只导入节点，保留客户端现有规则</small></a>
+      <a href="${escapeHtml(singBoxUrl)}"><strong>sing-box JSON</strong><small>官方客户端与 Hiddify 高级配置</small></a>
+      <a href="${escapeHtml(mihomoUrl)}"><strong>下载 Mihomo YAML</strong><small>适用于 Clash Verge Rev、FlClash</small></a>
+      <a href="${escapeHtml(egernUrl)}"><strong>下载 Egern YAML</strong><small>Egern 原生 proxies 节点集合</small></a>
+    </div>
+    <footer>同一个订阅身份支持 Mihomo、Egern 与 sing-box；重新生成订阅后，旧地址会统一失效。</footer>
+  </main>
+</body>
+</html>`;
+  response.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "content-length": Buffer.byteLength(payload),
+    "cache-control": "private, no-store",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer",
+    vary: "User-Agent, Accept",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "x-robots-tag": "noindex, nofollow"
+  });
+  response.end(payload);
+}
+
+const subscriptionFormatAliases = new Map([
+  ["mihomo", "mihomo"],
+  ["clash", "mihomo"],
+  ["clash-meta", "mihomo"],
+  ["egern", "egern"],
+  ["egern-profile", "egern-profile"],
+  ["singbox", "singbox"],
+  ["sing-box", "singbox"]
+]);
+
+function subscriptionFormatForRequest(request, url, pathFormat = "") {
+  const explicit = String(url.searchParams.get("format") || pathFormat || "").toLowerCase();
+  if (explicit) return subscriptionFormatAliases.get(explicit) || "unsupported";
+  const userAgent = String(request.headers["user-agent"] || "").toLowerCase();
+  const accept = String(request.headers.accept || "").toLowerCase();
+  if (userAgent.includes("egern")) return "egern";
+  if (/(?:clash|mihomo|flclash|stash)/.test(userAgent)) return "mihomo";
+  if (/(?:sing-box|singbox|hiddify)/.test(userAgent)) return "singbox";
+  if (accept.includes("text/html") && /mozilla|safari|chrome|firefox|edge/.test(userAgent)) {
+    return "landing";
+  }
+  return "mihomo";
 }
 
 async function sendStatic(response, webDir, pathname) {
@@ -340,9 +441,31 @@ export async function createRayLinkApp(options) {
     return configured ? new URL(configured) : configuredSubscriptionOrigin;
   };
   const subscriptionUrl = (subscription) => new URL(
-    `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
+    `/sub/${subscription.publicId}/${subscription.secret}`,
     currentSubscriptionOrigin()
   ).toString();
+  const subscriptionFormats = (subscription) => {
+    const universal = subscriptionUrl(subscription);
+    return {
+      mihomo: `${universal}?format=mihomo`,
+      egern: `${universal}?format=egern`,
+      egernProfile: `${universal}?format=egern-profile`,
+      singbox: `${universal}?format=singbox`
+    };
+  };
+  const subscriptionDetails = (subscription) => {
+    const universal = subscriptionUrl(subscription);
+    const formats = subscriptionFormats(subscription);
+    return {
+      subscriptionUrl: universal,
+      formats,
+      imports: {
+        clash: `clash://install-config?url=${encodeURIComponent(formats.mihomo)}&name=RayLink`,
+        egern: `egern:/subscriptions/new?url=${encodeURIComponent(formats.egern)}`,
+        egernProfile: `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(formats.egernProfile)}`
+      }
+    };
+  };
   const currentSubscription = (userId) => {
     const subscription = store.currentUserSubscription(userId);
     if (!subscription.configured) {
@@ -366,9 +489,7 @@ export async function createRayLinkApp(options) {
         409
       );
     }
-    return {
-      subscriptionUrl: subscriptionUrl(subscription)
-    };
+    return subscriptionDetails(subscription);
   };
   const requestOriginIsAllowed = (request) => {
     const requestOrigin = request.headers.origin;
@@ -702,9 +823,6 @@ export async function createRayLinkApp(options) {
     ) {
       throw httpError("ENTITLEMENT_INACTIVE", "账号当前不可使用", 403);
     }
-    if (!credential.clientFormats.includes("sing-box")) {
-      throw httpError("FORMAT_NOT_ALLOWED", "当前用户未启用 sing-box 配置", 403);
-    }
     return buildUserClientConfig({
       credential,
       hosts: eligibleHosts,
@@ -981,7 +1099,7 @@ export async function createRayLinkApp(options) {
       }
 
       const subscriptionMatch = url.pathname.match(
-        /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})\/sing-box\.json$/
+        /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})(?:\/(sing-box\.json|mihomo\.yaml|egern\.yaml|egern-profile\.yaml))?$/
       );
       if (request.method === "GET" && subscriptionMatch) {
         const subscriptionUser = store.userForSubscription(subscriptionMatch[1], subscriptionMatch[2]);
@@ -991,11 +1109,38 @@ export async function createRayLinkApp(options) {
           });
           return;
         }
-        sendSubscriptionJson(
+        const pathFormats = {
+          "sing-box.json": "singbox",
+          "mihomo.yaml": "mihomo",
+          "egern.yaml": "egern",
+          "egern-profile.yaml": "egern-profile"
+        };
+        const format = subscriptionFormatForRequest(
           request,
-          response,
-          await buildClientConfigForUser(subscriptionUser.id)
+          url,
+          pathFormats[subscriptionMatch[3]] || ""
         );
+        if (format === "unsupported") {
+          sendJson(response, 400, {
+            error: {
+              code: "SUBSCRIPTION_FORMAT_UNSUPPORTED",
+              message: "订阅格式不受支持"
+            }
+          });
+          return;
+        }
+        const universalUrl = new URL(
+          `/sub/${subscriptionMatch[1]}/${subscriptionMatch[2]}`,
+          currentSubscriptionOrigin()
+        ).toString();
+        if (format === "landing") {
+          sendSubscriptionLanding(response, universalUrl);
+          return;
+        }
+        sendSubscriptionArtifact(request, response, buildSubscriptionArtifact({
+          format,
+          singBoxConfig: await buildClientConfigForUser(subscriptionUser.id)
+        }));
         return;
       }
 
@@ -1091,18 +1236,20 @@ export async function createRayLinkApp(options) {
         }
         if (request.method === "POST" && url.pathname === "/api/portal/subscription/rotate") {
           const subscription = store.rotateUserSubscription(sessionUser.id);
-          sendJson(response, 201, {
-            subscriptionUrl: subscriptionUrl(subscription)
-          });
+          sendJson(response, 201, subscriptionDetails(subscription));
           return;
         }
-        if (request.method === "GET" && url.pathname === "/api/portal/config/sing-box") {
-          sendJson(
-            response,
-            200,
-            await buildClientConfigForUser(sessionUser.id),
-            { "content-disposition": `attachment; filename="raylink-sing-box.json"` }
-          );
+        const portalConfigMatch = url.pathname.match(
+          /^\/api\/portal\/config\/(sing-box|singbox|mihomo|egern|egern-profile)$/
+        );
+        if (request.method === "GET" && portalConfigMatch) {
+          const format = portalConfigMatch[1] === "sing-box"
+            ? "singbox"
+            : portalConfigMatch[1];
+          sendSubscriptionArtifact(request, response, buildSubscriptionArtifact({
+            format,
+            singBoxConfig: await buildClientConfigForUser(sessionUser.id)
+          }));
           return;
         }
         sendJson(response, 404, { error: { code: "NOT_FOUND", message: "接口不存在" } });
@@ -1540,9 +1687,7 @@ export async function createRayLinkApp(options) {
           const subscription = store.rotateUserSubscription(
             decodeURIComponent(rotateUserSubscriptionMatch[1])
           );
-          sendJson(response, 201, {
-            subscriptionUrl: subscriptionUrl(subscription)
-          });
+          sendJson(response, 201, subscriptionDetails(subscription));
           return;
         }
 

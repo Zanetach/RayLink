@@ -26,13 +26,19 @@ function createPanel() {
   const result = { hidden: true };
   const input = { value: "" };
   const qr = { rendered: "" };
+  const mihomo = { dataset: { subscriptionFormat: "mihomo" }, href: "" };
+  const egern = { dataset: { subscriptionFormat: "egern", subscriptionImport: "egern" }, href: "" };
+  const links = [mihomo, egern];
   const fields = new Map([
     ["[data-user-subscription-result]", result],
     ["#user-subscription-url", input],
     ["[data-user-subscription-qr]", qr]
   ]);
-  const panel = { querySelector: (selector) => fields.get(selector) || null };
-  return { panel, result, input, qr };
+  const panel = {
+    querySelector: (selector) => fields.get(selector) || null,
+    querySelectorAll: (selector) => selector === "[data-subscription-format]" ? links : []
+  };
+  return { panel, result, input, qr, mihomo, egern };
 }
 
 test("quick subscription controller reveals and rehydrates a generated QR link", () => {
@@ -54,6 +60,11 @@ test("quick subscription controller reveals and rehydrates a generated QR link",
   assert.equal(first.result.hidden, false);
   assert.equal(first.input.value, url);
   assert.equal(first.qr.rendered, url);
+  assert.equal(first.mihomo.href, `${url}?format=mihomo`);
+  assert.equal(
+    first.egern.href,
+    `egern:/subscriptions/new?url=${encodeURIComponent(`${url}?format=egern`)}`
+  );
 
   const reopened = createPanel();
   assert.equal(quick.hydrate({

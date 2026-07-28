@@ -7,6 +7,8 @@ let bootstrapRefreshInFlight = false;
 const requiredNodeAgentVersion = "0.7.0";
 
 const clientCatalog = {
+  mihomo: { name: "Clash / Mihomo", platforms: "Windows / macOS / Android", action: "导入订阅" },
+  egern: { name: "Egern", platforms: "iPhone / iPad", action: "一键导入" },
   "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "下载配置" }
 };
 
@@ -1091,6 +1093,11 @@ function userSubscriptionAccessMarkup(user) {
             <input id="user-subscription-url" type="url" value="${escapeHtml(generatedUrl)}" readonly spellcheck="false">
             <button type="button" class="button secondary" data-copy-target="user-subscription-url">${icon("copy")}复制</button>
           </div>
+          <div class="subscription-client-actions">
+            <a class="button secondary" href="#" data-subscription-format="mihomo" data-subscription-import="clash">导入 Clash / Mihomo</a>
+            <a class="button secondary" href="#" data-subscription-format="egern-profile" data-subscription-import="egern-profile">导入 Egern</a>
+            <a class="button secondary" href="#" data-subscription-format="singbox">下载 sing-box JSON</a>
+          </div>
           <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付。地址在服务端加密保存，刷新页面后仍可查看。</small>
         </div>
         <button
@@ -1133,7 +1140,7 @@ function userDrawerMarkup(user = {}) {
       <p class="drawer-section-label">用户权益</p>
       <label class="field"><span>流量额度（GB）</span><input name="quota" type="number" min="1" step="1" value="${Number(user.quota || 120)}" required><small class="field-error"></small></label>
       <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select><small class="field-hint">该用户只能获取所选区域的客户端配置</small></label>
-      <div class="switch-row"><div><strong>sing-box 配置</strong><small>用户中心自动提供多节点 sing-box JSON 配置</small></div><span class="status-badge good"><i></i>固定启用</span></div>
+      <div class="switch-row"><div><strong>多客户端订阅</strong><small>自动提供 Mihomo、Egern 与 sing-box 三种兼容配置</small></div><span class="status-badge good"><i></i>固定启用</span></div>
       <p class="drawer-section-label">账号状态</p>
       <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用自己的流量、节点与客户端权益</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
@@ -1523,8 +1530,7 @@ function portalHomeMarkup() {
   const clientEntries = entitlement.clientFormats.map((clientId) => {
     const client = clientCatalog[clientId];
     if (!client) return "";
-    const available = clientId === "sing-box";
-    return `<button type="button" ${available ? 'data-client-import="sing-box"' : "disabled"}><span><strong>${client.name}</strong><small>${client.platforms}</small></span><span>${available ? "下载配置" : "即将支持"}</span></button>`;
+    return `<button type="button" data-client-import="${escapeHtml(clientId)}"><span><strong>${client.name}</strong><small>${client.platforms}</small></span><span>${escapeHtml(client.action)}</span></button>`;
   }).join("");
   return `
     <div class="portal-home">
@@ -1614,9 +1620,15 @@ async function rotateAdminUserSubscription(button) {
   }
 }
 
-async function downloadPortalConfig() {
+async function downloadPortalConfig(format = "sing-box") {
+  const requestedFormat = format === "egern" ? "egern-profile" : format;
+  const filenames = {
+    mihomo: "raylink-mihomo.yaml",
+    "egern-profile": "raylink-egern-profile.yaml",
+    "sing-box": "raylink-sing-box.json"
+  };
   try {
-    const response = await fetch("/api/portal/config/sing-box");
+    const response = await fetch(`/api/portal/config/${requestedFormat}`);
     if (!response.ok) {
       const body = await response.json();
       throw new Error(body?.error?.message || "配置生成失败");
@@ -1625,12 +1637,12 @@ async function downloadPortalConfig() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "raylink-sing-box.json";
+    anchor.download = filenames[requestedFormat] || "raylink-config";
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-    showToast("配置已下载", "将 JSON 配置导入 sing-box 客户端即可使用。");
+    showToast("配置已下载", "将配置导入对应客户端即可使用。");
   } catch (error) {
     showToast("下载失败", error.message);
   }
@@ -1711,7 +1723,6 @@ async function saveUserForm(form) {
     email,
     quotaGb: Number(form.elements.quota.value),
     nodeScope: labelToScope(form.elements.nodeGroup.value),
-    clientFormats: ["sing-box"],
     expiresAt: form.elements.expires.value,
     usedGb: Number(form.elements.usedGb.value),
     state: form.querySelector("[data-user-enabled]").classList.contains("on") ? "active" : "disabled",
@@ -2372,7 +2383,7 @@ document.addEventListener("click", async (event) => {
 
   const clientImport = event.target.closest("[data-client-import]");
   if (clientImport) {
-    if (clientImport.dataset.clientImport === "sing-box") downloadPortalConfig();
+    downloadPortalConfig(clientImport.dataset.clientImport);
     return;
   }
 
