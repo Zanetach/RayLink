@@ -82,15 +82,11 @@ chown -R root:root "$candidate_root"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_directory="$backup_root/${timestamp}-v${current_version}-to-v${candidate_version}"
 install -d -m 0700 "$backup_directory"
-if [ -d "$data_root" ]; then
-  cp -a "$data_root" "$backup_directory/data"
-fi
-if [ -f "$service_unit" ]; then
-  cp -a "$service_unit" "$backup_directory/raylink.service"
-fi
 
 switch_started=false
 upgrade_succeeded=false
+data_backup_ready=false
+service_backup_ready=false
 rollback() {
   status=$?
   trap - EXIT
@@ -103,13 +99,13 @@ rollback() {
       fi
       mv "$previous_root" "$install_root"
     fi
-    if [ -d "$backup_directory/data" ]; then
+    if [ "$data_backup_ready" = true ]; then
       if [ -e "$data_root" ]; then
         mv "$data_root" "$backup_directory/failed-data" 2>/dev/null || true
       fi
       cp -a "$backup_directory/data" "$data_root"
     fi
-    if [ -f "$backup_directory/raylink.service" ]; then
+    if [ "$service_backup_ready" = true ]; then
       cp -a "$backup_directory/raylink.service" "$service_unit"
     fi
     systemctl daemon-reload >/dev/null 2>&1 || true
@@ -121,6 +117,14 @@ rollback() {
 trap rollback EXIT
 
 systemctl stop raylink
+if [ -d "$data_root" ]; then
+  cp -a "$data_root" "$backup_directory/data"
+  data_backup_ready=true
+fi
+if [ -f "$service_unit" ]; then
+  cp -a "$service_unit" "$backup_directory/raylink.service"
+  service_backup_ready=true
+fi
 mv "$install_root" "$previous_root"
 switch_started=true
 mv "$candidate_root" "$install_root"

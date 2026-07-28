@@ -745,6 +745,80 @@ test("the release package keeps every installer dependency executable", async ()
   }
 });
 
+test("the control-plane upgrader stops writers before backing up durable data", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-upgrade-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const installRoot = join(directory, "installed");
+  const dataRoot = join(directory, "data");
+  const backupRoot = join(directory, "backups");
+  const nodeRoot = join(directory, "node");
+  const fakeBin = join(directory, "bin");
+  const serviceUnit = join(directory, "raylink.service");
+  const orderLog = join(directory, "order.log");
+  await mkdir(installRoot, { recursive: true });
+  await mkdir(dataRoot, { recursive: true });
+  await mkdir(join(nodeRoot, "bin"), { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(
+    join(installRoot, "package.json"),
+    JSON.stringify({ name: "raylink-control-plane", version: "0.2.12" })
+  );
+  await writeFile(join(dataRoot, "raylink.db"), "durable-state");
+  await writeFile(serviceUnit, "[Service]\nExecStart=/opt/raylink/server/index.js\n");
+  const executables = {
+    id: "#!/usr/bin/env bash\n[ \"${1:-}\" = '-u' ] && printf '0\\n' || /usr/bin/id \"$@\"\n",
+    uname: "#!/usr/bin/env bash\n[ \"${1:-}\" = '-s' ] && printf 'Linux\\n' || /usr/bin/uname \"$@\"\n",
+    systemctl: [
+      "#!/usr/bin/env bash",
+      "printf 'systemctl %s\\n' \"$*\" >> \"${ORDER_LOG:?}\"",
+      "exit 0",
+      ""
+    ].join("\n"),
+    curl: "#!/usr/bin/env bash\nprintf '{\"state\":\"INITIALIZED\"}'\n",
+    chown: "#!/usr/bin/env bash\nexit 0\n",
+    cp: [
+      "#!/usr/bin/env bash",
+      "printf 'cp %s\\n' \"$*\" >> \"${ORDER_LOG:?}\"",
+      "exec /bin/cp \"$@\"",
+      ""
+    ].join("\n")
+  };
+  for (const [name, source] of Object.entries(executables)) {
+    await writeFile(join(fakeBin, name), source);
+    await chmod(join(fakeBin, name), 0o755);
+  }
+  await writeFile(
+    join(nodeRoot, "bin", "node"),
+    "#!/usr/bin/env bash\nexec \"${TEST_NODE_BIN:?}\" \"$@\"\n"
+  );
+  await chmod(join(nodeRoot, "bin", "node"), 0o755);
+
+  await execFile("bash", [
+    new URL("../deploy/upgrade-control-plane.sh", import.meta.url).pathname
+  ], {
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      ORDER_LOG: orderLog,
+      TEST_NODE_BIN: process.execPath,
+      RAYLINK_INSTALL_ROOT: installRoot,
+      RAYLINK_DATA_ROOT: dataRoot,
+      RAYLINK_BACKUP_ROOT: backupRoot,
+      RAYLINK_NODE_ROOT: nodeRoot,
+      RAYLINK_SERVICE_UNIT: serviceUnit,
+      RAYLINK_SOURCE_DIR: new URL("..", import.meta.url).pathname,
+      RAYLINK_PORT: "4173"
+    }
+  });
+
+  const operations = (await readFile(orderLog, "utf8")).trim().split("\n");
+  const stopIndex = operations.indexOf("systemctl stop raylink");
+  const dataBackupIndex = operations.findIndex((entry) => entry.startsWith(`cp -a ${dataRoot} `));
+  assert.notEqual(stopIndex, -1);
+  assert.notEqual(dataBackupIndex, -1);
+  assert.ok(stopIndex < dataBackupIndex, "RayLink must stop SQLite writers before copying its data directory");
+});
+
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
