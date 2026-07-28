@@ -2284,12 +2284,14 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /data-user-subscription-qr/);
   assert.match(appScript, /data-user-subscription-quick/);
   assert.match(appScript, /openUserSubscriptionQuick/);
-  assert.match(appScript, /subscriptionSession\.remember/);
-  assert.match(appScript, /subscriptionSession\.clear\(\)/);
+  assert.match(appScript, /subscriptionQuick\.reveal/);
+  assert.match(appScript, /subscriptionQuick\.clear/);
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
   assert.match(indexHtml, /src="\.\/qrcode\.min\.js/);
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
+  assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.8-quick-subscriptions/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
@@ -2297,6 +2299,14 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.equal(subscriptionSessionResponse.status, 200);
   assert.match(
     subscriptionSessionResponse.headers.get("content-type"),
+    /javascript/
+  );
+  const subscriptionQuickResponse = await fetch(
+    `${testApp.baseUrl}/subscription-quick.js`
+  );
+  assert.equal(subscriptionQuickResponse.status, 200);
+  assert.match(
+    subscriptionQuickResponse.headers.get("content-type"),
     /javascript/
   );
 

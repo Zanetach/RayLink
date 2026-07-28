@@ -1,5 +1,6 @@
 const users = [];
 const subscriptionSession = window.RayLinkSubscriptionSession;
+const subscriptionQuick = window.RayLinkSubscriptionQuick;
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
 const requiredNodeAgentVersion = "0.7.0";
@@ -993,7 +994,7 @@ function showAdminLogin() {
   elements.appShell.hidden = true;
   elements.mobileNav.hidden = true;
   elements.toast.classList.remove("visible");
-  subscriptionSession.clear();
+  subscriptionQuick.clear(subscriptionSession);
   history.replaceState({}, "", location.pathname);
   elements.authForm.elements.username.focus();
 }
@@ -1134,10 +1135,12 @@ function userDrawerMarkup(user = {}) {
 }
 
 function hydrateUserSubscriptionPanel(scope, userId) {
-  const generatedUrl = subscriptionSession.get(userId);
-  if (!generatedUrl) return;
-  const qr = scope.querySelector("[data-user-subscription-qr]");
-  window.RayLinkSubscriptionQr?.render(qr, generatedUrl);
+  subscriptionQuick.hydrate({
+    scope,
+    userId,
+    session: subscriptionSession,
+    qrRenderer: (container, value) => window.RayLinkSubscriptionQr?.render(container, value)
+  });
 }
 
 function openUser(email) {
@@ -1543,9 +1546,6 @@ async function rotateAdminUserSubscription(button) {
 
   const panel = button.closest("[data-user-subscription-panel]");
   const status = panel.querySelector("[data-user-subscription-status]");
-  const resultPanel = panel.querySelector("[data-user-subscription-result]");
-  const urlInput = panel.querySelector("#user-subscription-url");
-  const qr = panel.querySelector("[data-user-subscription-qr]");
   const previousText = button.textContent;
   button.disabled = true;
   button.textContent = isReset ? "正在重新生成…" : "正在生成…";
@@ -1554,13 +1554,13 @@ async function rotateAdminUserSubscription(button) {
       `/api/users/${encodeURIComponent(button.dataset.userId)}/subscription/rotate`,
       { method: "POST" }
     );
-    subscriptionSession.remember(button.dataset.userId, result.subscriptionUrl);
-    urlInput.value = result.subscriptionUrl;
-    resultPanel.hidden = false;
-    const qrReady = window.RayLinkSubscriptionQr?.render(
-      qr,
-      result.subscriptionUrl
-    ) === true;
+    const qrReady = subscriptionQuick.reveal({
+      panel,
+      userId: button.dataset.userId,
+      url: result.subscriptionUrl,
+      session: subscriptionSession,
+      qrRenderer: (container, value) => window.RayLinkSubscriptionQr?.render(container, value)
+    });
     status.textContent = qrReady
       ? "新地址已生成。可在本次浏览器会话中再次查看；刷新页面或退出登录后不再显示。"
       : "新地址已生成，二维码暂不可用，请复制链接；刷新页面或退出登录后不再显示。";
@@ -1569,7 +1569,7 @@ async function rotateAdminUserSubscription(button) {
     const user = users.find((item) => item.id === button.dataset.userId);
     if (user) user.subscription = { ...(user.subscription || {}), configured: true };
     renderUsers();
-    showToast("订阅地址已生成", "链接和二维码只在本次生成后完整显示。");
+    showToast("订阅地址已生成", "本次浏览器会话内可再次查看；刷新页面或退出登录后不再显示。");
   } catch (error) {
     status.textContent = error.message;
     button.textContent = previousText;
