@@ -173,7 +173,17 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.equal(config.route.final, "raylink-auto");
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.type === "selector").outbounds,
-    ["raylink-fastest", "raylink-shadowsocks", "raylink-vless"]
+    [
+      "raylink-smart",
+      "raylink-tcp",
+      "raylink-fastest",
+      "raylink-shadowsocks",
+      "raylink-vless"
+    ]
+  );
+  assert.equal(
+    config.outbounds.find((outbound) => outbound.type === "selector").default,
+    "raylink-smart"
   );
   assert.deepEqual(config.inbounds.map((inbound) => inbound.type), ["tun", "mixed"]);
   assert.equal(config.inbounds[0].auto_route, true);
@@ -263,12 +273,76 @@ test("multi-host client configuration exposes each host's enabled protocols thro
   );
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.tag === "raylink-auto").outbounds,
-    ["raylink-fastest", "raylink-local-shadowsocks", "raylink-fra-02-vless"]
+    [
+      "raylink-smart",
+      "raylink-tcp",
+      "raylink-fastest",
+      "raylink-local-shadowsocks",
+      "raylink-fra-02-vless"
+    ]
   );
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.tag === "raylink-fastest").outbounds,
     ["raylink-local-shadowsocks", "raylink-fra-02-vless"]
   );
+});
+
+test("client subscription separates TCP and UDP and excludes unhealthy UDP from smart selection", () => {
+  const profiles = defaultProtocolConfigs().map((profile) => ({
+    ...profile,
+    enabled: ["vless", "hysteria2", "tuic"].includes(profile.type),
+    tls: ["vless", "hysteria2", "tuic"].includes(profile.type)
+      ? { ...profile.tls, mode: "certificate", serverName: "node.example.com" }
+      : profile.tls
+  }));
+  const config = buildMultiHostProtocolClientConfig({
+    credential: {
+      email: eligibleUsers[0].email,
+      runtimeUuid: eligibleUsers[0].runtimeUuid,
+      runtimePassword: eligibleUsers[0].runtimePassword,
+      serverPassword: "c2VydmVyLWtleS0xNg=="
+    },
+    hosts: [{
+      id: "local",
+      name: "California",
+      address: "node.example.com",
+      protocols: profiles,
+      protocolActivations: [
+        {
+          type: "hysteria2",
+          publicCheck: { availability: "available", reachable: true }
+        },
+        {
+          type: "tuic",
+          publicCheck: {
+            availability: "unavailable",
+            reachable: false,
+            consecutiveFailures: 3
+          }
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-tcp").outbounds,
+    ["raylink-local-vless"]
+  );
+  assert.deepEqual(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-udp").outbounds,
+    ["raylink-local-tuic", "raylink-local-hysteria2"]
+  );
+  assert.deepEqual(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-smart").outbounds,
+    ["raylink-local-vless", "raylink-local-hysteria2"]
+  );
+  const selector = config.outbounds.find((outbound) => outbound.tag === "raylink-auto");
+  assert.equal(selector.default, "raylink-smart");
+  assert.deepEqual(selector.outbounds.slice(0, 3), [
+    "raylink-smart",
+    "raylink-tcp",
+    "raylink-udp"
+  ]);
 });
 
 test("Hysteria client inherits the managed bandwidth values required by sing-box", () => {

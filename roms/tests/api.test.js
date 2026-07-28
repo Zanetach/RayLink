@@ -2424,7 +2424,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.doesNotMatch(appScript, /protocolLabels\.slice\(0,\s*3\)/);
   assert.match(appScript, /class="host-protocol-tags"/);
   assert.match(appScript, /data-measure-host-latency/);
-  assert.match(appScript, /protocolLatencyPresentation/);
+  assert.match(appScript, /protocolConnectionPresentation/);
   assert.match(appScript, /protocol-latency-value/);
   const styleResponse = await fetch(`${testApp.baseUrl}/styles.css`);
   assert.equal(styleResponse.status, 200);
@@ -2435,7 +2435,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.12-subscription-tls/);
+  assert.match(indexHtml, /src="\.\/protocol-health\.js/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.12-connection-health/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
@@ -2453,6 +2454,12 @@ test("control plane serves the RayLink web application on the same origin", asyn
     subscriptionQuickResponse.headers.get("content-type"),
     /javascript/
   );
+  const protocolHealthResponse = await fetch(
+    `${testApp.baseUrl}/protocol-health.js`
+  );
+  assert.equal(protocolHealthResponse.status, 200);
+  assert.match(protocolHealthResponse.headers.get("content-type"), /javascript/);
+  assert.match(await protocolHealthResponse.text(), /RayLinkProtocolHealth/);
 
   const logoResponse = await fetch(
     `${testApp.baseUrl}/assets/brand/raylink-mark.svg`

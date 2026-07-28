@@ -112,9 +112,14 @@ function fixture(type, overrides = {}) {
   const protocolProbe = async (input) => {
     events.push(["protocol-probe", input.type, input.port]);
     if (overrides.protocolProbeError) throw new Error("协议握手失败");
+    const sequence = overrides.protocolSamples?.[input.type];
+    const sample = Array.isArray(sequence)
+      ? sequence.shift()
+      : undefined;
+    if (sample instanceof Error) throw sample;
     const latencyMs = input.network === "udp"
-      ? overrides.protocolLatencyMs
-      : overrides.publicLatencyMs;
+      ? sample ?? overrides.protocolLatencyMs
+      : sample ?? overrides.publicLatencyMs;
     return {
       reachable: true,
       probe: "sing-box-tools-fetch",
@@ -218,6 +223,123 @@ test("Host latency measurement records TCP and UDP protocol results without chan
   assert.equal(profiles.find((item) => item.type === "shadowsocks").enabled, true);
   assert.equal(activations.get("shadowsocks").publicCheck.latencyMs, 24);
   assert.equal(activations.get("hysteria2").publicCheck.latencyMs, 61);
+});
+
+test("Host connection measurement reports the median and jitter from five samples", async () => {
+  const { manager, activations } = fixture("shadowsocks", {
+    profiles: [
+      profile("shadowsocks", { enabled: true })
+    ],
+    protocolSamples: {
+      shadowsocks: [20, 40, 30, 50, 25]
+    }
+  });
+
+  const measured = await manager.measureHost({ hostId: "local" });
+
+  assert.deepEqual(measured.results, [{
+    type: "shadowsocks",
+    status: "available",
+    latencyMs: 30,
+    jitterMs: 19,
+    sampleCount: 5,
+    successfulSamples: 5
+  }]);
+  assert.deepEqual(
+    activations.get("shadowsocks").publicCheck.samples,
+    {
+      count: 5,
+      successful: 5,
+      failed: 0,
+      minMs: 20,
+      maxMs: 50
+    }
+  );
+  assert.equal(activations.get("shadowsocks").publicCheck.latencyMs, 30);
+  assert.equal(activations.get("shadowsocks").publicCheck.jitterMs, 19);
+  assert.equal(activations.get("shadowsocks").publicCheck.consecutiveFailures, 0);
+});
+
+test("Host connection measurement requires three consecutive failed rounds before timeout", async () => {
+  const failedSamples = Array.from(
+    { length: 15 },
+    () => new Error("connection timed out")
+  );
+  const previousCheck = {
+    reachable: true,
+    latencyMs: 88,
+    jitterMs: 7,
+    checkedAt: "2026-07-28T10:00:00.000Z",
+    lastSuccessAt: "2026-07-28T10:00:00.000Z",
+    consecutiveFailures: 0
+  };
+  const { manager, activations } = fixture("shadowsocks", {
+    profiles: [
+      profile("shadowsocks", { enabled: true })
+    ],
+    protocolActivations: [{
+      type: "shadowsocks",
+      state: "public-ready",
+      publicCheck: previousCheck
+    }],
+    protocolSamples: {
+      shadowsocks: failedSamples
+    }
+  });
+
+  const first = await manager.measureHost({ hostId: "local" });
+  assert.equal(first.results[0].status, "degraded");
+  assert.equal(activations.get("shadowsocks").publicCheck.reachable, true);
+  assert.equal(activations.get("shadowsocks").publicCheck.consecutiveFailures, 1);
+  assert.equal(activations.get("shadowsocks").publicCheck.latencyMs, 88);
+
+  const second = await manager.measureHost({ hostId: "local" });
+  assert.equal(second.results[0].status, "degraded");
+  assert.equal(activations.get("shadowsocks").publicCheck.reachable, true);
+  assert.equal(activations.get("shadowsocks").publicCheck.consecutiveFailures, 2);
+
+  const third = await manager.measureHost({ hostId: "local" });
+  assert.equal(third.results[0].status, "timeout");
+  assert.equal(activations.get("shadowsocks").publicCheck.reachable, false);
+  assert.equal(activations.get("shadowsocks").publicCheck.consecutiveFailures, 3);
+  assert.equal(
+    activations.get("shadowsocks").publicCheck.lastSuccessAt,
+    "2026-07-28T10:00:00.000Z"
+  );
+});
+
+test("Host connection measurement requires at least three successful samples", async () => {
+  const { manager, activations } = fixture("shadowsocks", {
+    profiles: [
+      profile("shadowsocks", { enabled: true })
+    ],
+    protocolActivations: [{
+      type: "shadowsocks",
+      state: "public-ready",
+      publicCheck: {
+        reachable: true,
+        latencyMs: 90,
+        jitterMs: 8,
+        checkedAt: "2026-07-28T10:00:00.000Z",
+        consecutiveFailures: 0
+      }
+    }],
+    protocolSamples: {
+      shadowsocks: [
+        20,
+        new Error("connection timed out"),
+        30,
+        new Error("connection timed out"),
+        new Error("connection timed out")
+      ]
+    }
+  });
+
+  const measured = await manager.measureHost({ hostId: "local" });
+
+  assert.equal(measured.results[0].status, "degraded");
+  assert.equal(activations.get("shadowsocks").publicCheck.consecutiveFailures, 1);
+  assert.equal(activations.get("shadowsocks").publicCheck.latencyMs, 90);
 });
 
 test("Host latency measurement marks enabled local-only protocols as not applicable", async () => {

@@ -1499,7 +1499,11 @@ export class RayLinkStore {
       ORDER BY hosts.created_at
     `).all().map((row) => {
       const host = hostFromRow(row);
-      return { ...host, protocols: this.listHostProtocolConfigs(host.id) };
+      return {
+        ...host,
+        protocols: this.listHostProtocolConfigs(host.id),
+        protocolActivations: this.listProtocolActivations(host.id)
+      };
     });
   }
 

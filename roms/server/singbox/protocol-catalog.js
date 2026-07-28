@@ -352,11 +352,21 @@ export function buildProtocolClientConfig({ profiles, credential, server, ruleSe
   return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl });
 }
 
+const udpClientProtocolTypes = new Set(["hysteria", "hysteria2", "tuic"]);
+
+function protocolIsAvailableForSmartSelection(activation) {
+  const check = activation?.publicCheck;
+  if (!check) return true;
+  if (check.availability === "unavailable") return false;
+  return check.reachable !== false;
+}
+
 export function buildMultiHostProtocolClientConfig({
   credential,
   hosts,
   ruleSetBaseUrl = null
 }) {
+  const smartExcludedTags = new Set();
   const protocolOutbounds = hosts.flatMap((host) => {
     const managed = (host.protocols || [])
       .filter((profile) => {
@@ -367,19 +377,60 @@ export function buildMultiHostProtocolClientConfig({
       .toLowerCase()
       .replace(/[^a-z0-9-]+/g, "-")
       .replace(/^-+|-+$/g, "") || "node";
-    return managed.map((profile) => buildClientOutbound(
-      profile,
-      credential,
-      host.address,
-      `raylink-${hostTag}-${profile.type}`
-    ));
+    const activations = new Map(
+      (host.protocolActivations || []).map((activation) => [activation.type, activation])
+    );
+    return managed.map((profile) => {
+      const tag = `raylink-${hostTag}-${profile.type}`;
+      if (
+        udpClientProtocolTypes.has(profile.type)
+        && !protocolIsAvailableForSmartSelection(activations.get(profile.type))
+      ) {
+        smartExcludedTags.add(tag);
+      }
+      return buildClientOutbound(profile, credential, host.address, tag);
+    });
   });
-  return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl });
+  return clientConfigForOutbounds(protocolOutbounds, {
+    ruleSetBaseUrl,
+    smartExcludedTags
+  });
 }
 
-function clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl = null } = {}) {
+function urlTestOutbound(tag, outbounds, tolerance = 50) {
+  return {
+    type: "urltest",
+    tag,
+    outbounds,
+    url: "https://www.gstatic.com/generate_204",
+    interval: "3m",
+    tolerance,
+    interrupt_exist_connections: true
+  };
+}
+
+function clientConfigForOutbounds(
+  protocolOutbounds,
+  { ruleSetBaseUrl = null, smartExcludedTags = new Set() } = {}
+) {
   if (!protocolOutbounds.length) throw protocolError("NO_CLIENT_PROTOCOL", "当前没有可下发的用户协议", 409);
   const tags = protocolOutbounds.map((outbound) => outbound.tag);
+  const tcpTags = protocolOutbounds
+    .filter((outbound) => !udpClientProtocolTypes.has(outbound.type))
+    .map((outbound) => outbound.tag);
+  const udpTags = protocolOutbounds
+    .filter((outbound) => udpClientProtocolTypes.has(outbound.type))
+    .map((outbound) => outbound.tag);
+  const healthyUdpTags = udpTags.filter((tag) => !smartExcludedTags.has(tag));
+  const smartTags = [...tcpTags, ...healthyUdpTags];
+  const usableSmartTags = smartTags.length ? smartTags : tags;
+  const automaticGroups = [
+    urlTestOutbound("raylink-smart", usableSmartTags, 80),
+    ...(tcpTags.length ? [urlTestOutbound("raylink-tcp", tcpTags)] : []),
+    ...(udpTags.length ? [urlTestOutbound("raylink-udp", udpTags)] : []),
+    urlTestOutbound("raylink-fastest", tags)
+  ];
+  const selectorGroups = automaticGroups.map((outbound) => outbound.tag);
   const ruleSets = ruleSetBaseUrl
     ? [
         {
@@ -485,19 +536,12 @@ function clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl = null } =
     ],
     outbounds: [
       ...protocolOutbounds,
-      {
-        type: "urltest",
-        tag: "raylink-fastest",
-        outbounds: tags,
-        url: "https://www.gstatic.com/generate_204",
-        interval: "3m",
-        tolerance: 50
-      },
+      ...automaticGroups,
       {
         type: "selector",
         tag: "raylink-auto",
-        outbounds: ["raylink-fastest", ...tags],
-        default: "raylink-fastest",
+        outbounds: [...selectorGroups, ...tags],
+        default: "raylink-smart",
         interrupt_exist_connections: true
       },
       { type: "direct", tag: "direct" }

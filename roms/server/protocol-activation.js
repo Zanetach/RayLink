@@ -39,6 +39,22 @@ function activationError(code, message, statusCode = 422) {
   return error;
 }
 
+const PROTOCOL_CONNECTION_SAMPLE_COUNT = 5;
+
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+}
+
+function connectionJitter(values) {
+  if (values.length < 2) return 0;
+  const deltas = values.slice(1).map((value, index) => Math.abs(value - values[index]));
+  return Math.round(deltas.reduce((total, value) => total + value, 0) / deltas.length);
+}
+
 export function protocolActivationPolicy(type) {
   const policy = policies.get(type);
   if (!policy) throw activationError("PROTOCOL_NOT_FOUND", "sing-box 入站协议不存在", 404);
@@ -378,7 +394,7 @@ export class ProtocolActivationManager {
     if (this.measuring.has(hostId)) {
       throw activationError(
         "PROTOCOL_LATENCY_IN_PROGRESS",
-        "该主机正在测试协议延迟",
+        "该主机正在测试协议连接",
         409
       );
     }
@@ -430,48 +446,110 @@ export class ProtocolActivationManager {
           });
           continue;
         }
+        const existing = existingActivations.get(profile.type);
         let publicCheck;
         try {
-          publicCheck = await this.probePublicProtocol({
-            type: profile.type,
-            address: host.address,
-            port: profile.port,
-            network: policy.network,
-            serverConfig,
-            attempts: 1,
-            timeoutMs: 10_000
-          });
-          const latencyMs = Number.isFinite(Number(publicCheck.latencyMs))
-            ? Math.max(0, Math.round(Number(publicCheck.latencyMs)))
-            : null;
+          const latencies = [];
+          let lastProbe = null;
+          let lastError = null;
+          for (let sample = 0; sample < PROTOCOL_CONNECTION_SAMPLE_COUNT; sample += 1) {
+            try {
+              const probe = await this.probePublicProtocol({
+                type: profile.type,
+                address: host.address,
+                port: profile.port,
+                network: policy.network,
+                serverConfig,
+                attempts: 1,
+                timeoutMs: 10_000
+              });
+              lastProbe = probe;
+              if (probe.reachable === true && Number.isFinite(Number(probe.latencyMs))) {
+                latencies.push(Math.max(0, Math.round(Number(probe.latencyMs))));
+              } else {
+                lastError = new Error("协议连接测试未返回有效耗时");
+              }
+            } catch (error) {
+              lastError = error;
+            }
+          }
+          if (latencies.length < 3) {
+            throw lastError || new Error("有效连接样本不足 3 次");
+          }
+          const latencyMs = median(latencies);
+          const jitterMs = connectionJitter(latencies);
+          const sampleSummary = {
+            count: PROTOCOL_CONNECTION_SAMPLE_COUNT,
+            successful: latencies.length,
+            failed: PROTOCOL_CONNECTION_SAMPLE_COUNT - latencies.length,
+            minMs: Math.min(...latencies),
+            maxMs: Math.max(...latencies)
+          };
           publicCheck = {
-            ...publicCheck,
-            reachable: publicCheck.reachable === true,
+            ...lastProbe,
+            reachable: true,
             latencyMs,
+            jitterMs,
+            samples: sampleSummary,
+            consecutiveFailures: 0,
+            availability: "available",
+            lastSuccessAt: checkedAt,
             checkedAt
           };
           results.push({
             type: profile.type,
-            status: publicCheck.reachable ? "available" : "unreachable",
-            latencyMs
+            status: "available",
+            latencyMs,
+            jitterMs,
+            sampleCount: sampleSummary.count,
+            successfulSamples: sampleSummary.successful
           });
         } catch (error) {
           const timedOut = /tim(?:e|ed)[ -]?out|超时/i.test(
             `${error.code || ""} ${error.message || ""}`
           );
+          const previousCheck = existing?.publicCheck || {};
+          const consecutiveFailures = Math.max(
+            0,
+            Number(previousCheck.consecutiveFailures || 0)
+          ) + 1;
+          const confirmedFailure = consecutiveFailures >= 3;
           publicCheck = {
-            reachable: false,
-            latencyMs: null,
+            ...previousCheck,
+            reachable: confirmedFailure
+              ? false
+              : previousCheck.reachable === true
+                ? true
+                : null,
+            availability: confirmedFailure ? "unavailable" : "degraded",
+            consecutiveFailures,
+            lastSuccessAt: previousCheck.lastSuccessAt
+              || (previousCheck.reachable === true ? previousCheck.checkedAt : null),
+            samples: {
+              count: PROTOCOL_CONNECTION_SAMPLE_COUNT,
+              successful: 0,
+              failed: PROTOCOL_CONNECTION_SAMPLE_COUNT,
+              minMs: null,
+              maxMs: null
+            },
             checkedAt,
             error: String(error.message || "协议探测失败").slice(0, 300)
           };
           results.push({
             type: profile.type,
-            status: timedOut ? "timeout" : "unreachable",
-            latencyMs: null
+            status: confirmedFailure
+              ? timedOut ? "timeout" : "unreachable"
+              : "degraded",
+            latencyMs: Number.isFinite(Number(previousCheck.latencyMs))
+              ? Number(previousCheck.latencyMs)
+              : null,
+            jitterMs: Number.isFinite(Number(previousCheck.jitterMs))
+              ? Number(previousCheck.jitterMs)
+              : null,
+            sampleCount: PROTOCOL_CONNECTION_SAMPLE_COUNT,
+            successfulSamples: 0
           });
         }
-        const existing = existingActivations.get(profile.type);
         this.store.setProtocolActivation(hostId, profile.type, {
           ...(existing || {}),
           state: existing?.state || "port-listening",
