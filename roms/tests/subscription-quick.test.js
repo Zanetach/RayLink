@@ -66,12 +66,3 @@ test("quick subscription controller reveals and rehydrates a generated QR link",
   assert.equal(reopened.input.value, url);
   assert.equal(reopened.qr.rendered, url);
 });
-
-test("quick subscription controller clears bearer URLs on logout", () => {
-  const { quick, session } = loadHelpers();
-  session.remember("user-1", "https://sub.example.com/private-token");
-
-  quick.clear(session);
-
-  assert.equal(session.get("user-1"), "");
-});

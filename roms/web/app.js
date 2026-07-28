@@ -994,7 +994,7 @@ function showAdminLogin() {
   elements.appShell.hidden = true;
   elements.mobileNav.hidden = true;
   elements.toast.classList.remove("visible");
-  subscriptionQuick.clear(subscriptionSession);
+  subscriptionSession.clear();
   history.replaceState({}, "", location.pathname);
   elements.authForm.elements.username.focus();
 }

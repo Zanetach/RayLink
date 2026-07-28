@@ -2285,7 +2285,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /data-user-subscription-quick/);
   assert.match(appScript, /openUserSubscriptionQuick/);
   assert.match(appScript, /subscriptionQuick\.reveal/);
-  assert.match(appScript, /subscriptionQuick\.clear/);
+  assert.match(appScript, /subscriptionSession\.clear\(\)/);
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
   assert.match(indexHtml, /src="\.\/qrcode\.min\.js/);
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
