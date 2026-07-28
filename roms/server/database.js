@@ -103,6 +103,13 @@ function validateUserEntitlement({ quotaGb, nodeScope }) {
   }
 }
 
+function validateUserPassword(password) {
+  if (typeof password !== "string" || password.length < 8) {
+    throw domainError("INVALID_PASSWORD", "用户中心密码至少需要 8 位");
+  }
+  return password;
+}
+
 function userFromRow(row) {
   return {
     id: row.id,
@@ -2095,9 +2102,7 @@ export class RayLinkStore {
     if (!Number.isFinite(usedGb) || usedGb < 0) {
       throw domainError("INVALID_USAGE", "已用流量必须是大于或等于 0 的数值");
     }
-    if (input.password !== undefined && String(input.password).length < 8) {
-      throw domainError("INVALID_PASSWORD", "用户中心密码至少需要 8 位");
-    }
+    if (input.password !== undefined) validateUserPassword(input.password);
 
     const id = randomUUID();
     const initials = name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "新";
@@ -2182,9 +2187,7 @@ export class RayLinkStore {
     if (!Number.isFinite(next.usedGb) || next.usedGb < 0) {
       throw domainError("INVALID_USAGE", "已用流量必须是大于或等于 0 的数值");
     }
-    if (input.password !== undefined && String(input.password).length < 8) {
-      throw domainError("INVALID_PASSWORD", "用户中心密码至少需要 8 位");
-    }
+    if (input.password !== undefined) validateUserPassword(input.password);
     const initials = next.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || current.initials;
     try {
       this.db.prepare(`
@@ -2208,8 +2211,7 @@ export class RayLinkStore {
         id
       );
       if (input.password !== undefined) {
-        this.db.prepare("UPDATE users SET password_hash = ? WHERE id = ?")
-          .run(hashPassword(String(input.password)), id);
+        this.resetUserPassword(id, input.password);
       }
     } catch (error) {
       if (String(error.message).includes("UNIQUE")) {
@@ -2218,6 +2220,32 @@ export class RayLinkStore {
       throw error;
     }
     return this.getUser(id);
+  }
+
+  resetUserPassword(id, password) {
+    if (!this.getUser(id)) {
+      throw domainError("USER_NOT_FOUND", "用户不存在", 404);
+    }
+    const nextPassword = validateUserPassword(password);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`
+        UPDATE users
+        SET password_hash = ?, updated_at = ?
+        WHERE id = ?
+      `).run(hashPassword(nextPassword), nowIso(), id);
+      const sessions = this.db.prepare(
+        "DELETE FROM user_sessions WHERE user_id = ?"
+      ).run(id);
+      this.db.exec("COMMIT");
+      return {
+        passwordReset: true,
+        sessionsRevoked: Number(sessions.changes)
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   runtimeSnapshot(hostId = "local") {

@@ -1121,6 +1121,32 @@ function userSubscriptionAccessMarkup(user) {
     </section>`;
 }
 
+function userPasswordResetMarkup(user) {
+  return `
+    <section class="user-access-card" data-user-password-reset>
+      <div>
+        <strong>重置用户中心密码</strong>
+        <small>重置后所有已登录设备需要重新登录；用户权益、协议凭据和订阅地址保持不变。</small>
+      </div>
+      <label class="field">
+        <span>新密码</span>
+        <input name="resetPassword" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位">
+        <small class="field-error"></small>
+      </label>
+      <label class="field">
+        <span>确认新密码</span>
+        <input name="confirmResetPassword" type="password" minlength="8" autocomplete="new-password" placeholder="再次输入新密码">
+        <small class="field-error"></small>
+      </label>
+      <button
+        type="button"
+        class="button secondary"
+        data-reset-user-password
+        data-user-id="${escapeHtml(user.id)}"
+      >重置密码</button>
+    </section>`;
+}
+
 function userDrawerMarkup(user = {}) {
   const isNew = !user.id;
   const selectedNodeGroup = user.nodeScope?.length ? scopeToLabel(user.nodeScope) : "全部节点";
@@ -1144,7 +1170,6 @@ function userDrawerMarkup(user = {}) {
       <label class="field"><span>显示名称</span><input name="name" value="${escapeHtml(user.name || "")}" placeholder="例如：徐清扬" required><small class="field-error"></small></label>
       <label class="field"><span>邮箱</span><input name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="name@company.com" required><small class="field-error"></small></label>
       ${isNew ? '<label class="field"><span>初始密码</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="至少 8 位" required><small class="field-error"></small></label>' : ""}
-      ${isNew ? "" : '<label class="field"><span>重置密码（可选）</span><input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="留空则保持不变"><small class="field-error"></small></label>'}
       <label class="field"><span>到期时间</span><input name="expires" type="date" value="${escapeHtml(user.expires || "2026-12-31")}" required><small class="field-error"></small></label>
       <label class="field"><span>已用流量</span><input name="usedGb" type="number" min="0" step="0.1" value="${Number(user.used || 0).toFixed(1)}" required><small class="field-error"></small><small class="field-hint">由支持 with_v2ray_api 的 Runtime 自动计量；管理员可在账务校正时调整</small></label>
       <p class="drawer-section-label">用户权益</p>
@@ -1156,6 +1181,8 @@ function userDrawerMarkup(user = {}) {
       <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用自己的流量、节点与订阅服务</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
       ${isNew ? "" : `
+        <p class="drawer-section-label">登录安全</p>
+        ${userPasswordResetMarkup(user)}
         <p class="drawer-section-label">用户中心与订阅访问</p>
         ${userSubscriptionAccessMarkup(user)}`}
     </form>`;
@@ -1740,13 +1767,69 @@ async function saveUserForm(form) {
     state: form.querySelector("[data-user-enabled]").classList.contains("on") ? "active" : "disabled",
     portalStatus: form.querySelector("[data-portal-enabled]").classList.contains("on") ? "active" : "invited"
   };
-  if (form.elements.password.value) payload.password = form.elements.password.value;
+  if (form.elements.password?.value) payload.password = form.elements.password.value;
   const result = await api(userId ? `/api/users/${encodeURIComponent(userId)}` : "/api/users", {
     method: userId ? "PATCH" : "POST",
     body: JSON.stringify(payload)
   });
   await loadBootstrap();
   return result;
+}
+
+function showPasswordResetFieldError(input, message) {
+  const field = input.closest(".field");
+  const error = field?.querySelector(".field-error");
+  if (error) {
+    error.textContent = message;
+    error.classList.add("visible");
+  }
+  input.focus();
+}
+
+async function resetUserPassword(button) {
+  const form = button.closest("#user-drawer-form");
+  const passwordInput = form?.elements.resetPassword;
+  const confirmationInput = form?.elements.confirmResetPassword;
+  if (!form || !passwordInput || !confirmationInput) return;
+  form.querySelectorAll("[data-user-password-reset] .field-error").forEach((error) => {
+    error.textContent = "";
+    error.classList.remove("visible");
+  });
+  if (passwordInput.value.length < 8) {
+    showPasswordResetFieldError(passwordInput, "用户中心密码至少需要 8 位");
+    return;
+  }
+  if (passwordInput.value !== confirmationInput.value) {
+    showPasswordResetFieldError(confirmationInput, "两次输入的密码不一致");
+    return;
+  }
+
+  const previousLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "正在重置…";
+  try {
+    const result = await api(
+      `/api/users/${encodeURIComponent(button.dataset.userId)}/password/reset`,
+      {
+        method: "POST",
+        body: JSON.stringify({ password: passwordInput.value })
+      }
+    );
+    passwordInput.value = "";
+    confirmationInput.value = "";
+    showToast(
+      "密码重置成功",
+      result.sessionsRevoked
+        ? `已注销 ${result.sessionsRevoked} 个用户中心会话，新密码立即生效。`
+        : "新密码已生效，用户可立即登录。"
+    );
+  } catch (error) {
+    showPasswordResetFieldError(passwordInput, error.message);
+    showToast("密码重置失败", error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = previousLabel;
+  }
 }
 
 async function saveHostForm(form) {
@@ -2390,6 +2473,12 @@ document.addEventListener("click", async (event) => {
   const userSubscriptionButton = event.target.closest("[data-user-subscription-action]");
   if (userSubscriptionButton) {
     await rotateAdminUserSubscription(userSubscriptionButton);
+    return;
+  }
+
+  const resetUserPasswordButton = event.target.closest("[data-reset-user-password]");
+  if (resetUserPasswordButton) {
+    await resetUserPassword(resetUserPasswordButton);
     return;
   }
 

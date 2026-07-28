@@ -1676,6 +1676,88 @@ test("admin can activate a new portal user with a separate login password", asyn
   assert.equal((await portalResponse.json()).user.email, "zhao.ming@example.cn");
 });
 
+test("admin resets an existing user password without changing the entitlement or subscription", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const adminCookie = await login(testApp.baseUrl);
+  const beforeBootstrap = await (await api(
+    testApp.baseUrl,
+    adminCookie,
+    "/api/bootstrap"
+  )).json();
+  const before = beforeBootstrap.users.find(
+    (candidate) => candidate.email === "priya@vantage-bioworks.in"
+  );
+
+  const existingLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: before.email,
+      password: "raylink-demo"
+    })
+  });
+  assert.equal(existingLogin.status, 200);
+  const existingCookie = existingLogin.headers.getSetCookie()[0].split(";")[0];
+
+  const resetResponse = await api(
+    testApp.baseUrl,
+    adminCookie,
+    `/api/users/${encodeURIComponent(before.id)}/password/reset`,
+    {
+      method: "POST",
+      body: JSON.stringify({ password: "NewPortal@2026" })
+    }
+  );
+  assert.equal(resetResponse.status, 200);
+  assert.deepEqual(await resetResponse.json(), {
+    passwordReset: true,
+    sessionsRevoked: 1
+  });
+
+  const staleSession = await fetch(`${testApp.baseUrl}/api/portal/me`, {
+    headers: { cookie: existingCookie }
+  });
+  assert.equal(staleSession.status, 401);
+
+  const oldPassword = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: before.email, password: "raylink-demo" })
+  });
+  assert.equal(oldPassword.status, 401);
+
+  const newPassword = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: before.email, password: "NewPortal@2026" })
+  });
+  assert.equal(newPassword.status, 200);
+
+  const afterBootstrap = await (await api(
+    testApp.baseUrl,
+    adminCookie,
+    "/api/bootstrap"
+  )).json();
+  const after = afterBootstrap.users.find((candidate) => candidate.id === before.id);
+  assert.deepEqual(
+    {
+      usedGb: after.usedGb,
+      quotaGb: after.quotaGb,
+      nodeScope: after.nodeScope,
+      expiresAt: after.expiresAt,
+      subscription: after.subscription
+    },
+    {
+      usedGb: before.usedGb,
+      quotaGb: before.quotaGb,
+      nodeScope: before.nodeScope,
+      expiresAt: before.expiresAt,
+      subscription: before.subscription
+    }
+  );
+});
+
 test("admin updates the single runtime host used by portal client configs", async (t) => {
   const testApp = await startTestApp({ proxyHost: "old-node.example.com", listenPort: 8388 });
   t.after(() => testApp.close());
@@ -2561,6 +2643,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /\/api\/users\/\$\{encodeURIComponent\(userId\)\}\/subscription/);
   assert.match(appScript, /subscriptionSession\.clear\(\)/);
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
+  assert.match(appScript, /data-reset-user-password/);
+  assert.match(appScript, /重置用户中心密码/);
+  assert.match(appScript, /重置后所有已登录设备需要重新登录/);
   assert.match(appScript, /data-subscription-format="mihomo"/);
   assert.match(appScript, /data-subscription-format="egern-profile"/);
   assert.match(appScript, /data-subscription-format="egern"/);
@@ -2585,7 +2670,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
   assert.match(indexHtml, /src="\.\/protocol-health\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.13-smart-routing/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.13-user-password-reset/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`

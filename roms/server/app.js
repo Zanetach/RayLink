@@ -1728,6 +1728,22 @@ export async function createRayLinkApp(options) {
           return;
         }
 
+        const resetUserPasswordMatch = url.pathname.match(
+          /^\/api\/users\/([^/]+)\/password\/reset$/
+        );
+        if (request.method === "POST" && resetUserPasswordMatch) {
+          const body = await readJson(request);
+          sendJson(
+            response,
+            200,
+            store.resetUserPassword(
+              decodeURIComponent(resetUserPasswordMatch[1]),
+              body.password
+            )
+          );
+          return;
+        }
+
         if (request.method === "POST" && url.pathname === "/api/hosts") {
           sendJson(response, 201, store.createRemoteHost(await readJson(request)));
           return;
