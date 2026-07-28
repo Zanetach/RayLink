@@ -79,6 +79,15 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   assert.match(artifact.body, /DOMAIN-SUFFIX,chatgpt\.com,AI 网站代理/);
   assert.match(artifact.body, /GEOIP,CN,DIRECT/);
   assert.match(artifact.body, /MATCH,RayLink 代理/);
+  assert.match(artifact.body, /nameserver-policy:/);
+  assert.match(
+    artifact.body,
+    /"geosite:cn":[\s\S]*?- "https:\/\/223\.5\.5\.5\/dns-query"/
+  );
+  assert.match(
+    artifact.body,
+    /nameserver:[\s\S]*?- "https:\/\/1\.1\.1\.1\/dns-query#RayLink 代理"/
+  );
 });
 
 test("Egern node subscription uses its native proxy schema and excludes unsupported protocols", () => {
@@ -125,13 +134,29 @@ test("Egern profile adds smart TCP UDP manual policies, routing and encrypted DN
   assert.match(artifact.body, /"\\(\\?i\\)VLESS\\|TROJAN\\|ANYTLS\\|VMESS": 0\.85/);
   assert.match(artifact.body, /name: "TCP 稳定"/);
   assert.match(artifact.body, /name: "UDP 高速"/);
+  assert.match(
+    artifact.body,
+    /- fallback:[\s\S]*?name: "故障回退"[\s\S]*?policies:[\s\S]*?- "UDP 高速"[\s\S]*?- "TCP 稳定"/
+  );
+  assert.match(artifact.body, /- conditional:/);
+  assert.match(artifact.body, /name: "网络环境"/);
+  assert.match(
+    artifact.body,
+    /cellular:[\s\S]*?match: "\*"[\s\S]*?policy: "TCP 稳定"/
+  );
+  assert.match(
+    artifact.body,
+    /ssid:[\s\S]*?match: "\*"[\s\S]*?policy: "故障回退"/
+  );
+  assert.match(artifact.body, /default_policy: "RayLink 智能"/);
   assert.match(artifact.body, /- select:/);
   assert.match(artifact.body, /name: "手动选择"/);
   assert.match(artifact.body, /^rules:/m);
   assert.match(artifact.body, /match: "openai.com"/);
-  assert.match(artifact.body, /policy: "RayLink 智能"/);
+  assert.match(artifact.body, /policy: "网络环境"/);
   assert.match(artifact.body, /match: "cn"/);
   assert.match(artifact.body, /policy: "DIRECT"/);
+  assert.match(artifact.body, /default:[\s\S]*?policy: "网络环境"/);
   assert.match(artifact.body, /^dns:/m);
   assert.ok(artifact.body.includes("https://1.1.1.1/dns-query"));
 });

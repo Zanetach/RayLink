@@ -265,10 +265,14 @@ function buildMihomoConfig(singBoxConfig) {
       ipv6: false,
       "enhanced-mode": "fake-ip",
       "fake-ip-range": "198.18.0.1/16",
+      "respect-rules": true,
+      "default-nameserver": ["223.5.5.5"],
       nameserver: [
-        "https://223.5.5.5/dns-query",
-        "https://1.1.1.1/dns-query"
+        "https://1.1.1.1/dns-query#RayLink 代理"
       ],
+      "nameserver-policy": {
+        "geosite:cn": ["https://223.5.5.5/dns-query"]
+      },
       "proxy-server-nameserver": [
         "https://223.5.5.5/dns-query"
       ]
@@ -490,27 +494,46 @@ function buildEgernProfile(singBoxConfig) {
       {
         fallback: {
           name: "故障回退",
-          policies: [...new Set([...(tcp.length ? tcp : smartNames), ...udp])],
+          policies: udp.length
+            ? ["UDP 高速", "TCP 稳定"]
+            : ["TCP 稳定", "RayLink 智能"],
           interval: 300,
           timeout: 5
         }
       },
       {
+        conditional: {
+          name: "网络环境",
+          rules: [
+            { cellular: { match: "*", policy: "TCP 稳定" } },
+            { ssid: { match: "*", policy: "故障回退" } }
+          ],
+          default_policy: "RayLink 智能"
+        }
+      },
+      {
         select: {
           name: "手动选择",
-          policies: ["RayLink 智能", "TCP 稳定", ...(udp.length ? ["UDP 高速"] : []), ...names]
+          policies: [
+            "网络环境",
+            "RayLink 智能",
+            "TCP 稳定",
+            ...(udp.length ? ["UDP 高速"] : []),
+            "故障回退",
+            ...names
+          ]
         }
       }
     ],
     rules: [
-      { domain_suffix: { match: "openai.com", policy: "RayLink 智能" } },
-      { domain_suffix: { match: "anthropic.com", policy: "RayLink 智能" } },
-      { domain_suffix: { match: "claude.ai", policy: "RayLink 智能" } },
-      { domain_suffix: { match: "google.com", policy: "RayLink 智能" } },
-      { domain_suffix: { match: "youtube.com", policy: "RayLink 智能" } },
+      { domain_suffix: { match: "openai.com", policy: "网络环境" } },
+      { domain_suffix: { match: "anthropic.com", policy: "网络环境" } },
+      { domain_suffix: { match: "claude.ai", policy: "网络环境" } },
+      { domain_suffix: { match: "google.com", policy: "网络环境" } },
+      { domain_suffix: { match: "youtube.com", policy: "网络环境" } },
       { domain_suffix: { match: "cn", policy: "DIRECT" } },
       { geoip: { match: "CN", policy: "DIRECT", no_resolve: true } },
-      { default: { policy: "RayLink 智能" } }
+      { default: { policy: "网络环境" } }
     ]
   };
 }

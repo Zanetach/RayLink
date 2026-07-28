@@ -8,10 +8,19 @@ const requiredNodeAgentVersion = "0.7.0";
 
 const clientCatalog = {
   mihomo: { name: "Clash / Mihomo", platforms: "Windows / macOS / Android", action: "导入订阅" },
-  egern: { name: "Egern", platforms: "iPhone / iPad", action: "一键导入" },
+  "egern-profile": {
+    name: "Egern 完整配置",
+    platforms: "iPhone / iPad · 含智能策略、分流与 DNS",
+    action: "下载完整配置"
+  },
+  egern: {
+    name: "Egern 节点订阅",
+    platforms: "iPhone / iPad · 仅添加节点，保留现有规则",
+    action: "下载节点订阅"
+  },
   "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "下载配置" }
 };
-const universalClientFormats = Object.freeze(["mihomo", "egern", "sing-box"]);
+const universalClientFormats = Object.freeze(["mihomo", "egern-profile", "egern", "sing-box"]);
 
 const accountSummary = { totalUsers: 0 };
 
@@ -1095,7 +1104,8 @@ function userSubscriptionAccessMarkup(user) {
           </div>
           <div class="subscription-client-actions">
             <a class="button secondary" href="#" data-subscription-format="mihomo" data-subscription-import="clash">导入 Clash / Mihomo</a>
-            <a class="button secondary" href="#" data-subscription-format="egern-profile" data-subscription-import="egern-profile">导入 Egern</a>
+            <a class="button secondary" href="#" data-subscription-format="egern-profile" data-subscription-import="egern-profile">导入 Egern 完整配置</a>
+            <a class="button secondary" href="#" data-subscription-format="egern" data-subscription-import="egern">仅添加 Egern 节点</a>
             <a class="button secondary" href="#" data-subscription-format="singbox">下载 sing-box JSON</a>
           </div>
           <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付。地址在服务端加密保存，刷新页面后仍可查看。</small>
@@ -1622,9 +1632,10 @@ async function rotateAdminUserSubscription(button) {
 }
 
 async function downloadPortalConfig(format = "sing-box") {
-  const requestedFormat = format === "egern" ? "egern-profile" : format;
+  const requestedFormat = format;
   const filenames = {
     mihomo: "raylink-mihomo.yaml",
+    egern: "raylink-egern.yaml",
     "egern-profile": "raylink-egern-profile.yaml",
     "sing-box": "raylink-sing-box.json"
   };

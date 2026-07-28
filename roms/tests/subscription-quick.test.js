@@ -27,8 +27,15 @@ function createPanel() {
   const input = { value: "" };
   const qr = { rendered: "" };
   const mihomo = { dataset: { subscriptionFormat: "mihomo" }, href: "" };
-  const egern = { dataset: { subscriptionFormat: "egern", subscriptionImport: "egern" }, href: "" };
-  const links = [mihomo, egern];
+  const egernProfile = {
+    dataset: { subscriptionFormat: "egern-profile", subscriptionImport: "egern-profile" },
+    href: ""
+  };
+  const egernNodes = {
+    dataset: { subscriptionFormat: "egern", subscriptionImport: "egern" },
+    href: ""
+  };
+  const links = [mihomo, egernProfile, egernNodes];
   const fields = new Map([
     ["[data-user-subscription-result]", result],
     ["#user-subscription-url", input],
@@ -38,7 +45,7 @@ function createPanel() {
     querySelector: (selector) => fields.get(selector) || null,
     querySelectorAll: (selector) => selector === "[data-subscription-format]" ? links : []
   };
-  return { panel, result, input, qr, mihomo, egern };
+  return { panel, result, input, qr, mihomo, egernNodes, egernProfile };
 }
 
 test("quick subscription controller reveals and rehydrates a generated QR link", () => {
@@ -62,7 +69,11 @@ test("quick subscription controller reveals and rehydrates a generated QR link",
   assert.equal(first.qr.rendered, url);
   assert.equal(first.mihomo.href, `${url}?format=mihomo`);
   assert.equal(
-    first.egern.href,
+    first.egernProfile.href,
+    `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(`${url}?format=egern-profile`)}`
+  );
+  assert.equal(
+    first.egernNodes.href,
     `egern:/subscriptions/new?url=${encodeURIComponent(`${url}?format=egern`)}`
   );
 

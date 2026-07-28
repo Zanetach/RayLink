@@ -1478,7 +1478,8 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
   assert.match(landing.headers.get("content-type"), /text\/html/);
   const landingHtml = await landing.text();
   assert.match(landingHtml, /Clash Verge Rev/);
-  assert.match(landingHtml, /Egern/);
+  assert.match(landingHtml, /Egern 智能配置/);
+  assert.match(landingHtml, /Egern 节点订阅/);
   assert.match(landingHtml, /sing-box/);
   assert.doesNotMatch(landingHtml, /raylink-demo/);
 });
@@ -2562,6 +2563,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
   assert.match(appScript, /data-subscription-format="mihomo"/);
   assert.match(appScript, /data-subscription-format="egern-profile"/);
+  assert.match(appScript, /data-subscription-format="egern"/);
+  assert.match(appScript, /Egern 完整配置/);
+  assert.match(appScript, /Egern 节点订阅/);
   assert.match(appScript, /Clash \/ Mihomo/);
   assert.match(appScript, /Egern/);
   assert.doesNotMatch(appScript, /profile\.enabled \|\| oneClick/);
@@ -2581,7 +2585,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
   assert.match(indexHtml, /src="\.\/protocol-health\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.13-universal-subscription/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.13-smart-routing/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
