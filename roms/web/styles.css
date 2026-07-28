@@ -100,9 +100,26 @@ body {
 .portal-subscription h2 { margin: 5px 0 0; color: var(--text-soft); font-size: 15px; font-weight: 600; }
 .portal-subscription > div > p:not(.drawer-section-label) { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .portal-subscription > .button { width: 100%; justify-content: center; }
-.portal-subscription-value label { display: block; margin-bottom: 6px; color: var(--faint); font-size: 10px; }
+.portal-subscription-value { display: grid; gap: 10px; }
+.portal-subscription-value[hidden] { display: none; }
+.portal-subscription-value label { display: block; color: var(--faint); font-size: 10px; }
 .portal-subscription-value > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .portal-subscription-value input { min-width: 0; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-soft); font-family: var(--font-mono); font-size: 10px; padding: 0 11px; }
+.portal-subscription-value > .subscription-qr {
+  display: grid;
+  width: 208px;
+  height: 208px;
+  grid-template-columns: none;
+  place-items: center;
+  justify-self: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+}
+.subscription-qr canvas,
+.subscription-qr img { display: block; width: 184px; height: 184px; image-rendering: pixelated; }
+.subscription-secret-note { color: var(--faint); font-size: 9px; line-height: 1.55; }
 .portal-guide { margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
 .portal-guide summary { color: var(--text-soft); cursor: pointer; font-size: 11px; font-weight: 600; }
 .portal-guide ol { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 10px; line-height: 1.7; }
@@ -1306,6 +1323,53 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .switch::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); content: ""; transition: transform 180ms var(--ease-out), background-color 160ms ease; }
 .switch.on { background: var(--accent-soft); }
 .switch.on::after { background: var(--accent); transform: translateX(18px); }
+.user-access-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+  padding: 16px;
+}
+.user-access-card strong,
+.user-access-card small { display: block; }
+.user-access-card strong { color: var(--text-soft); font-size: 11px; font-weight: 600; }
+.user-access-card small { margin-top: 4px; color: var(--faint); font-size: 9px; line-height: 1.55; }
+.secure-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.secure-link-row input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 0 10px;
+}
+.subscription-access {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 14px;
+}
+.subscription-access > .button { width: 100%; justify-content: center; }
+.subscription-result { display: grid; gap: 10px; }
+.subscription-result[hidden] { display: none; }
+.subscription-result .subscription-qr {
+  display: grid;
+  width: 208px;
+  height: 208px;
+  place-items: center;
+  justify-self: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+}
 .portal-login-help { display: grid; grid-template-columns: 28px 1fr; gap: 12px; padding: 16px; background: var(--canvas); }
 .portal-login-help svg { width: 18px; height: 18px; margin: 4px 0 0 4px; color: var(--muted); }
 .portal-login-help strong, .portal-login-help small { display: block; }

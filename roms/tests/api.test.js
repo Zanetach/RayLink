@@ -1243,6 +1243,54 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   assert.equal((await fetch(`${testApp.baseUrl}${secondSubscriptionPath}`)).status, 200);
 });
 
+test("administrator can generate a user's subscription URL and rotating it revokes the old URL", async (t) => {
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    subscriptionOrigin: "https://sub.example.com"
+  });
+  t.after(() => testApp.close());
+  const adminCookie = await login(testApp.baseUrl);
+  const bootstrap = await (
+    await api(testApp.baseUrl, adminCookie, "/api/bootstrap")
+  ).json();
+  const user = bootstrap.users.find(
+    (candidate) => candidate.email === "priya@vantage-bioworks.in"
+  );
+  assert.ok(user);
+
+  const unauthenticated = await fetch(
+    `${testApp.baseUrl}/api/users/${encodeURIComponent(user.id)}/subscription/rotate`,
+    { method: "POST" }
+  );
+  assert.equal(unauthenticated.status, 401);
+
+  const firstResponse = await api(
+    testApp.baseUrl,
+    adminCookie,
+    `/api/users/${encodeURIComponent(user.id)}/subscription/rotate`,
+    { method: "POST" }
+  );
+  assert.equal(firstResponse.status, 201);
+  const first = await firstResponse.json();
+  assert.equal(new URL(first.subscriptionUrl).origin, "https://sub.example.com");
+  const firstPath = new URL(first.subscriptionUrl).pathname;
+  assert.equal((await fetch(`${testApp.baseUrl}${firstPath}`)).status, 200);
+
+  const secondResponse = await api(
+    testApp.baseUrl,
+    adminCookie,
+    `/api/users/${encodeURIComponent(user.id)}/subscription/rotate`,
+    { method: "POST" }
+  );
+  assert.equal(secondResponse.status, 201);
+  const second = await secondResponse.json();
+  assert.notEqual(second.subscriptionUrl, first.subscriptionUrl);
+  const secondPath = new URL(second.subscriptionUrl).pathname;
+
+  assert.equal((await fetch(`${testApp.baseUrl}${firstPath}`)).status, 401);
+  assert.equal((await fetch(`${testApp.baseUrl}${secondPath}`)).status, 200);
+});
+
 test("subscription uses control-plane managed official rule sets when cached", async (t) => {
   const ruleSetFiles = new Map([
     ["geosite-geolocation-cn.srs", Buffer.from("managed-geosite")],
@@ -2231,6 +2279,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /renderHostTopology/);
   assert.match(appScript, /data-topology-host=/);
   assert.match(appScript, /data-topology-link=/);
+  assert.match(appScript, /data-user-subscription-action/);
+  assert.match(appScript, /data-user-subscription-qr/);
+  assert.match(indexHtml, /src="\.\/qrcode\.min\.js/);
 
   const logoResponse = await fetch(
     `${testApp.baseUrl}/assets/brand/raylink-mark.svg`
@@ -2300,9 +2351,16 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(portalHtml, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
   assert.doesNotMatch(portalHtml, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
   assert.match(portalHtml, /id="portal-copy-subscription"/);
+  assert.match(portalHtml, /id="portal-subscription-qr"/);
   assert.match(portalHtml, /TUN 需要系统 VPN 权限/);
   assert.match(portalHtml, /mixed 回退/);
   assert.match(portalHtml, /删除订阅/);
   assert.match(portalHtml, /href="\/styles\.css(?:\?[^"]*)?"/);
-  assert.match(portalHtml, /src="\/portal\.js"/);
+  assert.match(portalHtml, /src="\/qrcode\.min\.js/);
+  assert.match(portalHtml, /src="\/portal\.js(?:\?[^"]*)?"/);
+
+  const qrScriptResponse = await fetch(`${testApp.baseUrl}/qrcode.min.js`);
+  assert.equal(qrScriptResponse.status, 200);
+  assert.match(qrScriptResponse.headers.get("content-type"), /javascript/);
+  assert.match(await qrScriptResponse.text(), /QRCode/);
 });

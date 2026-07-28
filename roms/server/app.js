@@ -1218,6 +1218,7 @@ export async function createRayLinkApp(options) {
           sendJson(response, 200, {
             ...bootstrap,
             hosts,
+            access: store.setupStatus().access,
             certificate: store.certificateSettings(),
             telemetry: store.telemetryOverview(),
             runtime,

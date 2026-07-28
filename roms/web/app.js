@@ -19,6 +19,7 @@ const controlPlane = {
   protocolCatalog: [],
   deployments: [],
   telemetry: { windowHours: 24, networkSeries: [] },
+  access: null,
   certificate: { mode: null, email: "" },
   portalProfile: null
 };
@@ -170,7 +171,8 @@ function applyBootstrap(data) {
     quota: user.quotaGb,
     nodeScope: user.nodeScope,
     clients: user.clientFormats,
-    expires: user.expiresAt
+    expires: user.expiresAt,
+    subscription: user.subscription
   })));
   accountSummary.totalUsers = users.length;
   controlPlane.currentAdmin = data.currentAdmin;
@@ -182,6 +184,7 @@ function applyBootstrap(data) {
   controlPlane.protocolCatalog = data.protocolCatalog;
   controlPlane.deployments = data.deployments;
   controlPlane.telemetry = data.telemetry || { windowHours: 24, networkSeries: [] };
+  controlPlane.access = data.access || null;
   controlPlane.certificate = data.certificate || { mode: null, email: "" };
   const rollbackButton = document.querySelector("#rollback-config");
   const rollbackTarget = data.deployments.find((deployment) => deployment.status === "superseded");
@@ -1034,6 +1037,10 @@ function closeDrawer({ restoreFocus = true, clearContent = false } = {}) {
 
 function userDrawerMarkup(user = {}) {
   const isNew = !user.id;
+  const portalUrl = new URL(
+    "/portal",
+    controlPlane.access?.canonicalOrigin || window.location.origin
+  ).toString();
   const selectedNodeGroup = user.nodeScope?.length ? scopeToLabel(user.nodeScope) : "全部节点";
   const currentHostRegion = controlPlane.hosts[0]?.region;
   const standardNodeGroups = [
@@ -1065,6 +1072,41 @@ function userDrawerMarkup(user = {}) {
       <p class="drawer-section-label">账号状态</p>
       <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用自己的流量、节点与客户端权益</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
+      ${isNew ? "" : `
+        <p class="drawer-section-label">用户中心与订阅访问</p>
+        <section class="user-access-card">
+          <div>
+            <strong>用户中心登录</strong>
+            <small>用户访问下面的地址，使用邮箱 ${escapeHtml(user.email)} 和管理员设置的密码登录。</small>
+          </div>
+          <div class="secure-link-row">
+            <input id="user-portal-url" type="url" value="${escapeHtml(portalUrl)}" readonly spellcheck="false">
+            <button type="button" class="button secondary" data-copy-target="user-portal-url">${icon("copy")}复制</button>
+          </div>
+          <div class="subscription-access">
+            <div>
+              <strong>订阅地址</strong>
+              <small data-user-subscription-status>${user.subscription?.configured
+                ? "订阅已启用。完整地址不会长期保存；遗失时请重新生成。"
+                : "尚未生成。生成后可复制链接或让用户扫描二维码。"}</small>
+            </div>
+            <div class="subscription-result" data-user-subscription-result hidden>
+              <div class="subscription-qr" data-user-subscription-qr aria-label="用户订阅地址二维码"></div>
+              <div class="secure-link-row">
+                <input id="user-subscription-url" type="url" readonly spellcheck="false">
+                <button type="button" class="button secondary" data-copy-target="user-subscription-url">${icon("copy")}复制</button>
+              </div>
+              <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付；本次关闭详情后不再显示。</small>
+            </div>
+            <button
+              type="button"
+              class="button primary"
+              data-user-subscription-action
+              data-user-id="${escapeHtml(user.id)}"
+              data-subscription-configured="${user.subscription?.configured ? "true" : "false"}"
+            >${user.subscription?.configured ? "重新生成订阅地址" : "生成订阅地址"}</button>
+          </div>
+        </section>`}
     </form>`;
 }
 
@@ -1426,7 +1468,7 @@ function openPortal() {
   });
 }
 
-async function copyText(text) {
+async function copyText(text, message = "内容已复制到剪贴板。") {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -1439,7 +1481,57 @@ async function copyText(text) {
     document.execCommand("copy");
     textarea.remove();
   }
-  showToast("已复制", "用户中心入口已复制到剪贴板。");
+  showToast("已复制", message);
+}
+
+function renderSubscriptionQr(container, value) {
+  container.replaceChildren();
+  new QRCode(container, {
+    text: value,
+    width: 184,
+    height: 184,
+    colorDark: "#07100c",
+    colorLight: "#ffffff",
+    correctLevel: QRCode.CorrectLevel.M
+  });
+}
+
+async function rotateAdminUserSubscription(button) {
+  const isReset = button.dataset.subscriptionConfigured === "true";
+  if (
+    isReset
+    && !window.confirm("重新生成后，用户已经导入客户端的旧订阅地址会立即失效。确定继续吗？")
+  ) return;
+
+  const form = button.closest("#user-drawer-form");
+  const status = form.querySelector("[data-user-subscription-status]");
+  const resultPanel = form.querySelector("[data-user-subscription-result]");
+  const urlInput = form.querySelector("#user-subscription-url");
+  const qr = form.querySelector("[data-user-subscription-qr]");
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = isReset ? "正在重新生成…" : "正在生成…";
+  try {
+    const result = await api(
+      `/api/users/${encodeURIComponent(button.dataset.userId)}/subscription/rotate`,
+      { method: "POST" }
+    );
+    urlInput.value = result.subscriptionUrl;
+    renderSubscriptionQr(qr, result.subscriptionUrl);
+    resultPanel.hidden = false;
+    status.textContent = "新地址已生成。请立即复制或让用户扫描二维码；关闭详情后不会再次显示完整地址。";
+    button.dataset.subscriptionConfigured = "true";
+    button.textContent = "重新生成订阅地址";
+    const user = users.find((item) => item.id === button.dataset.userId);
+    if (user) user.subscription = { ...(user.subscription || {}), configured: true };
+    showToast("订阅地址已生成", "链接和二维码只在本次生成后完整显示。");
+  } catch (error) {
+    status.textContent = error.message;
+    button.textContent = previousText;
+    showToast("生成失败", error.message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function downloadPortalConfig() {
@@ -1719,6 +1811,26 @@ async function saveDrawer() {
     elements.drawerSave.disabled = false;
     elements.drawerSave.textContent = previousLabel;
     return;
+  }
+
+  if (
+    form.id === "user-drawer-form"
+    && previousLabel.includes("创建")
+    && userSaveResult?.id
+  ) {
+    const createdUser = users.find((user) => user.id === userSaveResult.id);
+    if (createdUser) {
+      elements.drawerEyebrow.textContent = "用户详情";
+      elements.drawerTitle.textContent = createdUser.name;
+      elements.drawerContent.innerHTML = userDrawerMarkup(createdUser);
+      elements.drawerSave.textContent = "保存更改";
+      elements.drawerSave.disabled = false;
+      showToast(
+        "用户已创建",
+        "可立即复制用户中心入口，并生成订阅链接或二维码。"
+      );
+      return;
+    }
   }
 
   const activatedProtocol = protocolSaveResult?.profile
@@ -2120,6 +2232,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const userSubscriptionButton = event.target.closest("[data-user-subscription-action]");
+  if (userSubscriptionButton) {
+    await rotateAdminUserSubscription(userSubscriptionButton);
+    return;
+  }
+
   const clientImport = event.target.closest("[data-client-import]");
   if (clientImport) {
     if (clientImport.dataset.clientImport === "sing-box") downloadPortalConfig();
@@ -2146,7 +2264,12 @@ document.addEventListener("click", async (event) => {
   const copyButton = event.target.closest("[data-copy-target]");
   if (copyButton) {
     const target = document.getElementById(copyButton.dataset.copyTarget);
-    copyText(target.textContent.trim());
+    copyText(
+      (target.value || target.textContent).trim(),
+      target.id.includes("subscription")
+        ? "订阅地址已复制，请通过安全渠道交付。"
+        : "用户中心入口已复制到剪贴板。"
+    );
     return;
   }
 
