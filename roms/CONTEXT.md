@@ -9,7 +9,7 @@ A person allowed to sign in to the user center and own exactly one User Entitlem
 _Avoid_: Client, subscriber, token
 
 **User Entitlement**:
-Traffic allowance, expiry, node scope, and supported client formats owned by exactly one User. It cannot be assigned to or reused by another User.
+Traffic allowance, expiry, and node scope owned by exactly one User. It cannot be assigned to or reused by another User. Client subscription formats are a platform capability shared by every User, not an entitlement.
 _Avoid_: Plan, subscription, package
 
 **Runtime Credential**:

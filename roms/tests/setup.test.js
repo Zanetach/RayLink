@@ -733,6 +733,7 @@ test("the release package keeps every installer dependency executable", async ()
     "../web/node/build-metered-runtime.sh",
     "../deploy/build-runtime-artifact.sh",
     "../deploy/install.sh",
+    "../deploy/upgrade-control-plane.sh",
     "../deploy/package-release.sh"
   ]) {
     const dependency = await stat(new URL(relativePath, import.meta.url));
@@ -747,12 +748,14 @@ test("the release package keeps every installer dependency executable", async ()
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const version = "0.2.12";
+  const version = "0.2.13";
   const architecture = process.arch === "arm64" ? "arm64" : "amd64";
   const releaseDirectory = join(directory, `v${version}`);
   const packageDirectory = join(directory, `raylink-${version}`);
   const packageDeployDirectory = join(packageDirectory, "deploy");
   const installRecordPath = join(directory, "install-record.txt");
+  const upgradeRecordPath = join(directory, "upgrade-record.txt");
+  const existingInstallRoot = join(directory, "installed-raylink");
   const fakeBinDirectory = join(directory, "bin");
   const armBinDirectory = join(directory, "arm-bin");
   await mkdir(releaseDirectory, { recursive: true });
@@ -765,6 +768,15 @@ test("one-command bootstrap verifies and prepares the matching release package",
       "#!/usr/bin/env bash",
       "printf '%s' \"${RAYLINK_PUBLIC_IP:-}\" > \"${INSTALL_RECORD_PATH:?}\"",
       "exit \"${INSTALL_EXIT_CODE:-0}\"",
+      ""
+    ].join("\n")
+  );
+  await writeFile(
+    join(packageDeployDirectory, "upgrade-control-plane.sh"),
+    [
+      "#!/usr/bin/env bash",
+      "printf '%s' \"${RAYLINK_INSTALL_ROOT:-}\" > \"${UPGRADE_RECORD_PATH:?}\"",
+      "exit \"${UPGRADE_EXIT_CODE:-0}\"",
       ""
     ].join("\n")
   );
@@ -859,6 +871,20 @@ test("one-command bootstrap verifies and prepares the matching release package",
   ];
   await execFile("bash", installerArguments, { env: installerEnvironment });
   assert.equal(await readFile(installRecordPath, "utf8"), "203.0.113.10");
+
+  await mkdir(existingInstallRoot, { recursive: true });
+  await writeFile(
+    join(existingInstallRoot, "package.json"),
+    JSON.stringify({ name: "raylink-control-plane", version: "0.2.11" })
+  );
+  await execFile("bash", installerArguments, {
+    env: {
+      ...installerEnvironment,
+      RAYLINK_INSTALL_ROOT: existingInstallRoot,
+      UPGRADE_RECORD_PATH: upgradeRecordPath
+    }
+  });
+  assert.equal(await readFile(upgradeRecordPath, "utf8"), existingInstallRoot);
 
   await assert.rejects(
     () => execFile("bash", installerArguments, {

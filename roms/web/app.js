@@ -11,6 +11,7 @@ const clientCatalog = {
   egern: { name: "Egern", platforms: "iPhone / iPad", action: "一键导入" },
   "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "下载配置" }
 };
+const universalClientFormats = Object.freeze(["mihomo", "egern", "sing-box"]);
 
 const accountSummary = { totalUsers: 0 };
 
@@ -175,7 +176,6 @@ function applyBootstrap(data) {
     used: user.usedGb,
     quota: user.quotaGb,
     nodeScope: user.nodeScope,
-    clients: user.clientFormats,
     expires: user.expiresAt,
     subscription: user.subscription
   })));
@@ -895,7 +895,7 @@ function renderUsers() {
           <div class="usage-copy"><span>${user.used.toFixed(1)} GB</span><span>${user.quota} GB</span></div>
           <div class="progress ${progressClass}"><i style="width:${ratio.toFixed(1)}%"></i></div>
         </td>
-        <td><span class="entitlement-cell"><strong>${escapeHtml(scopeToLabel(user.nodeScope))}</strong><small>${user.clients.length} 种客户端格式</small></span></td>
+        <td><span class="entitlement-cell"><strong>${escapeHtml(scopeToLabel(user.nodeScope))}</strong><small>通用订阅</small></span></td>
         <td class="numeric">${formatDate(user.expires)}</td>
         <td>
           <button
@@ -1527,7 +1527,7 @@ function portalHomeMarkup() {
   const profile = controlPlane.portalProfile;
   const user = profile.user;
   const entitlement = profile.entitlement;
-  const clientEntries = entitlement.clientFormats.map((clientId) => {
+  const clientEntries = universalClientFormats.map((clientId) => {
     const client = clientCatalog[clientId];
     if (!client) return "";
     return `<button type="button" data-client-import="${escapeHtml(clientId)}"><span><strong>${client.name}</strong><small>${client.platforms}</small></span><span>${escapeHtml(client.action)}</span></button>`;
@@ -1542,7 +1542,7 @@ function portalHomeMarkup() {
       <div class="portal-entitlement">
         <p class="drawer-section-label">当前用户权益</p>
         <h3>${escapeHtml(user.name)} 的访问权益</h3>
-        <p>流量、节点和客户端能力由管理员为当前账号单独设置。</p>
+        <p>流量和节点范围由管理员设置；通用订阅统一支持 Clash/Mihomo、Egern 与 sing-box。</p>
         <div class="entitlement-preview"><span><small>剩余流量</small><strong>${Math.max(0, entitlement.quotaGb - user.usedGb).toFixed(1)} GB</strong></span><span><small>节点范围</small><strong>${escapeHtml(scopeToLabel(entitlement.nodeScope))}</strong></span></div>
       </div>
       <p class="drawer-section-label">选择客户端</p>

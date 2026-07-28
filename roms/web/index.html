@@ -6,7 +6,7 @@
   <meta name="description" content="RayLink sing-box 多用户控制台前端原型">
   <title>RayLink · sing-box control plane</title>
   <link rel="icon" href="/assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=0.2.12-subscription-tls">
+  <link rel="stylesheet" href="./styles.css?v=0.2.13-universal-subscription">
 </head>
 <body>
   <section class="auth-screen" id="admin-auth" aria-labelledby="admin-auth-title">
@@ -224,7 +224,7 @@
 
         <section class="view" id="view-users" data-view="users">
           <div class="page-heading">
-            <div><p class="eyebrow">访问与服务</p><h1>用户管理</h1><p>新建用户时直接设置流量、到期时间、节点和客户端能力。</p></div>
+            <div><p class="eyebrow">访问与服务</p><h1>用户管理</h1><p>新建用户时直接设置流量、到期时间和节点范围；所有账号统一支持通用订阅。</p></div>
             <button class="button primary" data-new-user><svg><use href="#i-plus"/></svg>新建用户</button>
           </div>
 
@@ -245,7 +245,7 @@
             <section class="table-panel">
               <div class="table-scroll">
                 <table>
-                  <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>节点 / 客户端</th><th>到期时间</th><th>订阅</th><th><span class="sr-only">操作</span></th></tr></thead>
+                  <thead><tr><th>用户</th><th>状态</th><th>已用 / 配额</th><th>节点 / 订阅</th><th>到期时间</th><th>订阅</th><th><span class="sr-only">操作</span></th></tr></thead>
                   <tbody id="user-table-body"></tbody>
                 </table>
               </div>
@@ -439,10 +439,10 @@
   </div>
 
   <script src="./qrcode.min.js?v=1.0.0"></script>
-  <script src="./subscription-qr.js?v=0.2.12"></script>
-  <script src="./subscription-session.js?v=0.2.12"></script>
-  <script src="./subscription-quick.js?v=0.2.12-universal-subscription"></script>
-  <script src="./protocol-health.js?v=0.2.12-connection-health"></script>
-  <script src="./app.js?v=0.2.12-universal-subscription"></script>
+  <script src="./subscription-qr.js?v=0.2.13"></script>
+  <script src="./subscription-session.js?v=0.2.13"></script>
+  <script src="./subscription-quick.js?v=0.2.13-universal-subscription"></script>
+  <script src="./protocol-health.js?v=0.2.13-connection-health"></script>
+  <script src="./app.js?v=0.2.13-universal-subscription"></script>
 </body>
 </html>

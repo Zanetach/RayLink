@@ -1782,7 +1782,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   td::before { display: block; margin-bottom: 5px; color: var(--faint); font-size: 8px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
   #user-table-body td:nth-child(2)::before { content: "状态"; }
   #user-table-body td:nth-child(3)::before { content: "已用 / 配额"; }
-  #user-table-body td:nth-child(4)::before { content: "节点 / 客户端"; }
+  #user-table-body td:nth-child(4)::before { content: "节点 / 订阅"; }
   #user-table-body td:nth-child(5)::before { content: "到期时间"; }
   #user-table-body td:nth-child(6)::before { content: "订阅"; }
   #user-table-body td:nth-child(7)::before { display: none; }

@@ -1386,6 +1386,15 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
   assert.match(mihomo.headers.get("content-disposition"), /raylink-mihomo\.yaml/);
   assert.match(await mihomo.text(), /^mixed-port: 7890/m);
 
+  const mihomoHead = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
+    method: "HEAD",
+    headers: { "user-agent": "clash-verge/v2.5.2" }
+  });
+  assert.equal(mihomoHead.status, 200);
+  assert.match(mihomoHead.headers.get("content-type"), /application\/yaml/);
+  assert.ok(Number(mihomoHead.headers.get("content-length")) > 0);
+  assert.equal(await mihomoHead.text(), "");
+
   const egern = await fetch(`${testApp.baseUrl}${subscription.pathname}?format=egern`);
   assert.equal(egern.status, 200);
   assert.match(egern.headers.get("content-disposition"), /raylink-egern\.yaml/);
@@ -2471,6 +2480,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /用户管理/);
   assert.match(indexHtml, /<th>订阅<\/th>/);
   assert.doesNotMatch(indexHtml, /方案管理/);
+  assert.match(indexHtml, /通用订阅/);
+  assert.doesNotMatch(indexHtml, /节点 \/ 客户端/);
+  assert.doesNotMatch(indexHtml, /节点和客户端能力/);
   assert.match(indexHtml, /网络流量趋势/);
   assert.match(indexHtml, /dashboard-network-trend/);
   assert.match(indexHtml, /节点运行情况/);
@@ -2494,6 +2506,9 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(scriptResponse.headers.get("content-type"), /javascript/);
   const appScript = await scriptResponse.text();
   assert.doesNotMatch(appScript, /priya@vantage-bioworks\.in/);
+  assert.match(appScript, /通用订阅/);
+  assert.doesNotMatch(appScript, /种客户端格式/);
+  assert.doesNotMatch(appScript, /客户端能力由管理员/);
   assert.match(appScript, /assets\/brand\/raylink-mark\.svg\?v=20260726/);
   assert.doesNotMatch(appScript, /class="brand-mark[^"]*"[^>]*>R\/<\/span>/);
   assert.match(appScript, /api\("\/api\/auth\/logout"/);
@@ -2529,7 +2544,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
   assert.match(indexHtml, /src="\.\/protocol-health\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.12-universal-subscription/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.13-universal-subscription/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
@@ -2553,6 +2568,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(universalPortalHtml, /id="portal-import-mihomo"/);
   assert.match(universalPortalHtml, /id="portal-import-egern"/);
   assert.match(universalPortalHtml, /id="portal-download-singbox"/);
+  assert.doesNotMatch(universalPortalHtml, /客户端能力由管理员/);
   const portalScriptResponse = await fetch(`${testApp.baseUrl}/portal.js`);
   assert.equal(portalScriptResponse.status, 200);
   const portalScript = await portalScriptResponse.text();

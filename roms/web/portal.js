@@ -41,7 +41,7 @@ function renderAccount(profile) {
   document.querySelector("#portal-account-title").textContent = `${user.name} 的访问权益`;
   document.querySelector("#portal-remaining-quota").textContent = `${Math.max(0, entitlement.quotaGb - user.usedGb).toFixed(1)} GB`;
   document.querySelector("#portal-node-scope").textContent = scopeLabel(entitlement.nodeScope);
-  downloadButton.hidden = !entitlement.clientFormats.includes("sing-box");
+  downloadButton.hidden = false;
   const configured = Boolean(user.subscription?.configured);
   subscriptionAction.dataset.configured = String(configured);
   subscriptionAction.textContent = configured ? "重新生成订阅地址" : "生成订阅地址";

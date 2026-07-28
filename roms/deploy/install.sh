@@ -16,7 +16,7 @@ RayLink 一键安装
 
 参数：
   --public-ip IP           控制台对外访问 IP；留空时尝试自动检测
-  --version VERSION        安装版本，默认 0.2.12
+  --version VERSION        安装版本，默认 0.2.13
   --release-base-url URL   发布包根地址，默认使用 RayLink GitHub Releases
   --dry-run                只下载、校验和解压，不修改系统
   -h, --help               显示帮助
@@ -28,7 +28,7 @@ RayLink 一键安装
 EOF
 }
 
-version="${RAYLINK_VERSION:-0.2.12}"
+version="${RAYLINK_VERSION:-0.2.13}"
 public_ip="${RAYLINK_PUBLIC_IP:-}"
 default_release_base_url="https://github.com/Zanetach/RayLink/releases/download"
 release_base_url="${RAYLINK_RELEASE_BASE_URL:-$default_release_base_url}"
@@ -169,9 +169,18 @@ read_archive \
   -xzf "$archive_path" \
   -C "$temporary_root"
 installer="${temporary_root}/${expected_root}/deploy/install-control-plane.sh"
-[ -f "$installer" ] || fail "发布包缺少控制面安装器"
+upgrade_installer="${temporary_root}/${expected_root}/deploy/upgrade-control-plane.sh"
+install_root="${RAYLINK_INSTALL_ROOT:-/opt/raylink}"
+if [ -f "$install_root/package.json" ]; then
+  action=upgrade
+  installer="$upgrade_installer"
+  [ -f "$installer" ] || fail "发布包缺少控制面升级器"
+else
+  action=install
+  [ -f "$installer" ] || fail "发布包缺少控制面安装器"
+fi
 
-if [ -z "$public_ip" ] && [ "$dry_run" = false ]; then
+if [ "$action" = install ] && [ -z "$public_ip" ] && [ "$dry_run" = false ]; then
   public_ip="$(
     curl -fsSL --connect-timeout 5 https://api64.ipify.org 2>/dev/null || true
   )"
@@ -182,7 +191,9 @@ fi
 
 if [ "$dry_run" = true ]; then
   printf 'Dry run 完成，未修改系统。将执行：\n'
-  if [ -n "$public_ip" ]; then
+  if [ "$action" = upgrade ]; then
+    printf 'RAYLINK_INSTALL_ROOT=%q bash %q\n' "$install_root" "$installer"
+  elif [ -n "$public_ip" ]; then
     printf 'RAYLINK_PUBLIC_IP=%q bash %q\n' "$public_ip" "$installer"
   else
     printf 'bash %q\n' "$installer"
@@ -190,9 +201,13 @@ if [ "$dry_run" = true ]; then
   exit 0
 fi
 
-printf '发布包准备完成，开始安装控制面与 Runtime…\n'
-if [ -n "$public_ip" ]; then
+if [ "$action" = upgrade ]; then
+  printf '发布包准备完成，开始安全升级控制面（sing-box Runtime 保持运行）…\n'
+  RAYLINK_INSTALL_ROOT="$install_root" bash "$installer"
+elif [ -n "$public_ip" ]; then
+  printf '发布包准备完成，开始安装控制面与 Runtime…\n'
   RAYLINK_PUBLIC_IP="$public_ip" bash "$installer"
 else
+  printf '发布包准备完成，开始安装控制面与 Runtime…\n'
   bash "$installer"
 fi
