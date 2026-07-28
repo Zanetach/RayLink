@@ -399,7 +399,8 @@
             </section>
           </div>
           <section class="system-card-grid" data-system-panel="certificates" hidden>
-            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><p class="eyebrow">TLS 资产</p><h2>证书路径由主机协议管理</h2><p>打开一台主机，在“入口协议”中配置支持 TLS 的协议及证书路径。</p><button class="text-button" data-system-tab="hosts">查看主机 <svg><use href="#i-arrow"/></svg></button></div></article>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><p class="eyebrow">ACME 账户</p><h2>证书通知邮箱</h2><p>用于自动签发证书和接收证书到期通知。Naive、Hysteria、TUIC 与 Hysteria 2 一键启用时会自动读取这里的邮箱。</p><form class="certificate-settings-form" id="certificate-settings-form"><label class="field"><span>通知邮箱</span><input id="certificate-email" name="email" type="email" autocomplete="email" placeholder="ops@example.com" required><small class="field-error"></small></label><div class="heading-actions"><button class="button primary" type="submit">保存邮箱</button><span class="status-badge neutral" id="certificate-mode"><i></i>未配置</span></div></form></div></article>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><p class="eyebrow">TLS 资产</p><h2>证书路径由主机协议管理</h2><p>一键启用会优先使用主机域名自动签发证书；手动证书仍可在主机的“入口协议”中配置。</p><button class="text-button" data-system-tab="hosts">查看主机 <svg><use href="#i-arrow"/></svg></button></div></article>
             <article class="panel system-card"><span class="resource-icon">R</span><div><p class="eyebrow">Reality</p><h2>密钥按协议生成</h2><p>VLESS 等协议可在编辑抽屉中一键生成 Reality 密钥对。</p></div></article>
           </section>
           <section class="system-card-grid" data-system-panel="maintenance" hidden>

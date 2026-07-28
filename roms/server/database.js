@@ -12,6 +12,7 @@ import {
   hashSessionSecret,
   verifyPassword
 } from "./security.js";
+import { normalizeCertificateEmail } from "./certificate-settings.js";
 import {
   assertProtocolSet,
   defaultProtocolConfigs,
@@ -786,6 +787,29 @@ export class RayLinkStore {
     };
   }
 
+  certificateSettings() {
+    const rows = this.db.prepare(`
+      SELECT key, value FROM settings
+      WHERE key IN ('certificate_mode', 'certificate_email')
+    `).all();
+    const settings = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+    return {
+      mode: settings.certificate_mode || null,
+      email: settings.certificate_email || ""
+    };
+  }
+
+  updateCertificateSettings(input = {}) {
+    const email = normalizeCertificateEmail(input.email);
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES ('certificate_email', ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(email, timestamp);
+    return this.certificateSettings();
+  }
+
   verifySetupToken(token) {
     const status = this.setupStatus();
     if (status.state !== "SETUP_PENDING") return false;
@@ -893,6 +917,7 @@ export class RayLinkStore {
       upsert.run("allowed_origins", JSON.stringify(access.allowedOrigins), timestamp);
       upsert.run("access_mode", access.mode, timestamp);
       upsert.run("certificate_mode", certificate.mode, timestamp);
+      upsert.run("certificate_email", certificate.email || "", timestamp);
       this.db.prepare(
         "DELETE FROM settings WHERE key IN ('setup_token_hash', 'setup_token_expires_at', 'setup_progress')"
       ).run();

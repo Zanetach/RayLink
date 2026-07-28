@@ -19,6 +19,7 @@ const controlPlane = {
   protocolCatalog: [],
   deployments: [],
   telemetry: { windowHours: 24, networkSeries: [] },
+  certificate: { mode: null, email: "" },
   portalProfile: null
 };
 
@@ -181,6 +182,7 @@ function applyBootstrap(data) {
   controlPlane.protocolCatalog = data.protocolCatalog;
   controlPlane.deployments = data.deployments;
   controlPlane.telemetry = data.telemetry || { windowHours: 24, networkSeries: [] };
+  controlPlane.certificate = data.certificate || { mode: null, email: "" };
   const rollbackButton = document.querySelector("#rollback-config");
   const rollbackTarget = data.deployments.find((deployment) => deployment.status === "superseded");
   if (rollbackButton) {
@@ -808,6 +810,45 @@ function renderSystem() {
     upgradeButton.textContent = update?.latestVersion
       ? `安全升级到 ${update.latestVersion}`
       : "安全升级";
+  }
+  const certificateEmail = document.querySelector("#certificate-email");
+  if (
+    certificateEmail
+    && document.activeElement !== certificateEmail
+  ) {
+    certificateEmail.value = controlPlane.certificate?.email || "";
+  }
+  const certificateMode = document.querySelector("#certificate-mode");
+  if (certificateMode) {
+    const configured = Boolean(controlPlane.certificate?.email);
+    certificateMode.className = `status-badge ${configured ? "good" : "warning"}`;
+    certificateMode.innerHTML = `<i></i>${configured ? "已配置" : "未配置"}`;
+  }
+}
+
+async function saveCertificateSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const errorTarget = form.querySelector(".field-error");
+  button.disabled = true;
+  button.textContent = "正在保存…";
+  errorTarget.textContent = "";
+  errorTarget.classList.remove("visible");
+  try {
+    controlPlane.certificate = await api("/api/settings/certificate", {
+      method: "PATCH",
+      body: JSON.stringify({ email: form.elements.email.value.trim() })
+    });
+    renderSystem();
+    showToast("证书邮箱已保存", "新的 ACME 一键启用任务会自动使用这个邮箱。");
+  } catch (error) {
+    errorTarget.textContent = error.message;
+    errorTarget.classList.add("visible");
+    showToast("保存失败", error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "保存邮箱";
   }
 }
 
@@ -2129,6 +2170,7 @@ elements.drawerClose.addEventListener("click", closeDrawer);
 elements.drawerCancel.addEventListener("click", closeDrawer);
 elements.drawerScrim.addEventListener("click", closeDrawer);
 elements.drawerSave.addEventListener("click", saveDrawer);
+document.querySelector("#certificate-settings-form").addEventListener("submit", saveCertificateSettings);
 
 document.querySelector("#publish-config").addEventListener("click", publishConfig);
 document.querySelector("#rollback-config").addEventListener("click", rollbackConfig);

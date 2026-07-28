@@ -1535,6 +1535,8 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .system-card { display: grid; min-height: 230px; grid-template-columns: 42px 1fr; align-content: start; gap: 16px; padding: 24px; }
 .system-card h2 { margin-bottom: 8px; }
 .system-card p:not(.eyebrow) { margin: 0 0 20px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.certificate-settings-form { display: grid; gap: 14px; }
+.certificate-settings-form .heading-actions { align-items: center; justify-content: space-between; }
 .advanced-preview {
   max-height: 520px;
   overflow: auto;

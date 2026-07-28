@@ -9,17 +9,17 @@
 
 ## 推荐：一键安装与首次初始化
 
-v0.2.5 Release 当前支持 AMD64（x86_64）。服务器需要预先具备 `curl`。
+v0.2.6 Release 当前支持 AMD64（x86_64）。服务器需要预先具备 `curl`。
 使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.5/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.6/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.5/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.6/install.sh | sudo bash'
 ```
 
 脚本检测 CPU 架构和公网 IP，自动补齐 Debian/Ubuntu 上缺少的归档校验工具，
@@ -27,19 +27,19 @@ bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/dow
 云主机若有 NAT、多块网卡，建议显式提供实际访问地址：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.5/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.6/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 安装指定版本：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.5/install.sh | bash -s -- --version 0.2.5'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.6/install.sh | bash -s -- --version 0.2.6'
 ```
 
 只验证下载、校验和解压，不修改系统：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.5/install.sh | bash -s -- --dry-run'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.6/install.sh | bash -s -- --dry-run'
 ```
 
 一键安装会完成：
@@ -92,16 +92,16 @@ sudo bash deploy/build-runtime-artifact.sh 1.13.14 ./release-runtime amd64
 `raylink-sing-box-1.13.14-linux-amd64 version`，确认版本和完整审批 build tags。
 原生架构构建会在脚本内部直接完成这项执行校验。
 
-产物准备完成后构建正式安装包。v0.2.5 默认装配 AMD64 Runtime：
+产物准备完成后构建正式安装包。v0.2.6 默认装配 AMD64 Runtime：
 
 ```bash
-bash deploy/package-release.sh 0.2.5
+bash deploy/package-release.sh 0.2.6
 ```
 
 也可以显式指定本次发布需要装配的架构：
 
 ```bash
-RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.2.5
+RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.2.6
 ```
 
 发布包只包含 `package.json`、`server/`、`web/` 和 `deploy/`，不会打包本地

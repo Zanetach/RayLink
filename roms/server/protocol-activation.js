@@ -357,7 +357,7 @@ export class ProtocolActivationManager {
       if (!email) {
         throw activationError(
           "ACME_EMAIL_REQUIRED",
-          `${catalog.name} 自动证书需要先在系统访问设置中填写证书通知邮箱`
+          `${catalog.name} 自动证书需要先在“系统 → 证书”中填写证书通知邮箱`
         );
       }
       if (host.kind === "local" && this.certificateProvider) {

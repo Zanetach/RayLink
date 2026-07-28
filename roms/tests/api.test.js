@@ -108,6 +108,68 @@ test("admin can run the one-click protocol activation transaction", async (t) =>
   assert.ok(calls[0].adminId);
 });
 
+test("admin can configure the ACME notification email before one-click TLS activation", async (t) => {
+  const installer = {
+    async status() {
+      return {
+        installed: true,
+        version: "1.13.14",
+        platform: "linux",
+        architecture: "amd64",
+        tags: ["with_utls", "with_acme", "with_quic"]
+      };
+    },
+    async generateRealityKeypair() {
+      return { privateKey: "private-key", publicKey: "public-key" };
+    },
+    releaseStatus() {
+      return null;
+    }
+  };
+  const testApp = await startTestApp({
+    installer,
+    proxyHost: "node.example.com"
+  });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const saved = await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/settings/certificate",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ email: "Ops@Example.COM" })
+    }
+  );
+  assert.equal(saved.status, 200);
+  assert.deepEqual(await saved.json(), {
+    mode: null,
+    email: "ops@example.com"
+  });
+
+  const bootstrap = await (await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/bootstrap"
+  )).json();
+  assert.deepEqual(bootstrap.certificate, {
+    mode: null,
+    email: "ops@example.com"
+  });
+
+  const activation = await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/hosts/local/protocols/hysteria2/activate",
+    { method: "POST" }
+  );
+  assert.equal(activation.status, 200);
+  const activated = await activation.json();
+  assert.equal(activated.profile.tls.mode, "acme");
+  assert.equal(activated.profile.tls.acmeEmail, "ops@example.com");
+});
+
 test("remote one-click activation automatically retries the next port reported free by its Node", async (t) => {
   const installer = {
     async status() {

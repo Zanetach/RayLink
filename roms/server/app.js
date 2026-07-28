@@ -6,6 +6,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BbrManager } from "./bbr.js";
+import { normalizeCertificateEmail } from "./certificate-settings.js";
 import { RayLinkStore } from "./database.js";
 import { validateNodeEncryptionPublicKey } from "./node-secrets.js";
 import {
@@ -227,13 +228,11 @@ function normalizeSetupInput(body) {
       422
     );
   }
-  const certificateEmail = String(body.certificate?.email || "").trim().toLowerCase();
-  if (
-    certificateMode === "caddy-auto"
-    && !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,63}$/.test(certificateEmail)
-  ) {
-    throw httpError("INVALID_SETUP_INPUT", "请输入有效的证书通知邮箱", 422);
-  }
+  const certificateEmail = certificateMode === "caddy-auto"
+    ? normalizeCertificateEmail(body.certificate?.email, {
+        errorCode: "INVALID_SETUP_INPUT"
+      })
+    : "";
 
   const username = String(body.admin?.username || "").trim();
   const password = String(body.admin?.password || "");
@@ -470,9 +469,9 @@ export async function createRayLinkApp(options) {
         || (typeof runtimeAdapter.probeProtocol === "function"
           ? (input) => runtimeAdapter.probeProtocol(input)
           : null),
-      certificateEmail: () => store.setupStatus().certificate?.email || "",
+      certificateEmail: () => store.certificateSettings().email,
       certificateProvider: async (domain) => {
-        if (store.setupStatus().certificate?.mode !== "caddy-auto") return null;
+        if (store.certificateSettings().mode !== "caddy-auto") return null;
         return setupAccessManager.ensureNodeCertificate(domain);
       },
       runtimeMode: options.runtimeMode || "dry-run"
@@ -1219,6 +1218,7 @@ export async function createRayLinkApp(options) {
           sendJson(response, 200, {
             ...bootstrap,
             hosts,
+            certificate: store.certificateSettings(),
             telemetry: store.telemetryOverview(),
             runtime,
             runtimePreview: runtimeManager.preview(),
@@ -1232,6 +1232,18 @@ export async function createRayLinkApp(options) {
               activationPolicy: protocolActivationPolicy(protocol.type)
             }))
           });
+          return;
+        }
+
+        if (
+          request.method === "PATCH"
+          && url.pathname === "/api/settings/certificate"
+        ) {
+          sendJson(
+            response,
+            200,
+            store.updateCertificateSettings(await readJson(request))
+          );
           return;
         }
 
