@@ -1215,12 +1215,19 @@ export class RayLinkStore {
 
   userForSubscription(publicId, secret) {
     if (!publicId || !secret) return null;
-    return this.db.prepare(`
-      SELECT id
+    const user = this.db.prepare(`
+      SELECT id, used_bytes, quota_gb, expires_at
       FROM users
       WHERE subscription_public_id = ?
         AND subscription_secret_hash = ?
-    `).get(publicId, hashSessionSecret(secret)) || null;
+    `).get(publicId, hashSessionSecret(secret));
+    if (!user) return null;
+    return {
+      id: user.id,
+      usedBytes: Number(user.used_bytes || 0),
+      quotaGb: Number(user.quota_gb),
+      expiresAt: user.expires_at
+    };
   }
 
   listUsers() {

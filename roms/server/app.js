@@ -117,15 +117,38 @@ function versionIsOlder(currentVersion, targetVersion) {
   return false;
 }
 
-function sendSubscriptionArtifact(request, response, artifact) {
+function subscriptionUserInfo(user) {
+  const usedBytes = Math.max(
+    0,
+    Math.round(
+      user.usedBytes === undefined
+        ? (Number(user.usedGb) || 0) * (1024 ** 3)
+        : Number(user.usedBytes) || 0
+    )
+  );
+  const totalBytes = Math.max(0, Math.round((Number(user.quotaGb) || 0) * (1024 ** 3)));
+  const expiresAt = new Date(`${user.expiresAt}T23:59:59.999Z`);
+  const expire = Number.isFinite(expiresAt.getTime())
+    ? Math.floor(expiresAt.getTime() / 1000)
+    : 0;
+  return `upload=0; download=${usedBytes}; total=${totalBytes}; expire=${expire}`;
+}
+
+function sendSubscriptionArtifact(request, response, artifact, user) {
   const payload = artifact.body;
-  const etag = `"${createHash("sha256").update(payload).digest("hex")}"`;
+  const userInfo = subscriptionUserInfo(user);
+  const etag = `"${createHash("sha256")
+    .update(payload)
+    .update("\0")
+    .update(userInfo)
+    .digest("hex")}"`;
   const headers = {
     "cache-control": "private, no-cache",
     "content-type": artifact.contentType,
     "content-length": Buffer.byteLength(payload),
     "content-disposition": `attachment; filename="${artifact.filename}"`,
     etag,
+    "subscription-userinfo": userInfo,
     "referrer-policy": "no-referrer",
     vary: "User-Agent, Accept",
     "x-content-type-options": "nosniff",
@@ -1141,10 +1164,15 @@ export async function createRayLinkApp(options) {
           sendSubscriptionLanding(request, response, universalUrl);
           return;
         }
-        sendSubscriptionArtifact(request, response, buildSubscriptionArtifact({
-          format,
-          singBoxConfig: await buildClientConfigForUser(subscriptionUser.id)
-        }));
+        sendSubscriptionArtifact(
+          request,
+          response,
+          buildSubscriptionArtifact({
+            format,
+            singBoxConfig: await buildClientConfigForUser(subscriptionUser.id)
+          }),
+          subscriptionUser
+        );
         return;
       }
 
@@ -1250,10 +1278,15 @@ export async function createRayLinkApp(options) {
           const format = portalConfigMatch[1] === "sing-box"
             ? "singbox"
             : portalConfigMatch[1];
-          sendSubscriptionArtifact(request, response, buildSubscriptionArtifact({
-            format,
-            singBoxConfig: await buildClientConfigForUser(sessionUser.id)
-          }));
+          sendSubscriptionArtifact(
+            request,
+            response,
+            buildSubscriptionArtifact({
+              format,
+              singBoxConfig: await buildClientConfigForUser(sessionUser.id)
+            }),
+            profile.user
+          );
           return;
         }
         sendJson(response, 404, { error: { code: "NOT_FOUND", message: "接口不存在" } });

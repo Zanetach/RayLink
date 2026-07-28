@@ -1232,6 +1232,15 @@ test("active user logs in and downloads a credential-scoped sing-box client conf
     headers: { cookie: portalCookie }
   });
   assert.equal(configResponse.status, 200);
+  assert.equal(
+    configResponse.headers.get("subscription-userinfo"),
+    [
+      "upload=0",
+      `download=${Math.round(75.4 * (1024 ** 3))}`,
+      `total=${320 * (1024 ** 3)}`,
+      `expire=${Math.floor(new Date("2026-09-01T23:59:59.999Z").getTime() / 1000)}`
+    ].join("; ")
+  );
   const config = await configResponse.json();
   assert.equal(config.outbounds[0].server, "node.cyclelink.org");
   assert.equal(config.outbounds[0].server_port, 8388);
@@ -1384,6 +1393,15 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
   assert.equal(mihomo.status, 200);
   assert.match(mihomo.headers.get("content-type"), /application\/yaml/);
   assert.match(mihomo.headers.get("content-disposition"), /raylink-mihomo\.yaml/);
+  assert.equal(
+    mihomo.headers.get("subscription-userinfo"),
+    [
+      "upload=0",
+      `download=${Math.round(75.4 * (1024 ** 3))}`,
+      `total=${320 * (1024 ** 3)}`,
+      `expire=${Math.floor(new Date("2026-09-01T23:59:59.999Z").getTime() / 1000)}`
+    ].join("; ")
+  );
   assert.match(await mihomo.text(), /^mixed-port: 7890/m);
 
   const mihomoHead = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
@@ -1393,7 +1411,26 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
   assert.equal(mihomoHead.status, 200);
   assert.match(mihomoHead.headers.get("content-type"), /application\/yaml/);
   assert.ok(Number(mihomoHead.headers.get("content-length")) > 0);
+  assert.equal(
+    mihomoHead.headers.get("subscription-userinfo"),
+    mihomo.headers.get("subscription-userinfo")
+  );
   assert.equal(await mihomoHead.text(), "");
+
+  const user = testApp.app.store.listUsers()
+    .find((candidate) => candidate.email === "priya@vantage-bioworks.in");
+  testApp.app.store.updateUser(user.id, { usedGb: 76 });
+  const refreshedMihomo = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
+    headers: {
+      "if-none-match": mihomo.headers.get("etag"),
+      "user-agent": "clash-verge/v2.5.2"
+    }
+  });
+  assert.equal(refreshedMihomo.status, 200);
+  assert.match(
+    refreshedMihomo.headers.get("subscription-userinfo"),
+    new RegExp(`download=${76 * (1024 ** 3)}(?:;|$)`)
+  );
 
   const egern = await fetch(`${testApp.baseUrl}${subscription.pathname}?format=egern`);
   assert.equal(egern.status, 200);
