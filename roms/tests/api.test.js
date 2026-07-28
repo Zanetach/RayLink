@@ -2282,6 +2282,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /data-user-subscription-action/);
   assert.match(appScript, /data-user-subscription-qr/);
   assert.match(indexHtml, /src="\.\/qrcode\.min\.js/);
+  assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
 
   const logoResponse = await fetch(
     `${testApp.baseUrl}/assets/brand/raylink-mark.svg`
@@ -2357,10 +2358,17 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(portalHtml, /删除订阅/);
   assert.match(portalHtml, /href="\/styles\.css(?:\?[^"]*)?"/);
   assert.match(portalHtml, /src="\/qrcode\.min\.js/);
+  assert.match(portalHtml, /src="\/subscription-qr\.js/);
   assert.match(portalHtml, /src="\/portal\.js(?:\?[^"]*)?"/);
 
   const qrScriptResponse = await fetch(`${testApp.baseUrl}/qrcode.min.js`);
   assert.equal(qrScriptResponse.status, 200);
   assert.match(qrScriptResponse.headers.get("content-type"), /javascript/);
   assert.match(await qrScriptResponse.text(), /QRCode/);
+
+  const subscriptionQrResponse = await fetch(
+    `${testApp.baseUrl}/subscription-qr.js`
+  );
+  assert.equal(subscriptionQrResponse.status, 200);
+  assert.match(await subscriptionQrResponse.text(), /RayLinkSubscriptionQr/);
 });

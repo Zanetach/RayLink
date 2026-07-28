@@ -10,18 +10,6 @@ const subscriptionUrl = document.querySelector("#portal-subscription-url");
 const copySubscription = document.querySelector("#portal-copy-subscription");
 const subscriptionQr = document.querySelector("#portal-subscription-qr");
 
-function renderSubscriptionQr(container, value) {
-  container.replaceChildren();
-  new QRCode(container, {
-    text: value,
-    width: 184,
-    height: 184,
-    colorDark: "#07100c",
-    colorLight: "#ffffff",
-    correctLevel: QRCode.CorrectLevel.M
-  });
-}
-
 async function portalApi(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -117,9 +105,14 @@ subscriptionAction.addEventListener("click", async () => {
   try {
     const result = await portalApi("/api/portal/subscription/rotate", { method: "POST" });
     subscriptionUrl.value = result.subscriptionUrl;
-    renderSubscriptionQr(subscriptionQr, result.subscriptionUrl);
     subscriptionValue.hidden = false;
-    subscriptionStatus.textContent = "新地址已生成。请立即复制并导入客户端；本页面刷新后不会再次显示完整地址。";
+    const qrReady = window.RayLinkSubscriptionQr?.render(
+      subscriptionQr,
+      result.subscriptionUrl
+    ) === true;
+    subscriptionStatus.textContent = qrReady
+      ? "新地址已生成。请立即复制或扫描二维码并导入客户端；本页面刷新后不会再次显示完整地址。"
+      : "新地址已生成，二维码暂不可用，请立即复制链接；本页面刷新后不会再次显示完整地址。";
     subscriptionAction.textContent = "重置订阅地址";
   } catch (error) {
     subscriptionStatus.textContent = error.message;

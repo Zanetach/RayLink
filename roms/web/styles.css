@@ -105,11 +105,10 @@ body {
 .portal-subscription-value label { display: block; color: var(--faint); font-size: 10px; }
 .portal-subscription-value > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .portal-subscription-value input { min-width: 0; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-soft); font-family: var(--font-mono); font-size: 10px; padding: 0 11px; }
-.portal-subscription-value > .subscription-qr {
+.subscription-qr {
   display: grid;
   width: 208px;
   height: 208px;
-  grid-template-columns: none;
   place-items: center;
   justify-self: center;
   border: 1px solid var(--border);
@@ -117,8 +116,15 @@ body {
   background: #fff;
   padding: 12px;
 }
+.portal-subscription-value > .subscription-qr { grid-template-columns: none; }
 .subscription-qr canvas,
 .subscription-qr img { display: block; width: 184px; height: 184px; image-rendering: pixelated; }
+.subscription-qr.unavailable {
+  color: #24322c;
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+}
 .subscription-secret-note { color: var(--faint); font-size: 9px; line-height: 1.55; }
 .portal-guide { margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
 .portal-guide summary { color: var(--text-soft); cursor: pointer; font-size: 11px; font-weight: 600; }
@@ -1359,17 +1365,6 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .subscription-access > .button { width: 100%; justify-content: center; }
 .subscription-result { display: grid; gap: 10px; }
 .subscription-result[hidden] { display: none; }
-.subscription-result .subscription-qr {
-  display: grid;
-  width: 208px;
-  height: 208px;
-  place-items: center;
-  justify-self: center;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: #fff;
-  padding: 12px;
-}
 .portal-login-help { display: grid; grid-template-columns: 28px 1fr; gap: 12px; padding: 16px; background: var(--canvas); }
 .portal-login-help svg { width: 18px; height: 18px; margin: 4px 0 0 4px; color: var(--muted); }
 .portal-login-help strong, .portal-login-help small { display: block; }

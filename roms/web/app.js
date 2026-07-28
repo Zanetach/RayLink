@@ -1484,18 +1484,6 @@ async function copyText(text, message = "内容已复制到剪贴板。") {
   showToast("已复制", message);
 }
 
-function renderSubscriptionQr(container, value) {
-  container.replaceChildren();
-  new QRCode(container, {
-    text: value,
-    width: 184,
-    height: 184,
-    colorDark: "#07100c",
-    colorLight: "#ffffff",
-    correctLevel: QRCode.CorrectLevel.M
-  });
-}
-
 async function rotateAdminUserSubscription(button) {
   const isReset = button.dataset.subscriptionConfigured === "true";
   if (
@@ -1517,9 +1505,14 @@ async function rotateAdminUserSubscription(button) {
       { method: "POST" }
     );
     urlInput.value = result.subscriptionUrl;
-    renderSubscriptionQr(qr, result.subscriptionUrl);
     resultPanel.hidden = false;
-    status.textContent = "新地址已生成。请立即复制或让用户扫描二维码；关闭详情后不会再次显示完整地址。";
+    const qrReady = window.RayLinkSubscriptionQr?.render(
+      qr,
+      result.subscriptionUrl
+    ) === true;
+    status.textContent = qrReady
+      ? "新地址已生成。请立即复制或让用户扫描二维码；关闭详情后不会再次显示完整地址。"
+      : "新地址已生成，二维码暂不可用，请立即复制链接；关闭详情后不会再次显示完整地址。";
     button.dataset.subscriptionConfigured = "true";
     button.textContent = "重新生成订阅地址";
     const user = users.find((item) => item.id === button.dataset.userId);
