@@ -112,12 +112,15 @@ function fixture(type, overrides = {}) {
   const protocolProbe = async (input) => {
     events.push(["protocol-probe", input.type, input.port]);
     if (overrides.protocolProbeError) throw new Error("协议握手失败");
+    const latencyMs = input.network === "udp"
+      ? overrides.protocolLatencyMs
+      : overrides.publicLatencyMs;
     return {
       reachable: true,
       probe: "sing-box-tools-fetch",
       protocol: input.type,
-      ...(Number.isFinite(overrides.protocolLatencyMs)
-        ? { latencyMs: overrides.protocolLatencyMs }
+      ...(Number.isFinite(latencyMs)
+        ? { latencyMs }
         : {})
     };
   };
@@ -159,6 +162,10 @@ function fixture(type, overrides = {}) {
 test("protocol policies separate public, TLS, private and advanced behavior", () => {
   assert.equal(protocolActivationPolicy("shadowsocks").group, "one-click");
   assert.equal(protocolActivationPolicy("trojan").group, "tls");
+  assert.equal(protocolActivationPolicy("vmess").tls, "managed-certificate");
+  assert.equal(protocolActivationPolicy("trojan").tls, "managed-certificate");
+  assert.equal(protocolActivationPolicy("vless").tls, "managed-certificate");
+  assert.equal(protocolActivationPolicy("anytls").tls, "managed-certificate");
   assert.equal(protocolActivationPolicy("hysteria2").network, "udp");
   assert.equal(protocolActivationPolicy("socks").exposure, "private");
   assert.equal(protocolActivationPolicy("direct").group, "advanced");
@@ -185,7 +192,7 @@ test("one-click Shadowsocks activation reserves a port, opens TCP, publishes and
   ]);
   assert.equal(events.some(([name]) => name === "publish"), true);
   assert.equal(events.some(([name]) => name === "listening"), true);
-  assert.equal(events.some(([name]) => name === "public-probe"), true);
+  assert.equal(events.some(([name]) => name === "protocol-probe"), true);
 });
 
 test("Host latency measurement records TCP and UDP protocol results without changing profiles", async () => {
@@ -235,17 +242,15 @@ test("Host latency measurement marks enabled local-only protocols as not applica
   assert.match(activations.get("socks").publicCheck.reason, /仅本机/);
 });
 
-test("one-click VLESS uses generated Reality material", async () => {
+test("one-click VLESS uses the Host certificate for sing-box client compatibility", async () => {
   const { manager, profiles } = fixture("vless");
 
   await manager.enable({ hostId: "local", type: "vless", adminId: "admin-1" });
 
   const enabled = profiles.find((item) => item.type === "vless");
-  assert.equal(enabled.tls.mode, "reality");
-  assert.equal(enabled.tls.privateKey, "private-key");
-  assert.equal(enabled.tls.publicKey, "public-key");
-  assert.equal(enabled.tls.shortId, "0011223344556677");
-  assert.equal(enabled.tls.serverName, "www.microsoft.com");
+  assert.equal(enabled.tls.mode, "acme");
+  assert.equal(enabled.tls.serverName, "node.example.com");
+  assert.equal(enabled.tls.acmeEmail, "ops@example.com");
 });
 
 test("one-click Hysteria 2 binds node domain to ACME and opens UDP", async () => {
@@ -365,12 +370,12 @@ test("a remote port collision advances to the next candidate without reusing the
 
 test("failed public verification restores protocol config and firewall", async () => {
   const { manager, events, profiles, original } = fixture("shadowsocks", {
-    publicError: true
+    protocolProbeError: true
   });
 
   await assert.rejects(
     manager.enable({ hostId: "local", type: "shadowsocks", adminId: "admin-1" }),
-    /公网不可达/
+    /协议握手失败/
   );
 
   assert.deepEqual(profiles.find((item) => item.type === "shadowsocks"), original);

@@ -10,6 +10,8 @@ import {
   DUMMY_PASSWORD_HASH,
   hashPassword,
   hashSessionSecret,
+  protectSubscriptionSecret,
+  revealSubscriptionSecret,
   verifyPassword
 } from "./security.js";
 import { normalizeCertificateEmail } from "./certificate-settings.js";
@@ -123,7 +125,8 @@ function userFromRow(row) {
     expiresAt: row.expires_at,
     subscription: {
       publicId: row.subscription_public_id || null,
-      configured: Boolean(row.subscription_secret_hash)
+      configured: Boolean(row.subscription_secret_hash),
+      recoverable: Boolean(row.subscription_secret_encrypted)
     }
   };
 }
@@ -270,6 +273,7 @@ export class RayLinkStore {
     setupRequired = false,
     setupTokenHash = "",
     setupTokenExpiresAt = "",
+    subscriptionEncryptionKey = "",
     clock = () => new Date()
   }) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -277,6 +281,7 @@ export class RayLinkStore {
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.lastTelemetryPruneAt = 0;
     this.nodeTaskRetryBaseMs = Math.max(0, Number(nodeTaskRetryBaseMs) || 0);
+    this.subscriptionEncryptionKey = subscriptionEncryptionKey || adminPassword;
     this.clock = clock;
     this.migrate();
     this.seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData });
@@ -335,6 +340,7 @@ export class RayLinkStore {
         runtime_password TEXT NOT NULL,
         subscription_public_id TEXT,
         subscription_secret_hash TEXT,
+        subscription_secret_encrypted TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -517,6 +523,9 @@ export class RayLinkStore {
     }
     if (!userColumns.some((column) => column.name === "subscription_secret_hash")) {
       this.db.exec("ALTER TABLE users ADD COLUMN subscription_secret_hash TEXT");
+    }
+    if (!userColumns.some((column) => column.name === "subscription_secret_encrypted")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN subscription_secret_encrypted TEXT");
     }
     this.db.exec(`
       UPDATE users
@@ -1098,7 +1107,8 @@ export class RayLinkStore {
       SELECT users.id, users.name, users.initials, users.email, users.portal_status,
              users.state, users.used_gb, users.quota_gb,
              users.node_scope_json, users.client_formats_json, users.expires_at,
-             users.subscription_public_id, users.subscription_secret_hash
+             users.subscription_public_id, users.subscription_secret_hash,
+             users.subscription_secret_encrypted
       FROM users
       WHERE users.id = ?
     `).get(userId);
@@ -1149,12 +1159,67 @@ export class RayLinkStore {
     if (!user) throw domainError("USER_NOT_FOUND", "用户不存在", 404);
     const publicId = user.subscription_public_id || createRuntimePassword(18);
     const secret = createSessionSecret();
+    const encryptedSecret = protectSubscriptionSecret(
+      secret,
+      this.subscriptionEncryptionKey,
+      publicId
+    );
     this.db.prepare(`
       UPDATE users
-      SET subscription_public_id = ?, subscription_secret_hash = ?, updated_at = ?
+      SET subscription_public_id = ?, subscription_secret_hash = ?,
+          subscription_secret_encrypted = ?, updated_at = ?
       WHERE id = ?
-    `).run(publicId, hashSessionSecret(secret), nowIso(), userId);
+    `).run(
+      publicId,
+      hashSessionSecret(secret),
+      encryptedSecret,
+      nowIso(),
+      userId
+    );
     return { publicId, secret };
+  }
+
+  currentUserSubscription(userId) {
+    const user = this.db.prepare(`
+      SELECT subscription_public_id, subscription_secret_hash,
+             subscription_secret_encrypted
+      FROM users
+      WHERE id = ?
+    `).get(userId);
+    if (!user) throw domainError("USER_NOT_FOUND", "用户不存在", 404);
+    if (!user.subscription_secret_hash) {
+      return { configured: false, recoverable: false };
+    }
+    if (!user.subscription_secret_encrypted) {
+      return {
+        configured: true,
+        recoverable: false,
+        publicId: user.subscription_public_id
+      };
+    }
+    try {
+      const secret = revealSubscriptionSecret(
+        user.subscription_secret_encrypted,
+        this.subscriptionEncryptionKey,
+        user.subscription_public_id
+      );
+      if (hashSessionSecret(secret) !== user.subscription_secret_hash) {
+        throw new Error("订阅凭据校验失败");
+      }
+      return {
+        configured: true,
+        recoverable: true,
+        publicId: user.subscription_public_id,
+        secret
+      };
+    } catch {
+      return {
+        configured: true,
+        recoverable: false,
+        publicId: user.subscription_public_id,
+        reason: "decryption-failed"
+      };
+    }
   }
 
   userForSubscription(publicId, secret) {
@@ -1171,7 +1236,8 @@ export class RayLinkStore {
     return this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, used_bytes, quota_gb,
              node_scope_json, client_formats_json, expires_at,
-             subscription_public_id, subscription_secret_hash
+             subscription_public_id, subscription_secret_hash,
+             subscription_secret_encrypted
       FROM users
       ORDER BY created_at, name
     `).all().map(userFromRow);
@@ -2078,7 +2144,8 @@ export class RayLinkStore {
     const row = this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, used_bytes, quota_gb,
              node_scope_json, client_formats_json, expires_at,
-             subscription_public_id, subscription_secret_hash
+             subscription_public_id, subscription_secret_hash,
+             subscription_secret_encrypted
       FROM users WHERE id = ?
     `).get(id);
     return row ? userFromRow(row) : null;

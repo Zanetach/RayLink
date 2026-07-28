@@ -327,7 +327,9 @@ export async function createRayLinkApp(options) {
     nodeTaskRetryBaseMs: options.nodeTaskRetryBaseMs,
     setupRequired: options.setupRequired,
     setupTokenHash: options.setupTokenHash,
-    setupTokenExpiresAt: options.setupTokenExpiresAt
+    setupTokenExpiresAt: options.setupTokenExpiresAt,
+    subscriptionEncryptionKey: options.subscriptionEncryptionKey
+      || options.adminPassword
   });
   const currentPublicOrigin = () => {
     const configured = store.setupStatus().access?.canonicalOrigin;
@@ -336,6 +338,37 @@ export async function createRayLinkApp(options) {
   const currentSubscriptionOrigin = () => {
     const configured = store.setupStatus().access?.subscriptionOrigin;
     return configured ? new URL(configured) : configuredSubscriptionOrigin;
+  };
+  const subscriptionUrl = (subscription) => new URL(
+    `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
+    currentSubscriptionOrigin()
+  ).toString();
+  const currentSubscription = (userId) => {
+    const subscription = store.currentUserSubscription(userId);
+    if (!subscription.configured) {
+      throw httpError(
+        "SUBSCRIPTION_NOT_CONFIGURED",
+        "尚未生成订阅地址",
+        404
+      );
+    }
+    if (!subscription.recoverable) {
+      if (subscription.reason === "decryption-failed") {
+        console.warn(
+          `[RayLink] Stored subscription credential for user ${userId} could not be decrypted`
+        );
+      }
+      throw httpError(
+        "SUBSCRIPTION_ADDRESS_UNAVAILABLE",
+        subscription.reason === "decryption-failed"
+          ? "现有订阅地址无法解密；请检查订阅加密密钥，或重新生成地址"
+          : "现有订阅地址由旧版本生成，无法恢复；请重新生成一次，之后即可随时查看",
+        409
+      );
+    }
+    return {
+      subscriptionUrl: subscriptionUrl(subscription)
+    };
   };
   const requestOriginIsAllowed = (request) => {
     const requestOrigin = request.headers.origin;
@@ -1039,17 +1072,27 @@ export async function createRayLinkApp(options) {
           sendJson(response, 403, { error: { code: "ACCOUNT_DISABLED", message: "账号已经停用" } });
           return;
         }
+        if (
+          !["GET", "HEAD"].includes(request.method)
+          && !requestOriginIsAllowed(request)
+        ) {
+          sendJson(response, 403, {
+            error: { code: "ORIGIN_REJECTED", message: "请求来源不受信任" }
+          });
+          return;
+        }
         if (request.method === "GET" && url.pathname === "/api/portal/me") {
           sendJson(response, 200, profile);
+          return;
+        }
+        if (request.method === "GET" && url.pathname === "/api/portal/subscription") {
+          sendJson(response, 200, currentSubscription(sessionUser.id));
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/portal/subscription/rotate") {
           const subscription = store.rotateUserSubscription(sessionUser.id);
           sendJson(response, 201, {
-            subscriptionUrl: new URL(
-              `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
-              currentSubscriptionOrigin()
-            ).toString()
+            subscriptionUrl: subscriptionUrl(subscription)
           });
           return;
         }
@@ -1479,14 +1522,26 @@ export async function createRayLinkApp(options) {
           return;
         }
 
-        const userSubscriptionMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/subscription\/rotate$/);
-        if (request.method === "POST" && userSubscriptionMatch) {
-          const subscription = store.rotateUserSubscription(decodeURIComponent(userSubscriptionMatch[1]));
+        const currentUserSubscriptionMatch = url.pathname.match(
+          /^\/api\/users\/([^/]+)\/subscription$/
+        );
+        if (request.method === "GET" && currentUserSubscriptionMatch) {
+          sendJson(
+            response,
+            200,
+            currentSubscription(decodeURIComponent(currentUserSubscriptionMatch[1]))
+          );
+          return;
+        }
+        const rotateUserSubscriptionMatch = url.pathname.match(
+          /^\/api\/users\/([^/]+)\/subscription\/rotate$/
+        );
+        if (request.method === "POST" && rotateUserSubscriptionMatch) {
+          const subscription = store.rotateUserSubscription(
+            decodeURIComponent(rotateUserSubscriptionMatch[1])
+          );
           sendJson(response, 201, {
-            subscriptionUrl: new URL(
-              `/sub/${subscription.publicId}/${subscription.secret}/sing-box.json`,
-              currentSubscriptionOrigin()
-            ).toString()
+            subscriptionUrl: subscriptionUrl(subscription)
           });
           return;
         }
@@ -1595,6 +1650,7 @@ export async function createRayLinkApp(options) {
     server,
     store,
     runtimeManager,
+    protocolActivationManager,
     async listen({ host, port }) {
       await new Promise((resolve, reject) => {
         server.once("error", reject);

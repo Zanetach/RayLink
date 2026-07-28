@@ -65,14 +65,16 @@ test("managed protocol profiles compile separate user credentials into server in
   });
 
   assert.equal(inbounds.length, 2);
-  assert.deepEqual(inbounds[0].users, [{
+  assert.deepEqual(inbounds[0].users.slice(0, 1), [{
     name: "user@example.com",
     password: "dXNlci1wYXNzd29yZA=="
   }]);
-  assert.deepEqual(inbounds[1].users, [{
+  assert.equal(inbounds[0].users[1].name, "raylink-probe@internal");
+  assert.deepEqual(inbounds[1].users.slice(0, 1), [{
     name: "user@example.com",
     uuid: "3365c019-4b70-4dd5-9b3a-48d83a22f24d"
   }]);
+  assert.equal(inbounds[1].users[1].name, "raylink-probe@internal");
 });
 
 test("ACME TLS profiles compile a node-bound certificate request for sing-box 1.13", () => {
@@ -104,7 +106,7 @@ test("ACME TLS profiles compile a node-bound certificate request for sing-box 1.
   });
 });
 
-test("UDP protocol probe has a dedicated credential even before the first user is created", () => {
+test("public protocol probes have a dedicated credential before the first user is created", () => {
   const profile = normalizeProtocolConfig({
     ...defaultProtocolConfigs().find((item) => item.type === "hysteria2"),
     enabled: true,
@@ -124,6 +126,24 @@ test("UDP protocol probe has a dedicated credential even before the first user i
   assert.equal(inbound.users.length, 1);
   assert.equal(inbound.users[0].name, "raylink-probe@internal");
   assert.match(inbound.users[0].password, /^[A-Za-z0-9_-]{32}$/);
+
+  const vlessProfile = normalizeProtocolConfig({
+    ...defaultProtocolConfigs().find((item) => item.type === "vless"),
+    enabled: true,
+    tls: {
+      mode: "certificate",
+      serverName: "node.example.com",
+      certificatePath: "/tmp/node.crt",
+      keyPath: "/tmp/node.key"
+    }
+  });
+  const [vlessInbound] = buildProtocolInbounds({
+    profiles: [vlessProfile],
+    users: [],
+    masterPassword: "c2VydmVyLWtleS0xNg=="
+  });
+  assert.equal(vlessInbound.users[0].name, "raylink-probe@internal");
+  assert.match(vlessInbound.users[0].uuid, /^[0-9a-f-]{36}$/);
 });
 
 test("client configuration includes every enabled user-facing protocol", () => {

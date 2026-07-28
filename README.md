@@ -22,9 +22,9 @@ RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制�
 | 能力 | RayLink 的处理方式 |
 |---|---|
 | 一台控制面管理多台 VPS | 本机 Runtime 与远程 RayLink Node 使用同一套 Host、协议和 Deployment 模型 |
-| User Entitlement 与客户端配置 | 创建用户时直接设置流量、到期时间和 Host 范围；无需额外的可复用权益模板 |
+| User Entitlement 与客户端配置 | 创建用户时直接设置流量、到期时间和 Host 范围；订阅地址加密保存，可随时查看或显式重新生成 |
 | 一个客户端配置包含多个 Host | 按 User Entitlement 编译全部可用 Host 和协议，并生成 URLTest、Selector 与故障切换 |
-| Host 入口协议 | 协议绑定到具体 Host，按需启用；保存后经过能力、端口、TLS 与语法校验 |
+| Host 入口协议 | 协议绑定到具体 Host，按需启用；一键启用默认使用 Host 域名证书 TLS，并经过能力、端口与语法校验 |
 | 智能路由 | sing-box 客户端通过 TUN、DNS 分流、CN 规则直连和境外自动代理执行 |
 | 安全发布 | `sing-box check`、原子替换、版本快照、失败恢复和历史回滚 |
 | 真实流量计量 | 使用 sing-box 用户级统计，不以 Host 网卡总流量估算用户配额 |
@@ -89,20 +89,20 @@ flowchart LR
 服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.2/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.2/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | sudo bash'
 ```
 
 脚本会检测公网 IP，下载固定的 AMD64 发布包及 SHA-256，校验后解压，再执行系统安装。
 若需要指定公网 IP：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.2/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 一键安装会自动完成：
@@ -226,7 +226,7 @@ npm run check:production
 
 ## 当前边界
 
-v0.2.2 已覆盖单控制面、多 Host、用户客户端配置、安全发布、真实流量计量，以及由 Caddy 管理的首次初始化与域名配置。以下功能仍在后续范围：
+v0.2.12 已覆盖单控制面、多 Host、用户客户端配置、安全发布、真实流量计量，以及由 Caddy 管理的首次初始化与域名配置。以下功能仍在后续范围：
 
 - TLS 证书到期告警与 DNS 提供商 API 集成
 - 配置 URL 二维码与 Mihomo 格式转换
@@ -244,7 +244,7 @@ v0.2.2 已覆盖单控制面、多 Host、用户客户端配置、安全发布�
 - [生产落地计划](roms/docs/release/raylink-production-implementation-plan.md)
 - [v0.2.0 生产候选验收记录](roms/docs/release/v0.2.0-production-acceptance.md)
 - [v0.2.1 发布说明](roms/docs/release/v0.2.1.md)
-- [v0.2.2 发布说明](roms/docs/release/v0.2.2.md)
+- [v0.2.12 发布说明](roms/docs/release/v0.2.12.md)
 - [领域模型](roms/CONTEXT.md)
 - [架构决策记录](roms/docs/adr/)
 - [v0.2.0 发布说明](roms/docs/release/v0.2.0.md)

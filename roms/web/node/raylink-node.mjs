@@ -36,11 +36,56 @@ const execFile = promisify(execFileCallback);
 const AGENT_VERSION = "0.7.0";
 const SECRET_ENVELOPE_ALGORITHM = "x25519-hkdf-sha256-aes-256-gcm";
 const SECRET_ENVELOPE_CONTEXT = Buffer.from("raylink-node-secret-v1", "utf8");
-const UDP_PROTOCOL_PROBE_TYPES = new Set(["hysteria", "tuic", "hysteria2"]);
+const PROTOCOL_PROBE_TYPES = new Set([
+  "shadowsocks",
+  "vmess",
+  "vless",
+  "trojan",
+  "naive",
+  "anytls",
+  "hysteria",
+  "tuic",
+  "hysteria2"
+]);
 const DEFAULT_PROTOCOL_PROBE_URL = "https://www.gstatic.com/generate_204";
 
-export function buildUdpProtocolProbeConfig({ activation, configText }) {
+function realityPublicKey(privateKey) {
+  const raw = Buffer.from(String(privateKey || ""), "base64url");
+  if (raw.length !== 32) throw new Error("Reality 探针私钥无效");
+  const prefix = Buffer.from("302e020100300506032b656e04220420", "hex");
+  const key = createPrivateKey({
+    key: Buffer.concat([prefix, raw]),
+    type: "pkcs8",
+    format: "der"
+  });
+  return createPublicKey(key)
+    .export({ type: "spki", format: "der" })
+    .subarray(-32)
+    .toString("base64url");
+}
+
+function applyProbeTls(outbound, inbound) {
+  if (inbound.tls?.enabled !== true) return;
+  const serverName = inbound.tls.server_name;
+  if (!serverName) {
+    throw new Error(`${inbound.type} 外部探针缺少 TLS 服务器名称`);
+  }
+  outbound.tls = { enabled: true, server_name: serverName };
+  if (inbound.tls.reality?.enabled === true) {
+    outbound.tls.reality = {
+      enabled: true,
+      public_key: realityPublicKey(inbound.tls.reality.private_key),
+      short_id: inbound.tls.reality.short_id?.[0] || ""
+    };
+    outbound.tls.utls = { enabled: true, fingerprint: "chrome" };
+  }
+}
+
+export function buildProtocolProbeConfig({ activation, configText }) {
   const serverConfig = JSON.parse(configText);
+  if (!PROTOCOL_PROBE_TYPES.has(activation.type)) {
+    throw new Error(`协议 ${activation.type} 不支持外部握手探针`);
+  }
   const inbound = serverConfig.inbounds?.find((entry) => (
     entry.type === activation.type
     && Number(entry.listen_port) === Number(activation.port)
@@ -48,14 +93,13 @@ export function buildUdpProtocolProbeConfig({ activation, configText }) {
   if (!inbound) {
     throw new Error(`找不到 ${activation.type} 的已发布入站配置`);
   }
-  const user = inbound.users?.find((entry) => entry.name === "raylink-probe@internal")
+  const user = inbound.users?.find((entry) => (
+    entry.name === "raylink-probe@internal"
+    || entry.username === "raylink-probe@internal"
+  ))
     || inbound.users?.[0];
   if (!user) {
     throw new Error(`${activation.type} 外部探针需要至少一个有效用户`);
-  }
-  const serverName = inbound.tls?.server_name;
-  if (!serverName) {
-    throw new Error(`${activation.type} 外部探针缺少 TLS 服务器名称`);
   }
   const common = {
     type: activation.type,
@@ -64,7 +108,23 @@ export function buildUdpProtocolProbeConfig({ activation, configText }) {
     server_port: activation.port
   };
   let outbound;
-  if (activation.type === "hysteria") {
+  if (activation.type === "shadowsocks") {
+    outbound = {
+      ...common,
+      method: inbound.method,
+      password: `${inbound.password}:${user.password}`
+    };
+  } else if (activation.type === "vmess") {
+    outbound = { ...common, uuid: user.uuid, security: "auto" };
+  } else if (activation.type === "vless") {
+    outbound = { ...common, uuid: user.uuid };
+  } else if (activation.type === "naive") {
+    outbound = {
+      ...common,
+      username: user.username,
+      password: user.password
+    };
+  } else if (activation.type === "hysteria") {
     outbound = {
       ...common,
       auth_str: user.auth_str,
@@ -78,15 +138,11 @@ export function buildUdpProtocolProbeConfig({ activation, configText }) {
       password: user.password,
       congestion_control: "bbr"
     };
-  } else if (activation.type === "hysteria2") {
-    outbound = { ...common, password: user.password };
   } else {
-    throw new Error(`协议 ${activation.type} 不支持专用外部探针`);
+    outbound = { ...common, password: user.password };
   }
-  outbound.tls = {
-    enabled: true,
-    server_name: serverName
-  };
+  applyProbeTls(outbound, inbound);
+  if (inbound.transport) outbound.transport = structuredClone(inbound.transport);
   return {
     log: { disabled: true },
     dns: {
@@ -101,6 +157,8 @@ export function buildUdpProtocolProbeConfig({ activation, configText }) {
     }
   };
 }
+
+export const buildUdpProtocolProbeConfig = buildProtocolProbeConfig;
 
 function generateEncryptionKeypair() {
   const { publicKey, privateKey } = generateKeyPairSync("x25519");
@@ -524,7 +582,7 @@ export class NodeRuntimeAdapter {
       verify: (activation) => this.verifyPublicConnectivity(activation)
     };
     this.protocolProbe = options.protocolProbe || {
-      verify: (activation) => this.verifyUdpProtocol(activation)
+      verify: (activation) => this.verifyProtocol(activation)
     };
     this.protocolProbeUrl = options.protocolProbeUrl || DEFAULT_PROTOCOL_PROBE_URL;
     this.protocolProbeAttempts = Math.max(
@@ -634,8 +692,8 @@ export class NodeRuntimeAdapter {
     };
   }
 
-  async verifyUdpProtocol(activation) {
-    const probeConfig = buildUdpProtocolProbeConfig({
+  async verifyProtocol(activation) {
+    const probeConfig = buildProtocolProbeConfig({
       activation,
       configText: activation.configText
     });
@@ -826,8 +884,7 @@ export class NodeRuntimeAdapter {
       let activation = null;
       if (task.activation) {
         await this.portVerifier.waitForListening(task.activation);
-        const useProtocolProbe = task.activation.network === "udp"
-          && UDP_PROTOCOL_PROBE_TYPES.has(task.activation.type);
+        const useProtocolProbe = PROTOCOL_PROBE_TYPES.has(task.activation.type);
         const publicCheck = task.activation.exposure === "public"
           ? useProtocolProbe
             ? await this.protocolProbe.verify({

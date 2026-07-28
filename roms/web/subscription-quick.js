@@ -18,6 +18,7 @@ window.RayLinkSubscriptionQuick = Object.freeze({
     if (!url) return false;
     const panel = scope.querySelector("[data-user-subscription-panel]");
     if (!panel) return false;
-    return renderSubscriptionPanel(panel, url, qrRenderer);
+    renderSubscriptionPanel(panel, url, qrRenderer);
+    return true;
   }
 });

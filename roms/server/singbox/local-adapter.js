@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 
 import {
-  buildUdpProtocolProbeConfig,
+  buildProtocolProbeConfig,
   DEFAULT_PROTOCOL_PROBE_URL
 } from "./protocol-probe.js";
 
@@ -172,7 +172,7 @@ export class LocalSingBoxAdapter {
   }) {
     const sourceConfig = serverConfig
       || JSON.parse(await readFile(this.activePath, "utf8"));
-    const probeConfig = buildUdpProtocolProbeConfig({
+    const probeConfig = buildProtocolProbeConfig({
       type,
       address,
       port,

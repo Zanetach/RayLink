@@ -6,7 +6,7 @@
   <meta name="description" content="RayLink 用户中心">
   <title>用户中心 · RayLink</title>
   <link rel="icon" href="/assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=0.2.11">
+  <link rel="stylesheet" href="/styles.css?v=0.2.12">
 </head>
 <body class="portal-page">
   <main class="portal-shell">
@@ -53,7 +53,7 @@
             <input id="portal-subscription-url" type="url" readonly spellcheck="false">
             <button class="button secondary" id="portal-copy-subscription" type="button">复制</button>
           </div>
-          <small class="subscription-secret-note">二维码与链接包含登录凭据，请勿转发。页面刷新后不会再次显示完整地址。</small>
+          <small class="subscription-secret-note">二维码与链接包含登录凭据，请勿转发。地址在服务端加密保存，登录后可以再次查看。</small>
         </div>
         <button class="button primary" id="portal-subscription-action" type="button">生成订阅地址</button>
       </section>
@@ -72,7 +72,7 @@
     </section>
   </main>
   <script src="/qrcode.min.js?v=1.0.0"></script>
-  <script src="/subscription-qr.js?v=0.2.11"></script>
-  <script src="/portal.js?v=0.2.11"></script>
+  <script src="/subscription-qr.js?v=0.2.12"></script>
+  <script src="/portal.js?v=0.2.12"></script>
 </body>
 </html>

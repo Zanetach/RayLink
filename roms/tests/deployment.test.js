@@ -48,8 +48,12 @@ test("deployment publishes a validated snapshot without exposing credentials in 
   assert.equal(adapter.publications.length, 1);
 
   const publishedConfig = JSON.parse(adapter.publications[0].configText);
-  assert.equal(publishedConfig.inbounds[0].users.length, 5);
+  assert.equal(publishedConfig.inbounds[0].users.length, 6);
   assert.ok(publishedConfig.inbounds[0].users.every((user) => user.password));
+  assert.equal(
+    publishedConfig.inbounds[0].users.at(-1).name,
+    "raylink-probe@internal"
+  );
   assert.equal(store.listDeployments()[0].status, "active");
 });
 

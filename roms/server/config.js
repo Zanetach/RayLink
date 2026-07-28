@@ -36,6 +36,11 @@ export function loadConfig(env = process.env) {
   if (env.NODE_ENV === "production" && adminPassword === "Admin@2026") {
     throw new Error("RAYLINK_ADMIN_PASSWORD must be changed in production");
   }
+  const subscriptionEncryptionKey = env.RAYLINK_SUBSCRIPTION_ENCRYPTION_KEY
+    || (env.NODE_ENV === "production" ? "" : adminPassword);
+  if (env.NODE_ENV === "production" && !subscriptionEncryptionKey) {
+    throw new Error("RAYLINK_SUBSCRIPTION_ENCRYPTION_KEY must be set in production");
+  }
 
   return {
     host,
@@ -43,6 +48,7 @@ export function loadConfig(env = process.env) {
     dataDir: resolve(env.RAYLINK_DATA_DIR || "./data"),
     adminUsername: env.RAYLINK_ADMIN_USERNAME || "admin",
     adminPassword,
+    subscriptionEncryptionKey,
     seedDemoData: env.NODE_ENV !== "production",
     trustProxy: env.RAYLINK_TRUST_PROXY === "true",
     publicOrigin,

@@ -14,7 +14,7 @@ function loadSubscriptionSession() {
   return context.window.RayLinkSubscriptionSession;
 }
 
-test("generated subscription URLs remain available only in the current browser session", () => {
+test("the in-memory subscription cache resets on refresh so the server remains the source of truth", () => {
   const currentSession = loadSubscriptionSession();
   currentSession.remember("user-1", "https://sub.example.com/private-token");
 
@@ -25,7 +25,7 @@ test("generated subscription URLs remain available only in the current browser s
   assert.equal(
     loadSubscriptionSession().get("user-1"),
     "",
-    "a page refresh creates a new in-memory session without the bearer URL"
+    "a page refresh reloads the encrypted bearer URL from the authenticated API"
   );
 });
 

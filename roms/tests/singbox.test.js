@@ -84,7 +84,8 @@ test("sing-box config contains one credential per eligible user", () => {
     password: "MDEyMzQ1Njc4OWFiY2RlZg==",
     users: [
       { name: "active@example.cn", password: "YWJjZGVmZ2hpamtsbW5vcA==" },
-      { name: "all-nodes@example.cn", password: "cXdlcnR5dWlvcGFzZGZnaA==" }
+      { name: "all-nodes@example.cn", password: "cXdlcnR5dWlvcGFzZGZnaA==" },
+      { name: "raylink-probe@internal", password: "RU9hpUIXViwOQSsacCx2Wg==" }
     ]
   }]);
   assert.equal(config.outbounds[0].type, "direct");

@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { buildSingBoxConfig } from "../server/singbox/config.js";
 import {
-  buildUdpProtocolProbeConfig as buildLocalUdpProtocolProbeConfig
+  buildProtocolProbeConfig as buildLocalProtocolProbeConfig
 } from "../server/singbox/protocol-probe.js";
 import {
   buildProtocolClientConfig,
@@ -15,7 +15,7 @@ import {
   normalizeProtocolConfig,
   protocolCatalog
 } from "../server/singbox/protocol-catalog.js";
-import { buildUdpProtocolProbeConfig } from "../web/node/raylink-node.mjs";
+import { buildProtocolProbeConfig } from "../web/node/raylink-node.mjs";
 
 const singBoxBinary = process.env.SING_BOX_BIN || "sing-box";
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "raylink-protocol-check-"));
@@ -200,12 +200,39 @@ try {
       server: "node.example.com"
     });
     await checkConfig(`client-${protocol.type}-reality`, clientConfig);
+    const realityProbe = buildProtocolProbeConfig({
+      activation: {
+        type: protocol.type,
+        address: "node.example.com",
+        port: profile.port
+      },
+      configText: JSON.stringify(serverConfig)
+    });
+    assert.deepEqual(
+      realityProbe,
+      buildLocalProtocolProbeConfig({
+        type: protocol.type,
+        address: "node.example.com",
+        port: profile.port,
+        serverConfig
+      })
+    );
+    await checkConfig(`probe-${protocol.type}-reality`, realityProbe);
     checkedRealityProtocols.push(protocol.type);
   }
 
   const checkedAcmeProtocols = [];
-  const checkedUdpProtocolProbes = [];
-  for (const type of ["naive", "hysteria", "tuic", "hysteria2"]) {
+  const checkedProtocolProbes = [];
+  for (const type of [
+    "vmess",
+    "vless",
+    "trojan",
+    "naive",
+    "anytls",
+    "hysteria",
+    "tuic",
+    "hysteria2"
+  ]) {
     const profile = acmeProfile(type);
     const serverConfig = buildSingBoxConfig({
       host: {
@@ -217,29 +244,64 @@ try {
       masterPassword
     });
     await checkConfig(`server-${type}-acme`, serverConfig);
-    if (["hysteria", "tuic", "hysteria2"].includes(type)) {
-      const probeConfig = buildUdpProtocolProbeConfig({
-        activation: {
-          type,
-          address: "node.example.com",
-          port: profile.port
-        },
-        configText: JSON.stringify(serverConfig)
-      });
-      assert.deepEqual(
-        probeConfig,
-        buildLocalUdpProtocolProbeConfig({
-          type,
-          address: "node.example.com",
-          port: profile.port,
-          serverConfig
-        })
+    const probeConfig = buildProtocolProbeConfig({
+      activation: {
+        type,
+        address: "node.example.com",
+        port: profile.port
+      },
+      configText: JSON.stringify(serverConfig)
+    });
+    if (type === "naive") {
+      assert.equal(
+        probeConfig.outbounds[0].username,
+        "raylink-probe@internal",
+        "Naive probe must not consume a real User credential"
       );
-      await checkConfig(`probe-${type}`, probeConfig);
-      checkedUdpProtocolProbes.push(type);
     }
+    assert.deepEqual(
+      probeConfig,
+      buildLocalProtocolProbeConfig({
+        type,
+        address: "node.example.com",
+        port: profile.port,
+        serverConfig
+      })
+    );
+    await checkConfig(`probe-${type}`, probeConfig);
+    checkedProtocolProbes.push(type);
     checkedAcmeProtocols.push(type);
   }
+
+  const shadowsocksProfile = normalizeProtocolConfig({
+    ...defaultProtocolConfigs().find((profile) => profile.type === "shadowsocks"),
+    enabled: true
+  });
+  const shadowsocksServerConfig = buildSingBoxConfig({
+    host: { region: "test", buildTags: [] },
+    users: [user],
+    protocols: [shadowsocksProfile],
+    masterPassword
+  });
+  const shadowsocksProbe = buildProtocolProbeConfig({
+    activation: {
+      type: "shadowsocks",
+      address: "node.example.com",
+      port: shadowsocksProfile.port
+    },
+    configText: JSON.stringify(shadowsocksServerConfig)
+  });
+  assert.deepEqual(
+    shadowsocksProbe,
+    buildLocalProtocolProbeConfig({
+      type: "shadowsocks",
+      address: "node.example.com",
+      port: shadowsocksProfile.port,
+      serverConfig: shadowsocksServerConfig
+    })
+  );
+  await checkConfig("probe-shadowsocks", shadowsocksProbe);
+  checkedProtocolProbes.push("shadowsocks");
 
   const clientProfiles = protocolCatalog
     .filter((protocol) => protocol.clientCapable)
@@ -263,7 +325,7 @@ try {
     clientProtocolsChecked: clientProfiles.map((profile) => profile.type),
     realityProtocolsChecked: checkedRealityProtocols,
     acmeProtocolsChecked: checkedAcmeProtocols,
-    udpProtocolProbesChecked: checkedUdpProtocolProbes
+    protocolProbesChecked: checkedProtocolProbes
   }));
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });

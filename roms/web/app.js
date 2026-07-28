@@ -1096,9 +1096,11 @@ function userSubscriptionAccessMarkup(user) {
   const generatedUrl = subscriptionSession.get(user.id);
   const configured = user.subscription?.configured === true;
   const status = generatedUrl
-    ? "订阅地址已生成，可在本次浏览器会话中再次查看。"
+    ? "订阅地址已生成，可复制链接或扫描二维码。"
     : configured
-      ? "订阅已启用。完整地址不会长期保存；遗失时请重新生成。"
+      ? user.subscription?.recoverable
+        ? "正在读取现有订阅地址…"
+        : "现有地址由旧版本生成，需要重新生成一次；之后可随时查看。"
       : "尚未生成。生成后可复制链接或让用户扫描二维码。";
   return `
     <section class="user-access-card" data-user-subscription-panel>
@@ -1121,7 +1123,7 @@ function userSubscriptionAccessMarkup(user) {
             <input id="user-subscription-url" type="url" value="${escapeHtml(generatedUrl)}" readonly spellcheck="false">
             <button type="button" class="button secondary" data-copy-target="user-subscription-url">${icon("copy")}复制</button>
           </div>
-          <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付；刷新页面或退出登录后不再显示。</small>
+          <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付。地址在服务端加密保存，刷新页面后仍可查看。</small>
         </div>
         <button
           type="button"
@@ -1173,13 +1175,36 @@ function userDrawerMarkup(user = {}) {
     </form>`;
 }
 
-function hydrateUserSubscriptionPanel(scope, userId) {
-  subscriptionQuick.hydrate({
+async function hydrateUserSubscriptionPanel(scope, userId) {
+  const hydrated = subscriptionQuick.hydrate({
     scope,
     userId,
     session: subscriptionSession,
     qrRenderer: (container, value) => window.RayLinkSubscriptionQr?.render(container, value)
   });
+  if (hydrated) return;
+  const user = users.find((candidate) => candidate.id === userId);
+  if (!user?.subscription?.configured) return;
+  const panel = scope.querySelector("[data-user-subscription-panel]");
+  const status = panel?.querySelector("[data-user-subscription-status]");
+  if (!panel || !status) return;
+  try {
+    const result = await api(
+      `/api/users/${encodeURIComponent(userId)}/subscription`
+    );
+    const qrReady = subscriptionQuick.reveal({
+      panel,
+      userId,
+      url: result.subscriptionUrl,
+      session: subscriptionSession,
+      qrRenderer: (container, value) => window.RayLinkSubscriptionQr?.render(container, value)
+    });
+    status.textContent = qrReady
+      ? "现有订阅地址已载入，可复制或扫描二维码。"
+      : "现有订阅地址已载入，二维码暂不可用，请复制链接。";
+  } catch (error) {
+    status.textContent = error.message;
+  }
 }
 
 function openUser(email) {
@@ -1442,7 +1467,7 @@ function protocolDrawerMarkup(hostId, type) {
       </div>
       ${oneClick ? `<div class="protocol-activation-card">
         <strong>开启后即可使用</strong>
-        <small>RayLink 将自动选择空闲 ${escapeHtml(policy.network.toUpperCase())} 端口，生成凭据${policy.tls === "reality" ? "和 Reality 密钥" : policy.tls === "acme" ? "并为节点域名申请 TLS 证书" : ""}，配置防火墙，校验并发布 sing-box，检查可用后加入用户订阅。</small>
+        <small>RayLink 将自动选择空闲 ${escapeHtml(policy.network.toUpperCase())} 端口，生成凭据${policy.tls === "reality" ? "和 Reality 密钥" : policy.tls === "managed-certificate" ? "并配置 Host 域名 TLS 证书" : ""}，配置防火墙，校验并发布 sing-box，检查可用后加入用户订阅。</small>
         ${state.activation?.state === "failed" ? `<small class="activation-error">上次启用失败：${escapeHtml(state.activation.error || "节点未返回错误详情")}${state.activation.rolledBack === false ? "；自动回滚未完整完成，请先检查节点。" : "；已自动回滚，可直接重试。"}</small>` : ""}
         <div class="activation-flow"><span>配置</span><i></i><span>发布</span><i></i><span>监听</span><i></i><span>${policy.exposure === "private" ? "本机可用" : "公网可用"}</span></div>
       </div>` : ""}
@@ -1604,14 +1629,14 @@ async function rotateAdminUserSubscription(button) {
       qrRenderer: (container, value) => window.RayLinkSubscriptionQr?.render(container, value)
     });
     status.textContent = qrReady
-      ? "新地址已生成。可在本次浏览器会话中再次查看；刷新页面或退出登录后不再显示。"
-      : "新地址已生成，二维码暂不可用，请复制链接；刷新页面或退出登录后不再显示。";
+      ? "新地址已生成并加密保存，之后可随时查看。"
+      : "新地址已生成并加密保存，二维码暂不可用，请复制链接。";
     button.dataset.subscriptionConfigured = "true";
     button.textContent = "重新生成订阅地址";
     const user = users.find((item) => item.id === button.dataset.userId);
     if (user) user.subscription = { ...(user.subscription || {}), configured: true };
     renderUsers();
-    showToast("订阅地址已生成", "本次浏览器会话内可再次查看；刷新页面或退出登录后不再显示。");
+    showToast("订阅地址已生成", "新地址已加密保存，之后可随时查看。");
   } catch (error) {
     status.textContent = error.message;
     button.textContent = previousText;

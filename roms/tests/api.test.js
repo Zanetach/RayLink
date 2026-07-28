@@ -289,6 +289,16 @@ test("remote one-click activation automatically retries the next port reported f
     authorization: `Bearer ${enrolled.nodeSecret}`,
     "x-raylink-host-id": enrolled.hostId
   };
+  const certificateSettings = await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/settings/certificate",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ email: "ops@example.com" })
+    }
+  );
+  assert.equal(certificateSettings.status, 200);
 
   const activated = await api(
     testApp.baseUrl,
@@ -1271,6 +1281,19 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   });
   const portalCookie = loginResponse.headers.getSetCookie()[0].split(";")[0];
 
+  const forgedRotate = await fetch(
+    `${testApp.baseUrl}/api/portal/subscription/rotate`,
+    {
+      method: "POST",
+      headers: {
+        cookie: portalCookie,
+        origin: "https://untrusted.example"
+      }
+    }
+  );
+  assert.equal(forgedRotate.status, 403);
+  assert.equal((await forgedRotate.json()).error.code, "ORIGIN_REJECTED");
+
   const firstRotate = await fetch(`${testApp.baseUrl}/api/portal/subscription/rotate`, {
     method: "POST",
     headers: { cookie: portalCookie }
@@ -1280,6 +1303,15 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   assert.equal(new URL(first.subscriptionUrl).origin, "https://sub.example.com");
   const firstSubscriptionPath = new URL(first.subscriptionUrl).pathname;
   assert.match(firstSubscriptionPath, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/sing-box\.json$/);
+  const currentSubscription = await fetch(
+    `${testApp.baseUrl}/api/portal/subscription`,
+    { headers: { cookie: portalCookie } }
+  );
+  assert.equal(currentSubscription.status, 200);
+  assert.equal(
+    (await currentSubscription.json()).subscriptionUrl,
+    first.subscriptionUrl
+  );
 
   const isolatedControlPlane = await fetch(`${testApp.baseUrl}/api/bootstrap`, {
     headers: { "x-forwarded-host": "sub.example.com" }
@@ -1348,6 +1380,31 @@ test("administrator can generate a user's subscription URL and rotating it revok
   assert.equal(new URL(first.subscriptionUrl).origin, "https://sub.example.com");
   const firstPath = new URL(first.subscriptionUrl).pathname;
   assert.equal((await fetch(`${testApp.baseUrl}${firstPath}`)).status, 200);
+  const currentResponse = await api(
+    testApp.baseUrl,
+    adminCookie,
+    `/api/users/${encodeURIComponent(user.id)}/subscription`
+  );
+  assert.equal(currentResponse.status, 200);
+  assert.equal(
+    (await currentResponse.json()).subscriptionUrl,
+    first.subscriptionUrl
+  );
+  testApp.app.store.db.prepare(`
+    UPDATE users
+    SET subscription_secret_encrypted = NULL
+    WHERE id = ?
+  `).run(user.id);
+  const legacyResponse = await api(
+    testApp.baseUrl,
+    adminCookie,
+    `/api/users/${encodeURIComponent(user.id)}/subscription`
+  );
+  assert.equal(legacyResponse.status, 409);
+  assert.equal(
+    (await legacyResponse.json()).error.code,
+    "SUBSCRIPTION_ADDRESS_UNAVAILABLE"
+  );
 
   const secondResponse = await api(
     testApp.baseUrl,
@@ -1960,8 +2017,9 @@ test("publishing queues a host-specific sing-box configuration for an enrolled R
   assert.equal(task.kind, "publish-config");
   assert.match(task.payload.version, /^v/);
   const config = JSON.parse(task.payload.configText);
-  assert.equal(config.inbounds[0].users.length, 1);
+  assert.equal(config.inbounds[0].users.length, 2);
   assert.equal(config.inbounds[0].users[0].name, "priya@vantage-bioworks.in");
+  assert.equal(config.inbounds[0].users[1].name, "raylink-probe@internal");
 
   const completionResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/${task.id}/complete`, {
     method: "POST",
@@ -2358,6 +2416,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /data-user-subscription-quick/);
   assert.match(appScript, /openUserSubscriptionQuick/);
   assert.match(appScript, /subscriptionQuick\.reveal/);
+  assert.match(appScript, /\/api\/users\/\$\{encodeURIComponent\(userId\)\}\/subscription/);
   assert.match(appScript, /subscriptionSession\.clear\(\)/);
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
   assert.doesNotMatch(appScript, /profile\.enabled \|\| oneClick/);
@@ -2376,7 +2435,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.11-protocol-latency/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.12-subscription-tls/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`

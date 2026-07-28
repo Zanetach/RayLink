@@ -9,6 +9,7 @@ const subscriptionValue = document.querySelector("#portal-subscription-value");
 const subscriptionUrl = document.querySelector("#portal-subscription-url");
 const copySubscription = document.querySelector("#portal-copy-subscription");
 const subscriptionQr = document.querySelector("#portal-subscription-qr");
+let subscriptionLoadRequest = 0;
 
 async function portalApi(path, options = {}) {
   const response = await fetch(path, {
@@ -40,12 +41,47 @@ function renderAccount(profile) {
   downloadButton.hidden = !entitlement.clientFormats.includes("sing-box");
   const configured = Boolean(user.subscription?.configured);
   subscriptionAction.dataset.configured = String(configured);
-  subscriptionAction.textContent = configured ? "重置订阅地址" : "生成订阅地址";
+  subscriptionAction.textContent = configured ? "重新生成订阅地址" : "生成订阅地址";
   subscriptionStatus.textContent = configured
-    ? "订阅已启用。出于安全考虑，地址不会再次显示；如果遗失，请重置后重新导入客户端。"
+    ? user.subscription?.recoverable
+      ? "正在读取现有订阅地址…"
+      : "现有地址由旧版本生成，需要重新生成一次；之后可随时查看。"
     : "生成后粘贴到 sing-box 客户端；地址保持有效，直到你主动重置。";
   loginPanel.hidden = true;
   accountPanel.hidden = false;
+  if (configured && user.subscription?.recoverable) {
+    loadCurrentSubscription();
+  } else {
+    subscriptionValue.hidden = true;
+  }
+}
+
+function revealSubscription(url, existing = false) {
+  subscriptionUrl.value = url;
+  subscriptionValue.hidden = false;
+  const qrReady = window.RayLinkSubscriptionQr?.render(subscriptionQr, url) === true;
+  subscriptionStatus.textContent = existing
+    ? qrReady
+      ? "现有订阅地址已载入，可复制或扫描二维码。"
+      : "现有订阅地址已载入，二维码暂不可用，请复制链接。"
+    : qrReady
+      ? "新地址已生成并加密保存，之后可随时查看。"
+      : "新地址已生成并加密保存，二维码暂不可用，请复制链接。";
+}
+
+async function loadCurrentSubscription() {
+  const requestId = ++subscriptionLoadRequest;
+  try {
+    const result = await portalApi("/api/portal/subscription");
+    if (requestId === subscriptionLoadRequest) {
+      revealSubscription(result.subscriptionUrl, true);
+    }
+  } catch (error) {
+    if (requestId === subscriptionLoadRequest) {
+      subscriptionStatus.textContent = error.message;
+      subscriptionValue.hidden = true;
+    }
+  }
 }
 
 loginForm.addEventListener("submit", async (event) => {
@@ -99,26 +135,19 @@ downloadButton.addEventListener("click", async () => {
 
 subscriptionAction.addEventListener("click", async () => {
   const isReset = subscriptionAction.dataset.configured === "true";
-  if (isReset && !window.confirm("重置后，已经导入客户端的旧订阅地址会立即失效。确定继续吗？")) return;
+  if (isReset && !window.confirm("重新生成后，已经导入客户端的旧订阅地址会立即失效。确定继续吗？")) return;
 
   subscriptionAction.disabled = true;
-  subscriptionAction.textContent = isReset ? "正在重置…" : "正在生成…";
+  subscriptionAction.textContent = isReset ? "正在重新生成…" : "正在生成…";
   try {
     const result = await portalApi("/api/portal/subscription/rotate", { method: "POST" });
-    subscriptionUrl.value = result.subscriptionUrl;
-    subscriptionValue.hidden = false;
-    const qrReady = window.RayLinkSubscriptionQr?.render(
-      subscriptionQr,
-      result.subscriptionUrl
-    ) === true;
-    subscriptionStatus.textContent = qrReady
-      ? "新地址已生成。请立即复制或扫描二维码并导入客户端；本页面刷新后不会再次显示完整地址。"
-      : "新地址已生成，二维码暂不可用，请立即复制链接；本页面刷新后不会再次显示完整地址。";
+    subscriptionLoadRequest += 1;
+    revealSubscription(result.subscriptionUrl);
     subscriptionAction.dataset.configured = "true";
-    subscriptionAction.textContent = "重置订阅地址";
+    subscriptionAction.textContent = "重新生成订阅地址";
   } catch (error) {
     subscriptionStatus.textContent = error.message;
-    subscriptionAction.textContent = isReset ? "重置订阅地址" : "生成订阅地址";
+    subscriptionAction.textContent = isReset ? "重新生成订阅地址" : "生成订阅地址";
   } finally {
     subscriptionAction.disabled = false;
   }

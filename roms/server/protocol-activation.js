@@ -14,14 +14,14 @@ const execFile = promisify(execFileCallback);
 
 const policies = new Map([
   ["shadowsocks", { group: "one-click", network: "tcp", exposure: "public", tls: "none" }],
-  ["vmess", { group: "one-click", network: "tcp", exposure: "public", tls: "reality" }],
-  ["vless", { group: "one-click", network: "tcp", exposure: "public", tls: "reality" }],
-  ["trojan", { group: "tls", network: "tcp", exposure: "public", tls: "reality" }],
-  ["naive", { group: "tls", network: "tcp", exposure: "public", tls: "acme" }],
-  ["anytls", { group: "tls", network: "tcp", exposure: "public", tls: "reality" }],
-  ["hysteria", { group: "udp-tls", network: "udp", exposure: "public", tls: "acme" }],
-  ["tuic", { group: "udp-tls", network: "udp", exposure: "public", tls: "acme" }],
-  ["hysteria2", { group: "udp-tls", network: "udp", exposure: "public", tls: "acme" }],
+  ["vmess", { group: "one-click", network: "tcp", exposure: "public", tls: "managed-certificate" }],
+  ["vless", { group: "one-click", network: "tcp", exposure: "public", tls: "managed-certificate" }],
+  ["trojan", { group: "tls", network: "tcp", exposure: "public", tls: "managed-certificate" }],
+  ["naive", { group: "tls", network: "tcp", exposure: "public", tls: "managed-certificate" }],
+  ["anytls", { group: "tls", network: "tcp", exposure: "public", tls: "managed-certificate" }],
+  ["hysteria", { group: "udp-tls", network: "udp", exposure: "public", tls: "managed-certificate" }],
+  ["tuic", { group: "udp-tls", network: "udp", exposure: "public", tls: "managed-certificate" }],
+  ["hysteria2", { group: "udp-tls", network: "udp", exposure: "public", tls: "managed-certificate" }],
   ["socks", { group: "private", network: "tcp", exposure: "private", tls: "none" }],
   ["http", { group: "private", network: "tcp", exposure: "private", tls: "none" }],
   ["mixed", { group: "private", network: "tcp", exposure: "private", tls: "none" }],
@@ -283,7 +283,7 @@ export class ProtocolActivationManager {
     attempts,
     timeoutMs
   }) {
-    if (network === "udp" && this.protocolProbe) {
+    if (this.protocolProbe) {
       return this.protocolProbe({
         type,
         address,
@@ -532,7 +532,7 @@ export class ProtocolActivationManager {
         publicKey: keypair.publicKey,
         shortId: this.randomBytes(8).toString("hex")
       });
-    } else if (policy.tls === "acme") {
+    } else if (policy.tls === "managed-certificate") {
       const email = String(this.certificateEmail() || "").trim();
       if (!isDomain(host.address)) {
         throw activationError(

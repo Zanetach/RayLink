@@ -2,14 +2,26 @@ import { createHmac } from "node:crypto";
 
 const sourceRoot = "https://github.com/SagerNet/sing-box/tree/v1.13.14";
 const docsRoot = "https://sing-box.sagernet.org/configuration/inbound";
-const udpProbeTypes = new Set(["hysteria", "tuic", "hysteria2"]);
-const udpProbeUserName = "raylink-probe@internal";
+const protocolProbeTypes = new Set([
+  "shadowsocks",
+  "vmess",
+  "vless",
+  "trojan",
+  "naive",
+  "anytls",
+  "hysteria",
+  "tuic",
+  "hysteria2"
+]);
+const protocolProbeUserName = "raylink-probe@internal";
 
-function udpProbeUser(masterPassword, type) {
-  const password = createHmac("sha256", masterPassword)
+function protocolProbeUser(masterPassword, type) {
+  const passwordBytes = createHmac("sha256", masterPassword)
     .update(`raylink-probe-password:${type}`)
-    .digest("base64url")
-    .slice(0, 32);
+    .digest();
+  const password = type === "shadowsocks"
+    ? passwordBytes.subarray(0, 16).toString("base64")
+    : passwordBytes.toString("base64url").slice(0, 32);
   const uuidBytes = createHmac("sha256", masterPassword)
     .update(`raylink-probe-uuid:${type}`)
     .digest()
@@ -18,7 +30,7 @@ function udpProbeUser(masterPassword, type) {
   uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80;
   const hex = uuidBytes.toString("hex");
   return {
-    email: udpProbeUserName,
+    email: protocolProbeUserName,
     runtimePassword: password,
     runtimeUuid: [
       hex.slice(0, 8),
@@ -323,8 +335,8 @@ export function buildProtocolInbounds({ profiles, users, masterPassword }) {
     if (tls) base.tls = tls;
     const transport = buildTransport(profile);
     if (transport) base.transport = transport;
-    const serverUsers = udpProbeTypes.has(profile.type)
-      ? [...users, udpProbeUser(masterPassword, profile.type)]
+    const serverUsers = protocolProbeTypes.has(profile.type)
+      ? [...users, protocolProbeUser(masterPassword, profile.type)]
       : users;
     applyServerUsers(base, profile.type, serverUsers, masterPassword);
     return base;

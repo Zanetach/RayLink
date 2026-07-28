@@ -116,7 +116,7 @@ process.exit(args[0] === "check" ? 0 : 2);
   );
 });
 
-test("local adapter verifies Hysteria and TUIC through sing-box tools fetch", async (t) => {
+test("local adapter verifies UDP and TCP protocols through sing-box tools fetch", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "raylink-runtime-protocol-probe-"));
   const fakeBinary = join(dataDir, "fake-sing-box");
   const probeRecord = join(dataDir, "probe.json");
@@ -185,6 +185,46 @@ process.exit(2);
     uuid: "d5d29d63-1dad-4e45-9d0b-d4a012b71015",
     password: "probe-password",
     congestion_control: "bbr",
+    tls: {
+      enabled: true,
+      server_name: "node.example.com"
+    }
+  }]);
+
+  await adapter.publish({
+    version: "v2",
+    checksum: "second",
+    configText: JSON.stringify({
+      inbounds: [{
+        type: "vless",
+        tag: "raylink-vless",
+        listen: "::",
+        listen_port: 8444,
+        users: [{
+          name: "probe@example.com",
+          uuid: "d5d29d63-1dad-4e45-9d0b-d4a012b71015"
+        }],
+        tls: {
+          enabled: true,
+          server_name: "node.example.com",
+          certificate_path: "/tmp/certificate.pem",
+          key_path: "/tmp/private-key.pem"
+        }
+      }]
+    })
+  });
+  const tcpResult = await adapter.probeProtocol({
+    type: "vless",
+    address: "node.example.com",
+    port: 8444
+  });
+  assert.equal(tcpResult.reachable, true);
+  assert.deepEqual(JSON.parse(await readFile(probeRecord, "utf8")).outbounds, [{
+    type: "vless",
+    tag: "raylink-probe",
+    server: "node.example.com",
+    server_port: 8444,
+    uuid: "d5d29d63-1dad-4e45-9d0b-d4a012b71015",
     tls: {
       enabled: true,
       server_name: "node.example.com"

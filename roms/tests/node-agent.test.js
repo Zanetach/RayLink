@@ -220,7 +220,7 @@ test("RayLink Node reports a failed task without swallowing the next poll cycle"
   });
 });
 
-test("remote protocol activation opens its firewall, verifies listening and reports readiness", async () => {
+test("remote TCP protocol activation performs a real protocol probe before reporting readiness", async () => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-node-activation-"));
   const events = [];
   const adapter = new NodeRuntimeAdapter({
@@ -237,10 +237,10 @@ test("remote protocol activation opens its firewall, verifies listening and repo
     portVerifier: {
       waitForListening: async (activation) => events.push(["listening", activation.port])
     },
-    publicProbe: {
+    protocolProbe: {
       verify: async (activation) => {
-        events.push(["public", activation.address, activation.port]);
-        return { reachable: true };
+        events.push(["protocol", activation.type, activation.address, activation.port]);
+        return { reachable: true, probe: "sing-box-tools-fetch" };
       }
     }
   });
@@ -262,9 +262,12 @@ test("remote protocol activation opens its firewall, verifies listening and repo
   assert.deepEqual(events, [
     ["firewall", "tcp", 18444],
     ["listening", 18444],
-    ["public", "node.example.com", 18444]
+    ["protocol", "vless", "node.example.com", 18444]
   ]);
-  assert.deepEqual(result.activation.publicCheck, { reachable: true });
+  assert.deepEqual(result.activation.publicCheck, {
+    reachable: true,
+    probe: "sing-box-tools-fetch"
+  });
   assert.equal(result.activation.firewallManaged, true);
 });
 

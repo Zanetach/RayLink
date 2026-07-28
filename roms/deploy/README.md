@@ -9,17 +9,17 @@
 
 ## 推荐：一键安装与首次初始化
 
-v0.2.11 Release 当前支持 AMD64（x86_64）。服务器需要预先具备 `curl`。
+v0.2.12 Release 当前支持 AMD64（x86_64）。服务器需要预先具备 `curl`。
 使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.11/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.11/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | sudo bash'
 ```
 
 脚本检测 CPU 架构和公网 IP，自动补齐 Debian/Ubuntu 上缺少的归档校验工具，
@@ -27,19 +27,19 @@ bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/dow
 云主机若有 NAT、多块网卡，建议显式提供实际访问地址：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.11/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 安装指定版本：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.11/install.sh | bash -s -- --version 0.2.11'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | bash -s -- --version 0.2.12'
 ```
 
 只验证下载、校验和解压，不修改系统：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.11/install.sh | bash -s -- --dry-run'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.12/install.sh | bash -s -- --dry-run'
 ```
 
 一键安装会完成：
@@ -61,6 +61,24 @@ sudo env RAYLINK_PUBLIC_IP=203.0.113.10 bash deploy/install-control-plane.sh
 浏览器首次访问 IP 证书会提示证书由本机签发。继续前应核对安装器输出的
 SHA-256 证书指纹。初始化令牌只以哈希形式写入服务器，默认 30 分钟后失效；
 初始化成功后立即作废。
+
+### 从旧版本升级到 v0.2.12
+
+升级前备份 `/var/lib/raylink`。首次启动 v0.2.12 前，在
+`/etc/raylink/raylink.env` 中固定一个独立随机值：
+
+```text
+RAYLINK_SUBSCRIPTION_ENCRYPTION_KEY=<长期固定的随机密钥>
+```
+
+该值用于加密可再次查看的订阅 bearer，后续不得随管理员密码一起轮换。停止控制面后，
+可在 v0.2.12 安装目录执行下列命令，把旧的一键 Reality 入口迁移到 Host 域名证书
+TLS；包装脚本会安全加载生产环境并使用 RayLink 内置 Node.js。每个协议独立原子发布，
+逐个执行真实 sing-box 握手，当前协议失败即回滚：
+
+```bash
+sudo bash deploy/migrate-default-tls.sh
+```
 
 ### 发布时预编译 Runtime
 
@@ -92,16 +110,16 @@ sudo bash deploy/build-runtime-artifact.sh 1.13.14 ./release-runtime amd64
 `raylink-sing-box-1.13.14-linux-amd64 version`，确认版本和完整审批 build tags。
 原生架构构建会在脚本内部直接完成这项执行校验。
 
-产物准备完成后构建正式安装包。v0.2.11 默认装配 AMD64 Runtime：
+产物准备完成后构建正式安装包。v0.2.12 默认装配 AMD64 Runtime：
 
 ```bash
-bash deploy/package-release.sh 0.2.11
+bash deploy/package-release.sh 0.2.12
 ```
 
 也可以显式指定本次发布需要装配的架构：
 
 ```bash
-RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.2.11
+RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.2.12
 ```
 
 发布包只包含 `package.json`、`server/`、`web/` 和 `deploy/`，不会打包本地

@@ -209,6 +209,7 @@ setup_expires_at="$(
   '
 )"
 bootstrap_password="$(openssl rand -base64 36 | tr -d '\n')"
+subscription_encryption_key="$(openssl rand -base64 36 | tr -d '\n')"
 
 umask 077
 {
@@ -221,6 +222,7 @@ umask 077
     'RAYLINK_TRUST_PROXY=true' \
     'RAYLINK_ADMIN_USERNAME=bootstrap-admin' \
     "RAYLINK_ADMIN_PASSWORD=${bootstrap_password}" \
+    "RAYLINK_SUBSCRIPTION_ENCRYPTION_KEY=${subscription_encryption_key}" \
     "RAYLINK_DATA_DIR=${data_root}" \
     "RAYLINK_PROXY_HOST=${public_ip}" \
     'RAYLINK_PROXY_PORT=8388' \
