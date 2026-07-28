@@ -8,7 +8,7 @@ fail() {
 
 script_directory="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source_root="$(CDPATH= cd -- "$script_directory/.." && pwd)"
-release_version="${1:-0.2.7}"
+release_version="${1:-0.2.8}"
 output_path="${2:-$source_root/output/raylink-${release_version}.tar.gz}"
 release_arches="${RAYLINK_RELEASE_ARCHES:-amd64}"
 runtime_version="${RAYLINK_RUNTIME_VERSION:-1.13.14}"
