@@ -86,6 +86,31 @@ test("setup page assets load when previewed directly from disk", async () => {
   }
 });
 
+test("release defaults and browser cache keys match the package version", async () => {
+  const packageMetadata = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8")
+  );
+  const version = packageMetadata.version;
+  const [installer, packager, deploymentGuide, adminPage, portalPage] = await Promise.all([
+    readFile(new URL("../deploy/install.sh", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/package-release.sh", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/README.md", import.meta.url), "utf8"),
+    readFile(new URL("../web/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../web/portal.html", import.meta.url), "utf8")
+  ]);
+
+  assert.match(installer, new RegExp(`RAYLINK_VERSION:-${version.replaceAll(".", "\\.")}`));
+  assert.match(packager, new RegExp(`release_version="\\$\\{1:-${version.replaceAll(".", "\\.")}\\}"`));
+  assert.match(deploymentGuide, new RegExp(`releases/download/v${version.replaceAll(".", "\\.")}/install\\.sh`));
+
+  for (const html of [adminPage, portalPage]) {
+    const assetVersions = [...html.matchAll(/(?:styles|app|portal|subscription-[^?"']+|protocol-health)\.(?:css|js)\?v=([0-9]+\.[0-9]+\.[0-9]+)/g)]
+      .map((match) => match[1]);
+    assert.ok(assetVersions.length > 0);
+    assert.deepEqual([...new Set(assetVersions)], [version]);
+  }
+});
+
 test("setup form keeps validation feedback inside the RayLink interface", async () => {
   const setupPage = new URL("../web/setup.html", import.meta.url);
   const setupScript = new URL("../web/setup.js", import.meta.url);
@@ -871,7 +896,7 @@ test("a failed control-plane health check restores application, data and service
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const version = "0.2.13";
+  const version = "0.2.14";
   const architecture = process.arch === "arm64" ? "arm64" : "amd64";
   const releaseDirectory = join(directory, `v${version}`);
   const packageDirectory = join(directory, `raylink-${version}`);

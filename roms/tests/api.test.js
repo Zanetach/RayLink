@@ -2670,7 +2670,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
   assert.match(indexHtml, /src="\.\/protocol-health\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.13-user-password-reset/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.14/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
