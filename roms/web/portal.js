@@ -39,6 +39,7 @@ function renderAccount(profile) {
   document.querySelector("#portal-node-scope").textContent = scopeLabel(entitlement.nodeScope);
   downloadButton.hidden = !entitlement.clientFormats.includes("sing-box");
   const configured = Boolean(user.subscription?.configured);
+  subscriptionAction.dataset.configured = String(configured);
   subscriptionAction.textContent = configured ? "重置订阅地址" : "生成订阅地址";
   subscriptionStatus.textContent = configured
     ? "订阅已启用。出于安全考虑，地址不会再次显示；如果遗失，请重置后重新导入客户端。"
@@ -97,7 +98,7 @@ downloadButton.addEventListener("click", async () => {
 });
 
 subscriptionAction.addEventListener("click", async () => {
-  const isReset = subscriptionAction.textContent.includes("重置");
+  const isReset = subscriptionAction.dataset.configured === "true";
   if (isReset && !window.confirm("重置后，已经导入客户端的旧订阅地址会立即失效。确定继续吗？")) return;
 
   subscriptionAction.disabled = true;
@@ -113,6 +114,7 @@ subscriptionAction.addEventListener("click", async () => {
     subscriptionStatus.textContent = qrReady
       ? "新地址已生成。请立即复制或扫描二维码并导入客户端；本页面刷新后不会再次显示完整地址。"
       : "新地址已生成，二维码暂不可用，请立即复制链接；本页面刷新后不会再次显示完整地址。";
+    subscriptionAction.dataset.configured = "true";
     subscriptionAction.textContent = "重置订阅地址";
   } catch (error) {
     subscriptionStatus.textContent = error.message;
