@@ -669,7 +669,7 @@ function renderHosts() {
       <td><button class="identity-link" data-open-host="${escapeHtml(host.id)}"><span class="flag">SB</span><span><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></span></button></td>
       <td><span class="status-badge ${statusClass}"><i></i>${status}</span></td>
       <td>${protocolLabels.length
-        ? protocolLabels.slice(0, 3).map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join(" ")
+        ? `<div class="host-protocol-tags" aria-label="已启用 ${protocolLabels.length} 个入口协议">${protocolLabels.map((name) => `<span class="tag">${escapeHtml(name)}</span>`).join("")}</div>`
         : '<span class="tag">尚未启用</span>'}</td>
       <td>${isLocal ? "控制面本机" : "RayLink Node"}</td>
       <td>${escapeHtml(isLocal ? runtime.platform || "local" : [host.platform, host.architecture].filter(Boolean).join(" / ") || "等待上报")}</td>

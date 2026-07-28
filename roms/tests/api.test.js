@@ -2289,11 +2289,18 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(appScript, /hydrateUserSubscriptionPanel/);
   assert.doesNotMatch(appScript, /profile\.enabled \|\| oneClick/);
   assert.match(appScript, /protocolDrawerMarkup\(hostId, protocolType\)/);
+  assert.doesNotMatch(appScript, /protocolLabels\.slice\(0,\s*3\)/);
+  assert.match(appScript, /class="host-protocol-tags"/);
+  const styleResponse = await fetch(`${testApp.baseUrl}/styles.css`);
+  assert.equal(styleResponse.status, 200);
+  const styles = await styleResponse.text();
+  assert.match(styles, /\.host-protocol-tags\s*\{/);
+  assert.match(styles, /flex-wrap:\s*wrap/);
   assert.match(indexHtml, /src="\.\/qrcode\.min\.js/);
   assert.match(indexHtml, /src="\.\/subscription-qr\.js/);
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.9-tls-activation/);
+  assert.match(indexHtml, /app\.js\?v=0\.2\.10-host-protocols/);
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`

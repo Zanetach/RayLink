@@ -1257,6 +1257,16 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .topology-node.warning .topology-node-mark > i { background: var(--danger); }
 .topology-node.warning em { color: var(--danger); }
 .host-table td { height: 70px; }
+.host-table td:nth-child(3) { min-width: 280px; white-space: normal; }
+.host-protocol-tags {
+  display: flex;
+  max-width: 520px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+}
+.host-protocol-tags .tag { margin: 0; }
 .flag { border-radius: 50%; font-size: 9px; }
 
 .release-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 15px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
