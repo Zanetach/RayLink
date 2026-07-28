@@ -1,5 +1,5 @@
 const users = [];
-const generatedSubscriptionUrls = new Map();
+const subscriptionSession = window.RayLinkSubscriptionSession;
 let bootstrapRefreshTimer = null;
 let bootstrapRefreshInFlight = false;
 const requiredNodeAgentVersion = "0.7.0";
@@ -993,7 +993,7 @@ function showAdminLogin() {
   elements.appShell.hidden = true;
   elements.mobileNav.hidden = true;
   elements.toast.classList.remove("visible");
-  generatedSubscriptionUrls.clear();
+  subscriptionSession.clear();
   history.replaceState({}, "", location.pathname);
   elements.authForm.elements.username.focus();
 }
@@ -1053,7 +1053,7 @@ function userPortalUrl() {
 }
 
 function userSubscriptionAccessMarkup(user) {
-  const generatedUrl = generatedSubscriptionUrls.get(user.id) || "";
+  const generatedUrl = subscriptionSession.get(user.id);
   const configured = user.subscription?.configured === true;
   const status = generatedUrl
     ? "订阅地址已生成，可在本次浏览器会话中再次查看。"
@@ -1134,7 +1134,7 @@ function userDrawerMarkup(user = {}) {
 }
 
 function hydrateUserSubscriptionPanel(scope, userId) {
-  const generatedUrl = generatedSubscriptionUrls.get(userId);
+  const generatedUrl = subscriptionSession.get(userId);
   if (!generatedUrl) return;
   const qr = scope.querySelector("[data-user-subscription-qr]");
   window.RayLinkSubscriptionQr?.render(qr, generatedUrl);
@@ -1554,7 +1554,7 @@ async function rotateAdminUserSubscription(button) {
       `/api/users/${encodeURIComponent(button.dataset.userId)}/subscription/rotate`,
       { method: "POST" }
     );
-    generatedSubscriptionUrls.set(button.dataset.userId, result.subscriptionUrl);
+    subscriptionSession.remember(button.dataset.userId, result.subscriptionUrl);
     urlInput.value = result.subscriptionUrl;
     resultPanel.hidden = false;
     const qrReady = window.RayLinkSubscriptionQr?.render(
@@ -1562,8 +1562,8 @@ async function rotateAdminUserSubscription(button) {
       result.subscriptionUrl
     ) === true;
     status.textContent = qrReady
-      ? "新地址已生成。请立即复制或让用户扫描二维码；关闭详情后不会再次显示完整地址。"
-      : "新地址已生成，二维码暂不可用，请立即复制链接；关闭详情后不会再次显示完整地址。";
+      ? "新地址已生成。可在本次浏览器会话中再次查看；刷新页面或退出登录后不再显示。"
+      : "新地址已生成，二维码暂不可用，请复制链接；刷新页面或退出登录后不再显示。";
     button.dataset.subscriptionConfigured = "true";
     button.textContent = "重新生成订阅地址";
     const user = users.find((item) => item.id === button.dataset.userId);
