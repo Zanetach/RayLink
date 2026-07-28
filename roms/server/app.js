@@ -137,7 +137,7 @@ function sendSubscriptionArtifact(request, response, artifact) {
     return;
   }
   response.writeHead(200, headers);
-  response.end(payload);
+  response.end(request.method === "HEAD" ? undefined : payload);
 }
 
 function escapeHtml(value) {
@@ -149,7 +149,7 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function sendSubscriptionLanding(response, subscriptionUrl) {
+function sendSubscriptionLanding(request, response, subscriptionUrl) {
   const formatUrl = (format) => {
     const target = new URL(subscriptionUrl);
     target.searchParams.set("format", format);
@@ -209,7 +209,7 @@ function sendSubscriptionLanding(response, subscriptionUrl) {
     "x-frame-options": "DENY",
     "x-robots-tag": "noindex, nofollow"
   });
-  response.end(payload);
+  response.end(request.method === "HEAD" ? undefined : payload);
 }
 
 const subscriptionFormatAliases = new Map([
@@ -1101,7 +1101,7 @@ export async function createRayLinkApp(options) {
       const subscriptionMatch = url.pathname.match(
         /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})(?:\/(sing-box\.json|mihomo\.yaml|egern\.yaml|egern-profile\.yaml))?$/
       );
-      if (request.method === "GET" && subscriptionMatch) {
+      if (["GET", "HEAD"].includes(request.method) && subscriptionMatch) {
         const subscriptionUser = store.userForSubscription(subscriptionMatch[1], subscriptionMatch[2]);
         if (!subscriptionUser) {
           sendJson(response, 401, {
@@ -1134,7 +1134,7 @@ export async function createRayLinkApp(options) {
           currentSubscriptionOrigin()
         ).toString();
         if (format === "landing") {
-          sendSubscriptionLanding(response, universalUrl);
+          sendSubscriptionLanding(request, response, universalUrl);
           return;
         }
         sendSubscriptionArtifact(request, response, buildSubscriptionArtifact({
