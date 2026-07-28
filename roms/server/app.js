@@ -137,6 +137,10 @@ function sendSubscriptionArtifact(request, response, artifact) {
     return;
   }
   response.writeHead(200, headers);
+  endRequestPayload(request, response, payload);
+}
+
+function endRequestPayload(request, response, payload) {
   response.end(request.method === "HEAD" ? undefined : payload);
 }
 
@@ -209,7 +213,7 @@ function sendSubscriptionLanding(request, response, subscriptionUrl) {
     "x-frame-options": "DENY",
     "x-robots-tag": "noindex, nofollow"
   });
-  response.end(request.method === "HEAD" ? undefined : payload);
+  endRequestPayload(request, response, payload);
 }
 
 const subscriptionFormatAliases = new Map([

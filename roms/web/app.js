@@ -1140,9 +1140,10 @@ function userDrawerMarkup(user = {}) {
       <p class="drawer-section-label">用户权益</p>
       <label class="field"><span>流量额度（GB）</span><input name="quota" type="number" min="1" step="1" value="${Number(user.quota || 120)}" required><small class="field-error"></small></label>
       <label class="field"><span>节点范围</span><select name="nodeGroup">${nodeGroupOptions}</select><small class="field-hint">该用户只能获取所选区域的客户端配置</small></label>
+      <p class="drawer-section-label">平台订阅能力</p>
       <div class="switch-row"><div><strong>多客户端订阅</strong><small>自动提供 Mihomo、Egern 与 sing-box 三种兼容配置</small></div><span class="status-badge good"><i></i>固定启用</span></div>
       <p class="drawer-section-label">账号状态</p>
-      <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用自己的流量、节点与客户端权益</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
+      <div class="switch-row"><div><strong>启用账号</strong><small>允许登录用户中心并使用自己的流量、节点与订阅服务</small></div><button type="button" class="switch ${user.state !== "disabled" ? "on" : ""}" data-user-enabled role="switch" aria-checked="${user.state !== "disabled"}"></button></div>
       <div class="switch-row"><div><strong>${isNew ? "创建后激活用户中心" : "允许登录用户中心"}</strong><small>登录账号使用当前邮箱，密码与 Runtime 凭据相互独立</small></div><button type="button" class="switch ${isNew || user.portalStatus === "active" ? "on" : ""}" data-portal-enabled role="switch" aria-checked="${isNew || user.portalStatus === "active"}"></button></div>
       ${isNew ? "" : `
         <p class="drawer-section-label">用户中心与订阅访问</p>

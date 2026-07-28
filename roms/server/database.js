@@ -22,7 +22,7 @@ import {
   normalizeProtocolConfigs
 } from "./singbox/protocol-catalog.js";
 
-export const DEFAULT_CLIENT_FORMATS = Object.freeze(["mihomo", "egern", "sing-box"]);
+const LEGACY_CLIENT_FORMATS_JSON = '["mihomo","egern","sing-box"]';
 
 const seedPlans = [
   {
@@ -31,7 +31,7 @@ const seedPlans = [
     quotaGb: 120,
     legacyDeviceLimit: 3,
     nodeScope: ["tokyo", "singapore"],
-    clientFormats: [...DEFAULT_CLIENT_FORMATS],
+    legacyClientFormatsJson: LEGACY_CLIENT_FORMATS_JSON,
     description: "适合日常办公和开发",
     tone: "standard"
   },
@@ -41,7 +41,7 @@ const seedPlans = [
     quotaGb: 320,
     legacyDeviceLimit: 5,
     nodeScope: ["all"],
-    clientFormats: [...DEFAULT_CLIENT_FORMATS],
+    legacyClientFormatsJson: LEGACY_CLIENT_FORMATS_JSON,
     description: "面向高流量研发团队",
     tone: "premium"
   },
@@ -51,7 +51,7 @@ const seedPlans = [
     quotaGb: 36,
     legacyDeviceLimit: 1,
     nodeScope: ["tokyo"],
-    clientFormats: [...DEFAULT_CLIENT_FORMATS],
+    legacyClientFormatsJson: LEGACY_CLIENT_FORMATS_JSON,
     description: "外部协作和短期项目",
     tone: "temporary"
   }
@@ -103,10 +103,6 @@ function validateUserEntitlement({ quotaGb, nodeScope }) {
   }
 }
 
-function normalizeClientFormats() {
-  return [...DEFAULT_CLIENT_FORMATS];
-}
-
 function userFromRow(row) {
   return {
     id: row.id,
@@ -120,7 +116,6 @@ function userFromRow(row) {
       : Number(row.used_bytes) / GIBIBYTE,
     quotaGb: row.quota_gb,
     nodeScope: parseJson(row.node_scope_json, []),
-    clientFormats: parseJson(row.client_formats_json, []),
     expiresAt: row.expires_at,
     subscription: {
       publicId: row.subscription_public_id || null,
@@ -611,7 +606,7 @@ export class RayLinkStore {
           plan.quotaGb,
           plan.legacyDeviceLimit,
           JSON.stringify(plan.nodeScope),
-          JSON.stringify(plan.clientFormats),
+          plan.legacyClientFormatsJson,
           plan.description,
           plan.tone,
           createdAt,
@@ -643,7 +638,7 @@ export class RayLinkStore {
           entitlement.quotaGb,
           entitlement.legacyDeviceLimit,
           JSON.stringify(entitlement.nodeScope),
-          JSON.stringify(entitlement.clientFormats),
+          entitlement.legacyClientFormatsJson,
           expiresAt,
           randomUUID(),
           createShadowsocksKey(),
@@ -1105,7 +1100,7 @@ export class RayLinkStore {
     const row = this.db.prepare(`
       SELECT users.id, users.name, users.initials, users.email, users.portal_status,
              users.state, users.used_gb, users.quota_gb,
-             users.node_scope_json, users.client_formats_json, users.expires_at,
+             users.node_scope_json, users.expires_at,
              users.subscription_public_id, users.subscription_secret_hash,
              users.subscription_secret_encrypted
       FROM users
@@ -1116,8 +1111,7 @@ export class RayLinkStore {
       user: userFromRow(row),
       entitlement: {
         quotaGb: row.quota_gb,
-        nodeScope: parseJson(row.node_scope_json, []),
-        clientFormats: parseJson(row.client_formats_json, [])
+        nodeScope: parseJson(row.node_scope_json, [])
       }
     };
   }
@@ -1126,7 +1120,6 @@ export class RayLinkStore {
     const row = this.db.prepare(`
       SELECT users.email, users.runtime_uuid, users.runtime_password, users.state, users.portal_status,
              users.expires_at, users.used_gb, users.quota_gb, users.node_scope_json,
-             users.client_formats_json,
              (SELECT region FROM hosts WHERE id = 'local') AS host_region,
              (SELECT value FROM settings WHERE key = 'shadowsocks_master_password') AS server_password
       FROM users
@@ -1144,7 +1137,6 @@ export class RayLinkStore {
       usedGb: row.used_gb,
       quotaGb: row.quota_gb,
       nodeScope: parseJson(row.node_scope_json, []),
-      clientFormats: parseJson(row.client_formats_json, []),
       hostRegion: row.host_region
     };
   }
@@ -1234,7 +1226,7 @@ export class RayLinkStore {
   listUsers() {
     return this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, used_bytes, quota_gb,
-             node_scope_json, client_formats_json, expires_at,
+             node_scope_json, expires_at,
              subscription_public_id, subscription_secret_hash,
              subscription_secret_encrypted
       FROM users
@@ -2074,8 +2066,7 @@ export class RayLinkStore {
     const email = String(input.email || "").trim().toLowerCase();
     const entitlement = {
       quotaGb: Number(input.quotaGb),
-      nodeScope: input.nodeScope,
-      clientFormats: normalizeClientFormats(input.clientFormats)
+      nodeScope: input.nodeScope
     };
     if (!name) throw domainError("INVALID_USER_NAME", "用户名称不能为空");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -2126,7 +2117,7 @@ export class RayLinkStore {
         entitlement.quotaGb,
         1,
         JSON.stringify(entitlement.nodeScope),
-        JSON.stringify(entitlement.clientFormats),
+        LEGACY_CLIENT_FORMATS_JSON,
         input.expiresAt,
         randomUUID(),
         createShadowsocksKey(),
@@ -2146,7 +2137,7 @@ export class RayLinkStore {
   getUser(id) {
     const row = this.db.prepare(`
       SELECT id, name, initials, email, portal_status, state, used_gb, used_bytes, quota_gb,
-             node_scope_json, client_formats_json, expires_at,
+             node_scope_json, expires_at,
              subscription_public_id, subscription_secret_hash,
              subscription_secret_encrypted
       FROM users WHERE id = ?
@@ -2162,9 +2153,6 @@ export class RayLinkStore {
       email: input.email === undefined ? current.email : String(input.email).trim().toLowerCase(),
       quotaGb: input.quotaGb === undefined ? current.quotaGb : Number(input.quotaGb),
       nodeScope: input.nodeScope === undefined ? current.nodeScope : input.nodeScope,
-      clientFormats: input.clientFormats === undefined
-        ? [...DEFAULT_CLIENT_FORMATS]
-        : normalizeClientFormats(input.clientFormats),
       expiresAt: input.expiresAt === undefined ? current.expiresAt : String(input.expiresAt),
       state: input.state === undefined ? current.state : String(input.state),
       portalStatus: input.portalStatus === undefined ? current.portalStatus : String(input.portalStatus),
@@ -2195,7 +2183,7 @@ export class RayLinkStore {
       this.db.prepare(`
         UPDATE users
         SET name = ?, initials = ?, email = ?, quota_gb = ?,
-            node_scope_json = ?, client_formats_json = ?, expires_at = ?,
+            node_scope_json = ?, expires_at = ?,
             state = ?, portal_status = ?, used_gb = ?, used_bytes = ?, updated_at = ?
         WHERE id = ?
       `).run(
@@ -2204,7 +2192,6 @@ export class RayLinkStore {
         next.email,
         next.quotaGb,
         JSON.stringify(next.nodeScope),
-        JSON.stringify(next.clientFormats),
         next.expiresAt,
         next.state,
         next.portalStatus,

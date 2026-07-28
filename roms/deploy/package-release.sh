@@ -9,9 +9,16 @@ fail() {
 script_directory="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source_root="$(CDPATH= cd -- "$script_directory/.." && pwd)"
 release_version="${1:-0.2.13}"
-output_path="${2:-$source_root/output/raylink-${release_version}.tar.gz}"
 release_arches="${RAYLINK_RELEASE_ARCHES:-amd64}"
 runtime_version="${RAYLINK_RUNTIME_VERSION:-1.13.14}"
+if [ -n "${2:-}" ]; then
+  output_path="$2"
+else
+  release_arch_count="$(printf '%s\n' "$release_arches" | awk '{ print NF }')"
+  [ "$release_arch_count" -eq 1 ] \
+    || fail "多架构发布必须显式指定输出文件名"
+  output_path="$source_root/output/raylink-${release_version}-linux-${release_arches}.tar.gz"
+fi
 
 printf '%s' "$release_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
   || fail "发布版本格式无效"

@@ -340,6 +340,17 @@ test("Host connection measurement requires at least three successful samples", a
   assert.equal(measured.results[0].status, "degraded");
   assert.equal(activations.get("shadowsocks").publicCheck.consecutiveFailures, 1);
   assert.equal(activations.get("shadowsocks").publicCheck.latencyMs, 90);
+  assert.deepEqual(
+    activations.get("shadowsocks").publicCheck.samples,
+    {
+      count: 5,
+      successful: 2,
+      failed: 3,
+      minMs: 20,
+      maxMs: 30
+    }
+  );
+  assert.equal(measured.results[0].successfulSamples, 2);
 });
 
 test("Host latency measurement marks enabled local-only protocols as not applicable", async () => {

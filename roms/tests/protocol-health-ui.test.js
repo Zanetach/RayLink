@@ -22,6 +22,8 @@ test("protocol health presentation exposes availability, connection time, jitter
       reachable: true,
       latencyMs: 128,
       jitterMs: 14,
+      samples: { count: 5, successful: 4 },
+      layers: { port: "passed", handshake: "passed", public: "passed" },
       checkedAt: "2026-07-28T12:19:49.365Z"
     }
   });
@@ -29,8 +31,11 @@ test("protocol health presentation exposes availability, connection time, jitter
   assert.equal(result.availabilityLabel, "可用");
   assert.equal(result.latencyLabel, "128 ms");
   assert.equal(result.jitterLabel, "14 ms");
+  assert.equal(result.availabilityRateLabel, "80%");
   assert.match(result.summary, /连接耗时 128 ms/);
   assert.match(result.summary, /抖动 14 ms/);
+  assert.match(result.summary, /可用率 80%/);
+  assert.match(result.summary, /端口 通过 · 协议握手 通过 · 公网访问 通过/);
   assert.match(result.summary, /最近检测/);
 });
 

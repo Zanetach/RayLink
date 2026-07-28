@@ -55,6 +55,23 @@ function connectionJitter(values) {
   return Math.round(deltas.reduce((total, value) => total + value, 0) / deltas.length);
 }
 
+function protocolHealthLayers({ reachable, probe, previousState = "" }) {
+  const fullProtocolProbe = probe === "sing-box-tools-fetch";
+  const passed = reachable === true;
+  const failed = reachable === false;
+  return {
+    port: passed
+      ? "passed"
+      : ["port-listening", "public-ready"].includes(previousState)
+        ? "last-known"
+        : "unknown",
+    handshake: fullProtocolProbe
+      ? passed ? "passed" : failed ? "failed" : "unknown"
+      : "not-measured",
+    public: passed ? "passed" : failed ? "failed" : "unknown"
+  };
+}
+
 export function protocolActivationPolicy(type) {
   const policy = policies.get(type);
   if (!policy) throw activationError("PROTOCOL_NOT_FOUND", "sing-box 入站协议不存在", 404);
@@ -448,10 +465,10 @@ export class ProtocolActivationManager {
         }
         const existing = existingActivations.get(profile.type);
         let publicCheck;
+        const latencies = [];
+        let lastProbe = null;
+        let lastError = null;
         try {
-          const latencies = [];
-          let lastProbe = null;
-          let lastError = null;
           for (let sample = 0; sample < PROTOCOL_CONNECTION_SAMPLE_COUNT; sample += 1) {
             try {
               const probe = await this.probePublicProtocol({
@@ -491,6 +508,11 @@ export class ProtocolActivationManager {
             latencyMs,
             jitterMs,
             samples: sampleSummary,
+            layers: protocolHealthLayers({
+              reachable: true,
+              probe: lastProbe?.probe,
+              previousState: existing?.state
+            }),
             consecutiveFailures: 0,
             availability: "available",
             lastSuccessAt: checkedAt,
@@ -514,6 +536,13 @@ export class ProtocolActivationManager {
             Number(previousCheck.consecutiveFailures || 0)
           ) + 1;
           const confirmedFailure = consecutiveFailures >= 3;
+          const sampleSummary = {
+            count: PROTOCOL_CONNECTION_SAMPLE_COUNT,
+            successful: latencies.length,
+            failed: PROTOCOL_CONNECTION_SAMPLE_COUNT - latencies.length,
+            minMs: latencies.length ? Math.min(...latencies) : null,
+            maxMs: latencies.length ? Math.max(...latencies) : null
+          };
           publicCheck = {
             ...previousCheck,
             reachable: confirmedFailure
@@ -525,13 +554,12 @@ export class ProtocolActivationManager {
             consecutiveFailures,
             lastSuccessAt: previousCheck.lastSuccessAt
               || (previousCheck.reachable === true ? previousCheck.checkedAt : null),
-            samples: {
-              count: PROTOCOL_CONNECTION_SAMPLE_COUNT,
-              successful: 0,
-              failed: PROTOCOL_CONNECTION_SAMPLE_COUNT,
-              minMs: null,
-              maxMs: null
-            },
+            samples: sampleSummary,
+            layers: protocolHealthLayers({
+              reachable: confirmedFailure ? false : null,
+              probe: lastProbe?.probe || (this.protocolProbe ? "sing-box-tools-fetch" : ""),
+              previousState: existing?.state
+            }),
             checkedAt,
             error: String(error.message || "协议探测失败").slice(0, 300)
           };
@@ -547,7 +575,7 @@ export class ProtocolActivationManager {
               ? Number(previousCheck.jitterMs)
               : null,
             sampleCount: PROTOCOL_CONNECTION_SAMPLE_COUNT,
-            successfulSamples: 0
+            successfulSamples: sampleSummary.successful
           });
         }
         this.store.setProtocolActivation(hostId, profile.type, {
@@ -776,6 +804,11 @@ export class ProtocolActivationManager {
       }
       publicCheck = {
         ...publicCheck,
+        layers: protocolHealthLayers({
+          reachable: publicCheck.reachable,
+          probe: publicCheck.probe,
+          previousState: "port-listening"
+        }),
         checkedAt: publicCheck.checkedAt || new Date().toISOString()
       };
       const state = publicCheck.reachable === true ? "public-ready" : "port-listening";

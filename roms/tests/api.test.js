@@ -364,7 +364,7 @@ test("authenticated bootstrap returns users with independent entitlements", asyn
   assert.equal(user.quotaGb, 120);
   assert.equal("deviceLimit" in user, false);
   assert.deepEqual(user.nodeScope, ["tokyo", "singapore"]);
-  assert.deepEqual(user.clientFormats, ["mihomo", "egern", "sing-box"]);
+  assert.equal("clientFormats" in user, false);
   assert.equal("planId" in user, false);
   assert.equal("passwordHash" in body.users[0], false);
   assert.equal("runtimeCredential" in body.users[0], false);
@@ -675,7 +675,7 @@ test("admin creates and updates a user-owned entitlement", async (t) => {
   assert.equal(user.quotaGb, 86);
   assert.equal("deviceLimit" in user, false);
   assert.deepEqual(user.nodeScope, ["tokyo"]);
-  assert.deepEqual(user.clientFormats, ["mihomo", "egern", "sing-box"]);
+  assert.equal("clientFormats" in user, false);
   assert.equal(user.state, "disabled");
   assert.equal("planId" in user, false);
   assert.equal("runtimePassword" in user, false);
