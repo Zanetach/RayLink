@@ -896,7 +896,7 @@ test("a failed control-plane health check restores application, data and service
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const version = "0.2.14";
+  const version = "0.2.15";
   const architecture = process.arch === "arm64" ? "arm64" : "amd64";
   const releaseDirectory = join(directory, `v${version}`);
   const packageDirectory = join(directory, `raylink-${version}`);

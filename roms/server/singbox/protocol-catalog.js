@@ -501,10 +501,8 @@ function clientConfigForOutbounds(
     dns: {
       servers: [
         {
-          type: "udp",
-          tag: "dns-local",
-          server: "223.5.5.5",
-          detour: "direct"
+          type: "local",
+          tag: "dns-local"
         },
         {
           type: "tls",

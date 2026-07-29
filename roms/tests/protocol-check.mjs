@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -118,6 +119,31 @@ async function checkConfig(name, config) {
     const detail = String(error.stderr || error.stdout || error.message).trim();
     throw new Error(`${name} failed sing-box check: ${detail}`);
   }
+}
+
+async function checkConfigStarts(name, config) {
+  const configPath = join(temporaryDirectory, `${name}.json`);
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const child = spawn(singBoxBinary, ["run", "-c", configPath], {
+    stdio: ["ignore", "ignore", "pipe"]
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const exited = once(child, "exit").then(([code, signal]) => ({ code, signal }));
+  const earlyExit = await Promise.race([
+    exited,
+    new Promise((resolve) => setTimeout(() => resolve(null), 500))
+  ]);
+  if (earlyExit) {
+    throw new Error(
+      `${name} failed sing-box runtime startup (${earlyExit.code ?? earlyExit.signal}): ${stderr.trim()}`
+    );
+  }
+  child.kill("SIGTERM");
+  await exited;
 }
 
 try {
@@ -317,6 +343,19 @@ try {
     server: "node.example.com"
   });
   await checkConfig("client-all-managed-protocols", clientConfig);
+  await checkConfigStarts("client-dns-runtime", {
+    log: { level: "info" },
+    dns: {
+      servers: [clientConfig.dns.servers.find((server) => server.tag === "dns-local")],
+      final: "dns-local"
+    },
+    inbounds: [],
+    outbounds: [{ type: "direct", tag: "direct" }],
+    route: {
+      final: "direct",
+      auto_detect_interface: true
+    }
+  });
 
   assert.equal(checkedProtocols.length, protocolCatalog.length);
   console.log(JSON.stringify({

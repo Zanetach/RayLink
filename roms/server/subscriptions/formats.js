@@ -214,7 +214,10 @@ function buildMihomoConfig(singBoxConfig) {
       url: "https://www.gstatic.com/generate_204",
       interval: 180,
       tolerance: 80,
-      lazy: true
+      lazy: false,
+      timeout: 5000,
+      "max-failed-times": 3,
+      "expected-status": 204
     },
     {
       name: "TCP 稳定",
@@ -223,7 +226,10 @@ function buildMihomoConfig(singBoxConfig) {
       url: "https://www.gstatic.com/generate_204",
       interval: 180,
       tolerance: 50,
-      lazy: true
+      lazy: false,
+      timeout: 5000,
+      "max-failed-times": 3,
+      "expected-status": 204
     },
     ...(udp.length ? [{
       name: "UDP 高速",
@@ -232,7 +238,10 @@ function buildMihomoConfig(singBoxConfig) {
       url: "https://www.gstatic.com/generate_204",
       interval: 180,
       tolerance: 80,
-      lazy: true
+      lazy: false,
+      timeout: 5000,
+      "max-failed-times": 3,
+      "expected-status": 204
     }] : []),
     {
       name: "故障回退",
@@ -240,7 +249,10 @@ function buildMihomoConfig(singBoxConfig) {
       proxies: [...new Set([...(tcp.length ? tcp : automatic), ...udp])],
       url: "https://www.gstatic.com/generate_204",
       interval: 180,
-      lazy: true
+      lazy: false,
+      timeout: 5000,
+      "max-failed-times": 3,
+      "expected-status": 204
     },
     {
       name: "手动选择",

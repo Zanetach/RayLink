@@ -189,6 +189,10 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.equal(config.inbounds[0].auto_route, true);
   assert.equal(config.inbounds[0].strict_route, true);
   assert.deepEqual(config.dns.servers.map((server) => server.tag), ["dns-local", "dns-remote"]);
+  assert.deepEqual(config.dns.servers[0], {
+    type: "local",
+    tag: "dns-local"
+  });
   assert.equal(config.dns.final, "dns-remote");
   assert.equal(config.route.rules[0].action, "sniff");
   assert.equal(config.route.rules[1].action, "hijack-dns");
