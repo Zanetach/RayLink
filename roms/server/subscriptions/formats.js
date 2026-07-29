@@ -141,13 +141,16 @@ function mihomoProxy(outbound) {
     }, outbound), outbound);
   }
   if (outbound.type === "tuic") {
+    const alpn = Array.isArray(outbound.tls?.alpn) && outbound.tls.alpn.length
+      ? outbound.tls.alpn
+      : null;
     return applyMihomoTls({
       ...common,
       uuid: outbound.uuid,
       password: outbound.password,
       "congestion-controller": outbound.congestion_control || "bbr",
       "udp-relay-mode": "native",
-      alpn: ["h3"],
+      ...(alpn ? { alpn } : {}),
       udp: true
     }, outbound);
   }
@@ -189,11 +192,13 @@ function buildMihomoConfig(singBoxConfig) {
   const tcp = uniqueExisting(groupMembers(singBoxConfig, "raylink-tcp"), names);
   const udp = uniqueExisting(groupMembers(singBoxConfig, "raylink-udp"), names);
   const automatic = smart.length ? smart : names;
+  const stableCandidates = [...new Set([...(tcp.length ? tcp : automatic), ...udp])];
+  const manualCandidates = [...new Set([...stableCandidates, ...names])];
   const policyChoices = [
+    "故障回退",
     "RayLink 智能",
     "TCP 稳定",
     ...(udp.length ? ["UDP 高速"] : []),
-    "故障回退",
     "手动选择"
   ];
   const proxyGroups = [
@@ -246,7 +251,7 @@ function buildMihomoConfig(singBoxConfig) {
     {
       name: "故障回退",
       type: "fallback",
-      proxies: [...new Set([...(tcp.length ? tcp : automatic), ...udp])],
+      proxies: stableCandidates,
       url: "https://www.gstatic.com/generate_204",
       interval: 180,
       lazy: false,
@@ -257,7 +262,7 @@ function buildMihomoConfig(singBoxConfig) {
     {
       name: "手动选择",
       type: "select",
-      proxies: names
+      proxies: manualCandidates
     }
   ];
   return {
@@ -269,7 +274,7 @@ function buildMihomoConfig(singBoxConfig) {
     "unified-delay": true,
     "tcp-concurrent": true,
     profile: {
-      "store-selected": true,
+      "store-selected": false,
       "store-fake-ip": true
     },
     dns: {
@@ -408,13 +413,16 @@ function egernProxy(outbound) {
     };
   }
   if (outbound.type === "tuic") {
+    const alpn = Array.isArray(outbound.tls?.alpn) && outbound.tls.alpn.length
+      ? outbound.tls.alpn
+      : null;
     return {
       tuic: {
         ...common,
         uuid: outbound.uuid,
         password: outbound.password,
         udp_relay_mode: "native",
-        alpn: ["h3"],
+        ...(alpn ? { alpn } : {}),
         sni: outbound.tls?.server_name || outbound.server,
         skip_tls_verify: false
       }

@@ -76,7 +76,12 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   assert.match(artifact.body, /expected-status: 204/);
   assert.match(
     artifact.body,
-    /name: "AI 网站代理"[\s\S]*?proxies:[\s\S]*?- "RayLink 智能"/
+    /name: "AI 网站代理"[\s\S]*?proxies:[\s\S]*?- "故障回退"/
+  );
+  assert.match(artifact.body, /store-selected: false/);
+  assert.match(
+    artifact.body,
+    /name: "手动选择"[\s\S]*?proxies:[\s\S]*?- "raylink-tokyo-vless"[\s\S]*?- "raylink-tokyo-hysteria2"/
   );
   assert.match(artifact.body, /DOMAIN-SUFFIX,openai\.com,AI 网站代理/);
   assert.match(artifact.body, /DOMAIN-SUFFIX,chatgpt\.com,AI 网站代理/);
@@ -235,4 +240,33 @@ test("Mihomo and Egern exporters cover every shared RayLink public protocol", ()
     assert.match(egern, new RegExp(`- ${type}:`));
   }
   assert.doesNotMatch(egern, /hysteria:/);
+});
+
+test("TUIC exporters do not require an ALPN the managed server did not advertise", () => {
+  const config = {
+    outbounds: [{
+      type: "tuic",
+      tag: "raylink-tuic",
+      server: "node.example.com",
+      server_port: 8447,
+      uuid: "33333333-3333-4333-8333-333333333333",
+      password: "tuic-password",
+      tls: {
+        enabled: true,
+        server_name: "node.example.com"
+      }
+    }]
+  };
+
+  const mihomo = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig: config
+  }).body;
+  const egern = buildSubscriptionArtifact({
+    format: "egern",
+    singBoxConfig: config
+  }).body;
+
+  assert.doesNotMatch(mihomo, /alpn:/);
+  assert.doesNotMatch(egern, /alpn:/);
 });
