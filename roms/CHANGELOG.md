@@ -1,6 +1,6 @@
 # RayLink Changelog
 
-## Unreleased
+## 0.2.17 - 2026-07-30
 
 ### Added
 

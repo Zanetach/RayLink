@@ -13,6 +13,9 @@ import { createRayLinkApp } from "../server/app.js";
 import { hashSessionSecret } from "../server/security.js";
 
 const execFile = promisify(execFileCallback);
+const packageVersion = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8")
+).version;
 
 async function requestJson(baseUrl, path, { method = "GET", headers = {}, body = "" } = {}) {
   const target = new URL(path, baseUrl);
@@ -88,10 +91,7 @@ test("setup page assets load when previewed directly from disk", async () => {
 });
 
 test("release defaults and browser cache keys match the package version", async () => {
-  const packageMetadata = JSON.parse(
-    await readFile(new URL("../package.json", import.meta.url), "utf8")
-  );
-  const version = packageMetadata.version;
+  const version = packageVersion;
   const [installer, packager, deploymentGuide, adminPage, portalPage] = await Promise.all([
     readFile(new URL("../deploy/install.sh", import.meta.url), "utf8"),
     readFile(new URL("../deploy/package-release.sh", import.meta.url), "utf8"),
@@ -1036,7 +1036,7 @@ test("a failed control-plane health check restores application, data and service
 test("one-command bootstrap verifies and prepares the matching release package", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-bootstrap-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const version = "0.2.16";
+  const version = packageVersion;
   const architecture = process.arch === "arm64" ? "arm64" : "amd64";
   const releaseDirectory = join(directory, `v${version}`);
   const packageDirectory = join(directory, `raylink-${version}`);

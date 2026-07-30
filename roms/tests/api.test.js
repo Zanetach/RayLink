@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { createRayLinkApp } from "../server/app.js";
+
+const packageVersion = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8")
+).version;
 
 async function startTestApp(overrides = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "raylink-api-"));
@@ -2899,7 +2904,7 @@ test("control plane serves the RayLink web application on the same origin", asyn
   assert.match(indexHtml, /src="\.\/subscription-session\.js/);
   assert.match(indexHtml, /src="\.\/subscription-quick\.js/);
   assert.match(indexHtml, /src="\.\/protocol-health\.js/);
-  assert.match(indexHtml, /app\.js\?v=0\.2\.16/);
+  assert.ok(indexHtml.includes(`app.js?v=${packageVersion}`));
 
   const subscriptionSessionResponse = await fetch(
     `${testApp.baseUrl}/subscription-session.js`
