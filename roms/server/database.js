@@ -61,6 +61,7 @@ const LEGACY_ENTITLEMENT_PLAN_ID = "user-entitlement";
 const GIBIBYTE = 1024 ** 3;
 const MAX_USAGE_SAMPLE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_USAGE_SAMPLE_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const ADMIN_ROLES = new Set(["owner", "operator", "support", "auditor"]);
 
 const seedUsers = [
   ["林知夏", "LZ", "lin.zhixia@meridian-log.cn", "active", "active", 74.3, "standard", "2026-10-18"],
@@ -110,6 +111,32 @@ function validateUserPassword(password) {
   return password;
 }
 
+function validateAdminRole(role) {
+  const normalized = String(role || "");
+  if (!ADMIN_ROLES.has(normalized)) {
+    throw domainError("INVALID_ADMIN_ROLE", "管理员角色无效");
+  }
+  return normalized;
+}
+
+function validateAdminUsername(username) {
+  const normalized = String(username || "").trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,63}$/.test(normalized)) {
+    throw domainError(
+      "INVALID_ADMIN_USERNAME",
+      "管理员用户名需要 3–64 位，只能使用字母、数字、点、横线和下划线"
+    );
+  }
+  return normalized;
+}
+
+function validateAdminPassword(password) {
+  if (typeof password !== "string" || password.length < 12) {
+    throw domainError("INVALID_ADMIN_PASSWORD", "管理员密码至少需要 12 位");
+  }
+  return password;
+}
+
 function userFromRow(row) {
   return {
     id: row.id,
@@ -146,6 +173,8 @@ function normalizeTelemetry(input = {}) {
     cpuPercent: finiteMetric(input.cpuPercent, 0, 100),
     memoryUsedBytes: finiteMetric(input.memoryUsedBytes, 0, Number.MAX_SAFE_INTEGER),
     memoryTotalBytes: finiteMetric(input.memoryTotalBytes, 1, Number.MAX_SAFE_INTEGER),
+    diskUsedBytes: finiteMetric(input.diskUsedBytes, 0, Number.MAX_SAFE_INTEGER),
+    diskTotalBytes: finiteMetric(input.diskTotalBytes, 1, Number.MAX_SAFE_INTEGER),
     networkRxBytes: finiteMetric(input.networkRxBytes, 0, Number.MAX_SAFE_INTEGER),
     networkTxBytes: finiteMetric(input.networkTxBytes, 0, Number.MAX_SAFE_INTEGER),
     networkRxBps: finiteMetric(input.networkRxBps, 0, Number.MAX_SAFE_INTEGER),
@@ -210,6 +239,8 @@ function hostFromRow(row) {
       cpuPercent: row.cpu_percent ?? null,
       memoryUsedBytes: row.memory_used_bytes ?? null,
       memoryTotalBytes: row.memory_total_bytes ?? null,
+      diskUsedBytes: row.disk_used_bytes ?? null,
+      diskTotalBytes: row.disk_total_bytes ?? null,
       networkRxBytes: row.network_rx_bytes ?? null,
       networkTxBytes: row.network_tx_bytes ?? null,
       networkRxBps: row.network_rx_bps ?? null,
@@ -295,6 +326,7 @@ export class RayLinkStore {
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'owner',
         created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS sessions (
@@ -303,6 +335,19 @@ export class RayLinkStore {
         expires_at TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        admin_id TEXT REFERENCES admins(id) ON DELETE SET NULL,
+        actor_username TEXT NOT NULL,
+        actor_role TEXT NOT NULL,
+        action TEXT NOT NULL,
+        resource_type TEXT NOT NULL,
+        resource_id TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS audit_events_created
+      ON audit_events(created_at DESC);
       CREATE TABLE IF NOT EXISTS user_sessions (
         secret_hash TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -370,6 +415,8 @@ export class RayLinkStore {
         cpu_percent REAL,
         memory_used_bytes INTEGER,
         memory_total_bytes INTEGER,
+        disk_used_bytes INTEGER,
+        disk_total_bytes INTEGER,
         network_rx_bytes INTEGER,
         network_tx_bytes INTEGER,
         network_rx_bps REAL,
@@ -483,6 +530,10 @@ export class RayLinkStore {
       CREATE INDEX IF NOT EXISTS daily_user_usage_user_date
       ON daily_user_usage(user_id, usage_date);
     `);
+    const adminColumns = this.db.prepare("PRAGMA table_info(admins)").all();
+    if (!adminColumns.some((column) => column.name === "role")) {
+      this.db.exec("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'owner'");
+    }
     const deploymentColumns = this.db.prepare("PRAGMA table_info(deployments)").all();
     if (!deploymentColumns.some((column) => column.name === "publisher_admin_id")) {
       this.db.exec("ALTER TABLE deployments ADD COLUMN publisher_admin_id TEXT");
@@ -558,6 +609,8 @@ export class RayLinkStore {
       ["cpu_percent", "REAL"],
       ["memory_used_bytes", "INTEGER"],
       ["memory_total_bytes", "INTEGER"],
+      ["disk_used_bytes", "INTEGER"],
+      ["disk_total_bytes", "INTEGER"],
       ["network_rx_bytes", "INTEGER"],
       ["network_tx_bytes", "INTEGER"],
       ["network_rx_bps", "REAL"],
@@ -587,8 +640,8 @@ export class RayLinkStore {
   seed({ adminUsername, adminPassword, initialHostAddress, initialListenPort, seedDemoData }) {
     const createdAt = nowIso();
     const insertAdmin = this.db.prepare(`
-      INSERT OR IGNORE INTO admins (id, username, password_hash, created_at)
-      VALUES (?, ?, ?, ?)
+      INSERT OR IGNORE INTO admins (id, username, password_hash, role, created_at)
+      VALUES (?, ?, ?, 'owner', ?)
     `);
     insertAdmin.run(randomUUID(), adminUsername, hashPassword(adminPassword), createdAt);
 
@@ -704,7 +757,150 @@ export class RayLinkStore {
     const admin = this.db.prepare("SELECT * FROM admins WHERE username = ?").get(username);
     const valid = await verifyPassword(password, admin?.password_hash || DUMMY_PASSWORD_HASH);
     if (!admin || !valid) return null;
-    return { id: admin.id, username: admin.username };
+    return { id: admin.id, username: admin.username, role: admin.role || "owner" };
+  }
+
+  listAdmins() {
+    return this.db.prepare(`
+      SELECT id, username, role, created_at
+      FROM admins
+      ORDER BY created_at, username
+    `).all().map((admin) => ({
+      id: admin.id,
+      username: admin.username,
+      role: admin.role || "owner",
+      createdAt: admin.created_at
+    }));
+  }
+
+  createAdmin(input) {
+    const admin = {
+      id: randomUUID(),
+      username: validateAdminUsername(input.username),
+      role: validateAdminRole(input.role),
+      password: validateAdminPassword(input.password),
+      createdAt: nowIso()
+    };
+    try {
+      this.db.prepare(`
+        INSERT INTO admins (id, username, password_hash, role, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        admin.id,
+        admin.username,
+        hashPassword(admin.password),
+        admin.role,
+        admin.createdAt
+      );
+    } catch (error) {
+      if (/UNIQUE constraint failed: admins\.username/i.test(error.message)) {
+        throw domainError("ADMIN_USERNAME_EXISTS", "管理员用户名已经存在", 409);
+      }
+      throw error;
+    }
+    return {
+      id: admin.id,
+      username: admin.username,
+      role: admin.role,
+      createdAt: admin.createdAt
+    };
+  }
+
+  updateAdmin(id, input) {
+    const current = this.db.prepare(
+      "SELECT id, username, role, created_at FROM admins WHERE id = ?"
+    ).get(id);
+    if (!current) throw domainError("ADMIN_NOT_FOUND", "管理员不存在", 404);
+    const username = input.username === undefined
+      ? current.username
+      : validateAdminUsername(input.username);
+    const role = input.role === undefined
+      ? current.role
+      : validateAdminRole(input.role);
+    if (current.role === "owner" && role !== "owner") {
+      const owners = this.db.prepare(
+        "SELECT COUNT(*) AS count FROM admins WHERE role = 'owner'"
+      ).get().count;
+      if (Number(owners) <= 1) {
+        throw domainError("LAST_OWNER_REQUIRED", "系统必须保留至少一个 Owner", 409);
+      }
+    }
+    const password = input.password === undefined
+      ? null
+      : validateAdminPassword(input.password);
+    try {
+      this.db.prepare(`
+        UPDATE admins
+        SET username = ?, role = ?,
+            password_hash = CASE WHEN ? IS NULL THEN password_hash ELSE ? END
+        WHERE id = ?
+      `).run(
+        username,
+        role,
+        password,
+        password ? hashPassword(password) : null,
+        id
+      );
+    } catch (error) {
+      if (/UNIQUE constraint failed: admins\.username/i.test(error.message)) {
+        throw domainError("ADMIN_USERNAME_EXISTS", "管理员用户名已经存在", 409);
+      }
+      throw error;
+    }
+    if (password) this.db.prepare("DELETE FROM sessions WHERE admin_id = ?").run(id);
+    return {
+      id,
+      username,
+      role,
+      createdAt: current.created_at
+    };
+  }
+
+  recordAuditEvent({
+    adminId,
+    actorUsername,
+    actorRole,
+    action,
+    resourceType,
+    resourceId = null,
+    metadata = {}
+  }) {
+    this.db.prepare(`
+      INSERT INTO audit_events (
+        admin_id, actor_username, actor_role, action, resource_type,
+        resource_id, metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      adminId || null,
+      String(actorUsername || "unknown"),
+      String(actorRole || "unknown"),
+      String(action || "unknown"),
+      String(resourceType || "system"),
+      resourceId ? String(resourceId) : null,
+      JSON.stringify(metadata),
+      nowIso()
+    );
+  }
+
+  listAuditEvents(limit = 100) {
+    const boundedLimit = Math.min(500, Math.max(1, Number(limit) || 100));
+    return this.db.prepare(`
+      SELECT id, admin_id, actor_username, actor_role, action, resource_type,
+             resource_id, metadata_json, created_at
+      FROM audit_events
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(boundedLimit).map((event) => ({
+      id: event.id,
+      adminId: event.admin_id,
+      actorUsername: event.actor_username,
+      actorRole: event.actor_role,
+      action: event.action,
+      resourceType: event.resource_type,
+      resourceId: event.resource_id,
+      metadata: parseJson(event.metadata_json, {}),
+      createdAt: event.created_at
+    }));
   }
 
   initializeSetup({ setupRequired, setupTokenHash, setupTokenExpiresAt }) {
@@ -941,7 +1137,7 @@ export class RayLinkStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
-    return { id: currentAdmin.id, username: admin.username };
+    return { id: currentAdmin.id, username: admin.username, role: "owner" };
   }
 
   createAdminSession(adminId, ttlSeconds = 43_200) {
@@ -957,7 +1153,7 @@ export class RayLinkStore {
   adminForSession(secret) {
     if (!secret) return null;
     return this.db.prepare(`
-      SELECT admins.id, admins.username
+      SELECT admins.id, admins.username, admins.role
       FROM sessions
       JOIN admins ON admins.id = sessions.admin_id
       WHERE sessions.secret_hash = ? AND sessions.expires_at > ?
@@ -1724,6 +1920,7 @@ export class RayLinkStore {
       this.db.prepare(`
         UPDATE hosts
         SET cpu_percent = ?, memory_used_bytes = ?, memory_total_bytes = ?,
+            disk_used_bytes = ?, disk_total_bytes = ?,
             network_rx_bytes = ?, network_tx_bytes = ?,
             network_rx_bps = ?, network_tx_bps = ?, service_status = ?,
             metrics_updated_at = ?, updated_at = ?
@@ -1732,6 +1929,8 @@ export class RayLinkStore {
         telemetry.cpuPercent,
         telemetry.memoryUsedBytes,
         telemetry.memoryTotalBytes,
+        telemetry.diskUsedBytes,
+        telemetry.diskTotalBytes,
         telemetry.networkRxBytes,
         telemetry.networkTxBytes,
         telemetry.networkRxBps,
@@ -1904,30 +2103,46 @@ export class RayLinkStore {
   nextNodeTask(hostId) {
     const now = nowIso();
     const retryBefore = new Date(Date.now() - 60_000).toISOString();
-    const task = this.db.prepare(`
-      SELECT id, kind, payload_json, priority, attempt_count
-      FROM node_tasks
-      WHERE host_id = ?
-        AND (
-          (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
-          OR (status = 'claimed' AND claimed_at < ?)
-        )
-      ORDER BY priority DESC, created_at DESC
-      LIMIT 1
-    `).get(hostId, now, retryBefore);
-    if (!task) return null;
-    this.db.prepare(`
-      UPDATE node_tasks
-      SET status = 'claimed', claimed_at = ?, attempt_count = attempt_count + 1
-      WHERE id = ?
-    `).run(now, task.id);
-    return {
-      id: task.id,
-      kind: task.kind,
-      payload: parseJson(task.payload_json, {}),
-      priority: Number(task.priority) >= 100 ? "critical" : "normal",
-      attempt: Number(task.attempt_count) + 1
-    };
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const task = this.db.prepare(`
+        SELECT id, kind, payload_json, priority, attempt_count
+        FROM node_tasks
+        WHERE host_id = ?
+          AND (
+            (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+            OR (status = 'claimed' AND claimed_at < ?)
+          )
+        ORDER BY priority DESC, created_at DESC
+        LIMIT 1
+      `).get(hostId, now, retryBefore);
+      if (!task) {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      const claimed = this.db.prepare(`
+        UPDATE node_tasks
+        SET status = 'claimed', claimed_at = ?, attempt_count = attempt_count + 1
+        WHERE id = ?
+          AND host_id = ?
+          AND (
+            (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+            OR (status = 'claimed' AND claimed_at < ?)
+          )
+      `).run(now, task.id, hostId, now, retryBefore);
+      this.db.exec("COMMIT");
+      if (claimed.changes !== 1) return null;
+      return {
+        id: task.id,
+        kind: task.kind,
+        payload: parseJson(task.payload_json, {}),
+        priority: Number(task.priority) >= 100 ? "critical" : "normal",
+        attempt: Number(task.attempt_count) + 1
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   completeNodeTask(hostId, taskId, input = {}) {
@@ -2069,7 +2284,7 @@ export class RayLinkStore {
 
   bootstrap(admin) {
     return {
-      currentAdmin: { id: admin.id, username: admin.username },
+      currentAdmin: { id: admin.id, username: admin.username, role: admin.role || "owner" },
       users: this.listUsers(),
       hosts: this.listHosts()
     };
@@ -2399,7 +2614,7 @@ export class RayLinkStore {
   }
 
   listDeployments(limit = 20) {
-    return this.db.prepare(`
+    const rows = this.db.prepare(`
       SELECT deployments.id, deployments.version, deployments.status, deployments.config_json,
              deployments.error_json, deployments.created_at, deployments.published_at,
              admins.username AS publisher_username
@@ -2407,13 +2622,88 @@ export class RayLinkStore {
       LEFT JOIN admins ON admins.id = deployments.publisher_admin_id
       ORDER BY deployments.created_at DESC
       LIMIT ?
-    `).all(limit).map((row) => {
+    `).all(limit);
+    const hostNames = new Map(this.db.prepare(
+      "SELECT id, name, address FROM hosts"
+    ).all().map((host) => [host.id, host]));
+    const latestTasks = new Map();
+    for (const task of this.db.prepare(`
+      SELECT host_id, status, payload_json, result_json, created_at, claimed_at, finished_at
+      FROM node_tasks
+      WHERE kind = 'publish-config'
+      ORDER BY created_at DESC
+    `).all()) {
+      const payload = parseJson(task.payload_json, {});
+      if (!payload.version) continue;
+      const key = `${payload.version}:${task.host_id}`;
+      if (!latestTasks.has(key)) {
+        latestTasks.set(key, {
+          ...task,
+          payload,
+          result: parseJson(task.result_json, null)
+        });
+      }
+    }
+    return rows.map((row) => {
       const metadata = parseJson(row.config_json, {});
       const error = parseJson(row.error_json, null);
+      const localStatus = row.status === "failed"
+        ? "failed"
+        : row.status === "validating"
+          ? "deploying"
+          : row.status === "superseded"
+            ? "superseded"
+            : "applied";
+      const targets = [{
+        hostId: "local",
+        name: hostNames.get("local")?.name || "RayLink Control Plane",
+        address: hostNames.get("local")?.address || null,
+        certificates: [],
+        status: localStatus,
+        updatedAt: row.published_at || row.created_at,
+        error: error?.message || null
+      }, ...(Array.isArray(metadata.hostSnapshots) ? metadata.hostSnapshots : []).map((snapshot) => {
+        const task = latestTasks.get(`${row.version}:${snapshot.hostId}`);
+        const statuses = {
+          pending: "pending",
+          claimed: "deploying",
+          succeeded: "applied",
+          failed: "failed"
+        };
+        const host = hostNames.get(snapshot.hostId);
+        return {
+          hostId: snapshot.hostId,
+          name: host?.name || snapshot.hostId,
+          address: host?.address || null,
+          certificates: Array.isArray(snapshot.tlsAssets)
+            ? snapshot.tlsAssets.map((asset) => ({
+                name: asset.name,
+                fingerprint256: asset.fingerprint256,
+                validTo: asset.validTo
+              }))
+            : [],
+          status: task ? statuses[task.status] : "not-queued",
+          updatedAt: task?.finished_at || task?.claimed_at || task?.created_at || row.created_at,
+          error: task?.result?.error || null
+        };
+      })];
+      const rolloutStatus = row.status === "failed"
+        ? "failed"
+        : row.status === "validating"
+          ? "deploying"
+          : row.status === "superseded"
+            ? "superseded"
+            : targets.some((target) => target.status === "failed")
+              ? "failed"
+              : targets.every((target) => target.status === "applied")
+                ? "complete"
+                : "pending";
       return {
         id: row.id,
         version: row.version,
         status: row.status,
+        rolloutStatus,
+        targets,
         checksum: metadata.checksum,
         eligibleUsers: metadata.eligibleUsers,
         error: error?.message || null,

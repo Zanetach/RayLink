@@ -438,6 +438,156 @@ test("admin can log out the current control-plane session", async (t) => {
   assert.match(secureLogout.headers.getSetCookie()[0], /Secure/);
 });
 
+test("owner manages administrator roles while support and auditor remain isolated", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const ownerCookie = await login(testApp.baseUrl);
+  const ownerBootstrap = await (
+    await api(testApp.baseUrl, ownerCookie, "/api/bootstrap")
+  ).json();
+  assert.deepEqual(ownerBootstrap.backups, []);
+  const backupResponse = await api(testApp.baseUrl, ownerCookie, "/api/backups", {
+    method: "POST"
+  });
+  assert.equal(backupResponse.status, 201);
+  assert.equal((await backupResponse.json()).integrity, "ok");
+  const backupList = await (
+    await api(testApp.baseUrl, ownerCookie, "/api/backups")
+  ).json();
+  assert.equal(backupList.backups.length, 1);
+  const alerts = await (
+    await api(testApp.baseUrl, ownerCookie, "/api/alerts")
+  ).json();
+  assert.equal(Array.isArray(alerts.alerts), true);
+  assert.equal(alerts.delivery.enabled, false);
+  const lastOwnerDemotion = await api(
+    testApp.baseUrl,
+    ownerCookie,
+    `/api/admins/${encodeURIComponent(ownerBootstrap.currentAdmin.id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ role: "auditor" })
+    }
+  );
+  assert.equal(lastOwnerDemotion.status, 409);
+  assert.equal((await lastOwnerDemotion.json()).error.code, "LAST_OWNER_REQUIRED");
+
+  const supportResponse = await api(testApp.baseUrl, ownerCookie, "/api/admins", {
+    method: "POST",
+    body: JSON.stringify({
+      username: "support-one",
+      password: "Support@2026!",
+      role: "support"
+    })
+  });
+  assert.equal(supportResponse.status, 201);
+
+  const supportLogin = await fetch(`${testApp.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: "support-one", password: "Support@2026!" })
+  });
+  assert.equal(supportLogin.status, 200);
+  assert.equal((await supportLogin.clone().json()).currentAdmin.role, "support");
+  const supportCookie = supportLogin.headers.getSetCookie()[0].split(";")[0];
+
+  const supportUser = await api(testApp.baseUrl, supportCookie, "/api/users", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Supported User",
+      email: "supported-user@example.com",
+      password: "Portal@2026",
+      quotaGb: 50,
+      nodeScope: ["all"],
+      state: "active",
+      portalStatus: "active",
+      expiresAt: "2030-12-31"
+    })
+  });
+  assert.equal(supportUser.status, 201);
+
+  const forbiddenPublish = await api(
+    testApp.baseUrl,
+    supportCookie,
+    "/api/deployments",
+    { method: "POST" }
+  );
+  assert.equal(forbiddenPublish.status, 403);
+  assert.equal((await forbiddenPublish.json()).error.code, "FORBIDDEN");
+  assert.equal(
+    (await api(testApp.baseUrl, supportCookie, "/api/admins")).status,
+    403
+  );
+  assert.equal(
+    (await api(testApp.baseUrl, supportCookie, "/api/backups", {
+      method: "POST"
+    })).status,
+    403
+  );
+
+  const auditorResponse = await api(testApp.baseUrl, ownerCookie, "/api/admins", {
+    method: "POST",
+    body: JSON.stringify({
+      username: "auditor-one",
+      password: "Auditor@2026!",
+      role: "auditor"
+    })
+  });
+  assert.equal(auditorResponse.status, 201);
+  const auditorLogin = await fetch(`${testApp.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: "auditor-one", password: "Auditor@2026!" })
+  });
+  const auditorCookie = auditorLogin.headers.getSetCookie()[0].split(";")[0];
+  assert.equal((await api(testApp.baseUrl, auditorCookie, "/api/bootstrap")).status, 200);
+  assert.equal(
+    (await api(testApp.baseUrl, auditorCookie, "/api/users", {
+      method: "POST",
+      body: JSON.stringify({})
+    })).status,
+    403
+  );
+
+  const auditResponse = await api(testApp.baseUrl, ownerCookie, "/api/audit");
+  assert.equal(auditResponse.status, 200);
+  const audit = await auditResponse.json();
+  assert.ok(audit.events.some((event) => (
+    event.actorUsername === "support-one"
+    && event.action === "POST /api/users"
+  )));
+  assert.ok(!audit.events.some((event) => event.action.includes("password")));
+});
+
+test("the control plane creates its first scheduled backup shortly after startup", async (t) => {
+  let creates = 0;
+  const backupManager = {
+    async create() {
+      creates += 1;
+      return {
+        filename: "raylink-20260730T000000-12345678.sqlite",
+        checksum: "a".repeat(64),
+        integrity: "ok"
+      };
+    },
+    async list() {
+      return [];
+    },
+    async verify() {
+      return { valid: true };
+    }
+  };
+  const testApp = await startTestApp({
+    backupManager,
+    backupIntervalMs: 60_000,
+    backupStartupDelayMs: 1
+  });
+  t.after(() => testApp.close());
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(creates, 1);
+});
+
 test("production initialization can start without known demo users", async (t) => {
   const testApp = await startTestApp({ seedDemoData: false });
   t.after(() => testApp.close());
@@ -631,6 +781,8 @@ test("authenticated bootstrap reports current local host telemetry", async (t) =
         cpuPercent: 21.4,
         memoryUsedBytes: 3_000,
         memoryTotalBytes: 8_000,
+        diskUsedBytes: 20_000,
+        diskTotalBytes: 100_000,
         networkRxBytes: 40_000,
         networkTxBytes: 20_000,
         networkRxBps: 640_000,
@@ -649,6 +801,8 @@ test("authenticated bootstrap reports current local host telemetry", async (t) =
 
   assert.equal(localHost.telemetry.cpuPercent, 21.4);
   assert.equal(localHost.telemetry.memoryUsedBytes, 3_000);
+  assert.equal(localHost.telemetry.diskUsedBytes, 20_000);
+  assert.equal(localHost.telemetry.diskTotalBytes, 100_000);
   assert.equal(localHost.telemetry.serviceStatus, "running");
   assert.equal(body.telemetry.networkSeries.at(-1).downloadBps, 640_000);
   assert.ok(telemetrySamples >= 2);
@@ -1854,6 +2008,8 @@ test("admin creates a remote host and RayLink Node enrolls with a one-time token
         cpuPercent: 37.5,
         memoryUsedBytes: 2_147_483_648,
         memoryTotalBytes: 4_294_967_296,
+        diskUsedBytes: 8_589_934_592,
+        diskTotalBytes: 21_474_836_480,
         networkRxBytes: 12_884_901_888,
         networkTxBytes: 3_221_225_472,
         networkRxBps: 12_500_000,
@@ -1878,6 +2034,8 @@ test("admin creates a remote host and RayLink Node enrolls with a one-time token
     cpuPercent: 37.5,
     memoryUsedBytes: 2_147_483_648,
     memoryTotalBytes: 4_294_967_296,
+    diskUsedBytes: 8_589_934_592,
+    diskTotalBytes: 21_474_836_480,
     networkRxBytes: 12_884_901_888,
     networkTxBytes: 3_221_225_472,
     networkRxBps: 12_500_000,
@@ -2397,6 +2555,77 @@ test("remote entitlement revocation is critical, retryable and visible until app
   })).json();
   assert.equal(expansionTask.priority, "normal");
   assert.match(expansionTask.payload.configText, /priya@vantage-bioworks\.in/);
+});
+
+test("narrowing a User node scope republishes a remote-only Runtime Credential revocation", async (t) => {
+  const runtimeAdapter = {
+    async publish() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    },
+    async status() {
+      return { state: "running", mode: "test", runtimeVersion: "1.13.12" };
+    }
+  };
+  const testApp = await startTestApp({ runtimeAdapter });
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+  const created = await (await api(testApp.baseUrl, cookie, "/api/hosts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Singapore scope verification",
+      address: "scope.example.com",
+      region: "singapore"
+    })
+  })).json();
+  const enrolled = await (await fetch(`${testApp.baseUrl}/api/node/enroll`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: created.enrollmentToken,
+      hostname: "scope-node",
+      platform: "linux",
+      architecture: "amd64",
+      agentVersion: "0.7.0",
+      runtimeVersion: "1.13.12"
+    })
+  })).json();
+  await enableHostShadowsocks(testApp.baseUrl, cookie, enrolled.hostId);
+  const nodeHeaders = {
+    authorization: `Bearer ${enrolled.nodeSecret}`,
+    "x-raylink-host-id": enrolled.hostId
+  };
+
+  await api(testApp.baseUrl, cookie, "/api/deployments", { method: "POST" });
+  const initialTask = await (await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  })).json();
+  assert.match(initialTask.payload.configText, /priya@vantage-bioworks\.in/);
+  await fetch(`${testApp.baseUrl}/api/node/tasks/${initialTask.id}/complete`, {
+    method: "POST",
+    headers: { ...nodeHeaders, "content-type": "application/json" },
+    body: JSON.stringify({
+      attempt: initialTask.attempt,
+      status: "succeeded",
+      runtimeVersion: "1.13.12"
+    })
+  });
+
+  const bootstrap = await (await api(testApp.baseUrl, cookie, "/api/bootstrap")).json();
+  const priya = bootstrap.users.find((user) => user.email === "priya@vantage-bioworks.in");
+  const updateResponse = await api(testApp.baseUrl, cookie, `/api/users/${priya.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ nodeScope: ["tokyo"] })
+  });
+  assert.equal(updateResponse.status, 200);
+  assert.equal((await updateResponse.json()).runtimeSync.status, "published");
+
+  const revocationResponse = await fetch(`${testApp.baseUrl}/api/node/tasks/next`, {
+    headers: nodeHeaders
+  });
+  assert.equal(revocationResponse.status, 200);
+  const revocationTask = await revocationResponse.json();
+  assert.equal(revocationTask.priority, "critical");
+  assert.doesNotMatch(revocationTask.payload.configText, /priya@vantage-bioworks\.in/);
 });
 
 test("revoking portal access invalidates an existing user session", async (t) => {

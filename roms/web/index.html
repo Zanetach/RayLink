@@ -113,8 +113,8 @@
             <span>搜索资源</span>
             <kbd>⌘ K</kbd>
           </button>
-          <button class="icon-button" aria-label="通知">
-            <svg><use href="#i-bell"/></svg><span class="notification-dot"></span>
+          <button class="icon-button" id="notification-button" aria-label="通知">
+            <svg><use href="#i-bell"/></svg><span class="notification-dot" hidden></span>
           </button>
           <button class="icon-button" aria-label="帮助">
             <svg><use href="#i-help"/></svg>
@@ -134,6 +134,12 @@
               <svg><use href="#i-code"/></svg>查看当前配置
             </button>
           </div>
+
+          <section class="notice-card" id="operational-alert-notice" hidden>
+            <span><svg><use href="#i-shield"/></svg></span>
+            <div><strong id="operational-alert-title">发现运行告警</strong><p id="operational-alert-copy">请检查节点与发布状态。</p></div>
+            <button class="button secondary" data-view-target="operations">查看运维</button>
+          </section>
 
           <section class="notice-card" id="runtime-update-notice" hidden>
             <span><svg><use href="#i-refresh"/></svg></span>
@@ -380,6 +386,7 @@
             <button class="active" data-system-tab="hosts" role="tab" aria-selected="true">主机</button>
             <button data-system-tab="certificates" role="tab" aria-selected="false">证书</button>
             <button data-system-tab="maintenance" role="tab" aria-selected="false">版本与备份</button>
+            <button data-system-tab="access" data-owner-only role="tab" aria-selected="false">权限与审计</button>
             <button data-system-tab="advanced" role="tab" aria-selected="false">高级</button>
           </div>
           <div data-system-panel="hosts">
@@ -405,7 +412,23 @@
           </section>
           <section class="system-card-grid" data-system-panel="maintenance" hidden>
             <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><p class="eyebrow">版本</p><h2 id="system-version">检测中</h2><p id="system-build">正在读取当前二进制构建。</p><p id="system-update-state">尚未检查稳定版更新。</p><div class="heading-actions"><button class="button secondary" data-check-runtime-update><svg><use href="#i-refresh"/></svg>检查更新</button><button class="button primary" id="upgrade-local-runtime" hidden><svg><use href="#i-arrow"/></svg>安全升级</button></div></div></article>
-            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-rollback"/></svg></span><div><p class="eyebrow">备份</p><h2>发布快照</h2><p>每次发布都会保留不可变配置快照，可在运维工作区回滚。</p><button class="button secondary" data-view-target="operations">查看发布记录</button></div></article>
+            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-rollback"/></svg></span><div><p class="eyebrow">数据库备份</p><h2 id="system-backup-title">尚无在线备份</h2><p id="system-backup-state">每天自动执行 SQLite 在线备份，并校验 SHA-256 与数据库完整性。</p><div class="heading-actions"><button class="button primary" data-create-backup><svg><use href="#i-rollback"/></svg>立即备份</button><button class="button secondary" data-view-target="operations">查看发布记录</button></div></div></article>
+          </section>
+          <section data-system-panel="access" hidden>
+            <section class="panel access-management-panel">
+              <div class="panel-heading"><div><p class="eyebrow">管理员权限</p><h2>角色与账号</h2><p>Owner 管理所有能力；Operator 管理运行与用户；Support 只管理用户；Auditor 只读。</p></div></div>
+              <form id="admin-create-form" class="admin-create-form">
+                <label class="field"><span>用户名</span><input name="username" autocomplete="off" minlength="3" maxlength="64" required></label>
+                <label class="field"><span>初始密码</span><input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+                <label class="field"><span>角色</span><select name="role"><option value="operator">Operator</option><option value="support">Support</option><option value="auditor">Auditor</option><option value="owner">Owner</option></select></label>
+                <button class="button primary" type="submit"><svg><use href="#i-plus"/></svg>创建管理员</button>
+              </form>
+              <div class="admin-access-list" id="admin-access-list"></div>
+            </section>
+            <section class="panel audit-panel">
+              <div class="panel-heading"><div><p class="eyebrow">不可变操作记录</p><h2>最近审计事件</h2></div></div>
+              <div class="operations-log" id="audit-event-list"></div>
+            </section>
           </section>
           <section class="resource-panel" data-system-panel="advanced" hidden>
             <div class="resource-panel-heading"><div><p class="eyebrow">高级配置</p><h2>受管配置摘要</h2><p>这里展示 RayLink 管理的核心字段。受管字段需回到对应工作区修改。</p></div><button class="button secondary" data-view-target="operations"><svg><use href="#i-code"/></svg>打开配置工作台</button></div>

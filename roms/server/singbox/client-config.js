@@ -5,11 +5,13 @@ import {
 export function buildUserClientConfig({
   credential,
   hosts,
-  ruleSetBaseUrl = null
+  ruleSetBaseUrl = null,
+  probeUrl
 }) {
   return buildMultiHostProtocolClientConfig({
     credential,
     hosts: hosts || [],
-    ruleSetBaseUrl
+    ruleSetBaseUrl,
+    probeUrl
   });
 }

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, statfs } from "node:fs/promises";
 import { cpus, freemem, platform, totalmem } from "node:os";
 
 function cpuTimesSnapshot() {
@@ -26,9 +26,24 @@ async function networkBytesSnapshot() {
   }
 }
 
+async function diskBytesSnapshot(path = "/") {
+  try {
+    const filesystem = await statfs(path);
+    const diskTotalBytes = Number(filesystem.bsize) * Number(filesystem.blocks);
+    const diskAvailableBytes = Number(filesystem.bsize) * Number(filesystem.bavail);
+    return {
+      diskUsedBytes: Math.max(0, diskTotalBytes - diskAvailableBytes),
+      diskTotalBytes
+    };
+  } catch {
+    return { diskUsedBytes: null, diskTotalBytes: null };
+  }
+}
+
 export class LocalTelemetryCollector {
   constructor(options = {}) {
     this.clock = options.clock || Date.now;
+    this.diskPath = options.diskPath || "/";
     this.previous = null;
   }
 
@@ -38,6 +53,7 @@ export class LocalTelemetryCollector {
       cpu: cpuTimesSnapshot(),
       memoryUsedBytes: memoryTotalBytes - freemem(),
       memoryTotalBytes,
+      ...await diskBytesSnapshot(this.diskPath),
       ...await networkBytesSnapshot()
     };
     const timestamp = this.clock();
@@ -62,6 +78,8 @@ export class LocalTelemetryCollector {
       cpuPercent: Number(Math.max(0, Math.min(100, cpuPercent)).toFixed(1)),
       memoryUsedBytes: sample.memoryUsedBytes,
       memoryTotalBytes: sample.memoryTotalBytes,
+      diskUsedBytes: sample.diskUsedBytes,
+      diskTotalBytes: sample.diskTotalBytes,
       networkRxBytes: sample.networkRxBytes,
       networkTxBytes: sample.networkTxBytes,
       networkRxBps: byteRate(sample.networkRxBytes, this.previous?.sample.networkRxBytes),

@@ -109,11 +109,6 @@ case "$(uname -m)" in
   *) fail "不支持的 CPU 架构：$(uname -m)" ;;
 esac
 
-if [ "$architecture" != "amd64" ] \
-  && [ "${release_base_url%/}" = "$default_release_base_url" ]; then
-  fail "RayLink 官方发布包目前仅提供 linux-amd64；当前主机是 linux-${architecture}"
-fi
-
 temporary_root="$(mktemp -d)"
 trap 'rm -rf "$temporary_root"' EXIT
 

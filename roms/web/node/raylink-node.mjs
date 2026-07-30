@@ -22,6 +22,7 @@ import {
   readdir,
   rename,
   rm,
+  statfs,
   writeFile
 } from "node:fs/promises";
 import { arch, cpus, freemem, hostname, platform, totalmem } from "node:os";
@@ -495,10 +496,21 @@ async function networkBytesSnapshot() {
 
 async function systemSample() {
   const memoryTotalBytes = totalmem();
+  let disk = { diskUsedBytes: null, diskTotalBytes: null };
+  try {
+    const filesystem = await statfs("/");
+    const diskTotalBytes = Number(filesystem.bsize) * Number(filesystem.blocks);
+    const diskAvailableBytes = Number(filesystem.bsize) * Number(filesystem.bavail);
+    disk = {
+      diskUsedBytes: Math.max(0, diskTotalBytes - diskAvailableBytes),
+      diskTotalBytes
+    };
+  } catch {}
   return {
     cpu: cpuTimesSnapshot(),
     memoryUsedBytes: memoryTotalBytes - freemem(),
     memoryTotalBytes,
+    ...disk,
     ...await networkBytesSnapshot()
   };
 }
@@ -546,6 +558,8 @@ export class NodeTelemetryCollector {
       cpuPercent: Number(cpuPercent.toFixed(1)),
       memoryUsedBytes: sample.memoryUsedBytes,
       memoryTotalBytes: sample.memoryTotalBytes,
+      diskUsedBytes: sample.diskUsedBytes,
+      diskTotalBytes: sample.diskTotalBytes,
       networkRxBytes: sample.networkRxBytes,
       networkTxBytes: sample.networkTxBytes,
       networkRxBps: byteRate(sample.networkRxBytes, this.previous?.sample.networkRxBytes),

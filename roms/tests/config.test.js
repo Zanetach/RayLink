@@ -96,6 +96,58 @@ test("protocol probe endpoint is configurable and must use HTTPS in production",
   );
 });
 
+test("online backup schedule and retention are configurable and validated", () => {
+  const config = loadConfig({
+    RAYLINK_BACKUP_DIR: "/var/backups/raylink/database",
+    RAYLINK_BACKUP_RETENTION_COUNT: "30",
+    RAYLINK_BACKUP_INTERVAL_MS: "3600000"
+  });
+  assert.equal(config.backupDir, "/var/backups/raylink/database");
+  assert.equal(config.backupRetentionCount, 30);
+  assert.equal(config.backupIntervalMs, 3_600_000);
+  assert.equal(
+    loadConfig({ RAYLINK_DATA_DIR: "/var/lib/raylink" }).backupDir,
+    "/var/lib/raylink/backups"
+  );
+  assert.throws(
+    () => loadConfig({ RAYLINK_BACKUP_INTERVAL_MS: "-1" }),
+    /must be a non-negative integer/
+  );
+});
+
+test("alert webhook is configurable and requires HTTPS in production", () => {
+  const config = loadConfig({
+    NODE_ENV: "production",
+    RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
+    ...productionSecrets,
+    RAYLINK_ALERT_WEBHOOK_URL: "https://alerts.example.com/raylink",
+    RAYLINK_ALERT_INTERVAL_MS: "30000"
+  });
+  assert.equal(config.alertWebhookUrl, "https://alerts.example.com/raylink");
+  assert.equal(config.alertIntervalMs, 30_000);
+  assert.throws(
+    () => loadConfig({
+      NODE_ENV: "production",
+      RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
+      ...productionSecrets,
+      RAYLINK_ALERT_WEBHOOK_URL: "http://alerts.example.com/raylink"
+    }),
+    /RAYLINK_ALERT_WEBHOOK_URL must use HTTPS/
+  );
+  assert.throws(
+    () => loadConfig({
+      RAYLINK_ALERT_WEBHOOK_URL: "not-a-url"
+    }),
+    /RAYLINK_ALERT_WEBHOOK_URL must be a valid HTTP or HTTPS URL/
+  );
+  assert.throws(
+    () => loadConfig({
+      RAYLINK_ALERT_WEBHOOK_URL: "file:///tmp/raylink-alerts"
+    }),
+    /RAYLINK_ALERT_WEBHOOK_URL must be a valid HTTP or HTTPS URL/
+  );
+});
+
 test("production first-run mode still requires HTTPS and a hashed expiring token", () => {
   assert.throws(
     () => loadConfig({

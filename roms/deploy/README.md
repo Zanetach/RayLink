@@ -95,8 +95,9 @@ sudo bash deploy/migrate-default-tls.sh
 
 ### 发布时预编译 Runtime
 
-正式发布包应同时包含 `linux-amd64` 和 `linux-arm64` 两个 Runtime，避免每台 VPS
-重复下载 Go 模块和编译。分别在对应架构的可信 Linux 构建机执行：
+正式版本同时发布独立的 `linux-amd64` 和 `linux-arm64` 安装包，避免每台 VPS
+重复下载 Go 模块和编译。GitHub Release 工作流分别在原生 AMD64 与 ARM64
+Linux Runner 上执行：
 
 ```bash
 sudo bash deploy/build-runtime-artifact.sh 1.13.14
@@ -123,7 +124,8 @@ sudo bash deploy/build-runtime-artifact.sh 1.13.14 ./release-runtime amd64
 `raylink-sing-box-1.13.14-linux-amd64 version`，确认版本和完整审批 build tags。
 原生架构构建会在脚本内部直接完成这项执行校验。
 
-产物准备完成后构建正式安装包。v0.2.16 默认装配 AMD64 Runtime：
+本地也可以在 Runtime 产物准备完成后构建单架构正式安装包。v0.2.16 默认装配
+AMD64 Runtime：
 
 ```bash
 bash deploy/package-release.sh 0.2.16
@@ -135,8 +137,20 @@ bash deploy/package-release.sh 0.2.16
 RAYLINK_RELEASE_ARCHES=amd64 bash deploy/package-release.sh 0.2.16
 ```
 
-发布包只包含 `package.json`、`server/`、`web/` 和 `deploy/`，不会打包本地
-`data/`、测试数据库或开发输出，并会同时生成发布包 `.sha256`。
+发布包包含运行程序、部署工具、README、变更日志和生产门槛文档，不会打包本地
+`data/`、测试数据库或开发输出。每个架构会同时生成：
+
+- `.tar.gz` 正式安装包；
+- `.tar.gz.sha256` 独立校验文件；
+- `.manifest.json` 机器可读发布清单；
+- `.spdx.json` SPDX 2.3 SBOM。
+
+推送与 `package.json` 相同版本的 `v*.*.*` Tag 后，流水线会为所有发布资产生成
+GitHub Build Provenance 证明并发布 Release。ARM64 安装器使用与 AMD64 相同的一键
+命令，会自动按 `uname -m` 下载匹配的安装包。
+
+控制面升级会先停止 SQLite 写入、创建恢复点，再由候选版本在隔离副本上执行数据库
+迁移、`PRAGMA integrity_check` 和外键检查。只有兼容检查通过后才切换应用目录。
 
 若令牌过期，在服务器上执行以下命令可安全轮换令牌。新明文令牌仍只显示一次，
 服务器只保存其哈希：

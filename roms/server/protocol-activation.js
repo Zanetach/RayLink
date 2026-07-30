@@ -40,6 +40,8 @@ function activationError(code, message, statusCode = 422) {
 }
 
 const PROTOCOL_CONNECTION_SAMPLE_COUNT = 5;
+const PROTOCOL_CONNECTION_MINIMUM_SUCCESSES = 4;
+const PROTOCOL_HEALTH_WINDOW_ROUNDS = 12;
 
 function median(values) {
   const sorted = [...values].sort((left, right) => left - right);
@@ -49,10 +51,44 @@ function median(values) {
     : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 
+function percentile(values, ratio) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.max(0, Math.ceil(sorted.length * ratio) - 1);
+  return sorted[index];
+}
+
 function connectionJitter(values) {
   if (values.length < 2) return 0;
-  const deltas = values.slice(1).map((value, index) => Math.abs(value - values[index]));
-  return Math.round(deltas.reduce((total, value) => total + value, 0) / deltas.length);
+  const center = median(values);
+  return median(values.map((value) => Math.abs(value - center)));
+}
+
+function updateHealthWindow(previousCheck, samples, checkedAt, metrics = {}) {
+  const previousRounds = Array.isArray(previousCheck?.healthWindow?.rounds)
+    ? previousCheck.healthWindow.rounds
+    : [];
+  const rounds = [
+    ...previousRounds,
+    {
+      checkedAt,
+      count: samples.count,
+      successful: samples.successful,
+      failed: samples.failed,
+      ...(Number.isFinite(metrics.latencyMs) ? { latencyMs: metrics.latencyMs } : {}),
+      ...(Number.isFinite(metrics.p95Ms) ? { p95Ms: metrics.p95Ms } : {}),
+      ...(Number.isFinite(metrics.jitterMs) ? { jitterMs: metrics.jitterMs } : {})
+    }
+  ].slice(-PROTOCOL_HEALTH_WINDOW_ROUNDS);
+  const totals = rounds.reduce((summary, round) => ({
+    count: summary.count + Number(round.count || 0),
+    successful: summary.successful + Number(round.successful || 0),
+    failed: summary.failed + Number(round.failed || 0)
+  }), { count: 0, successful: 0, failed: 0 });
+  return {
+    rounds,
+    ...totals,
+    successRate: totals.count ? Math.round(totals.successful / totals.count * 10_000) / 100 : 0
+  };
 }
 
 function protocolHealthLayers({ reachable, probe, previousState = "" }) {
@@ -490,10 +526,13 @@ export class ProtocolActivationManager {
               lastError = error;
             }
           }
-          if (latencies.length < 3) {
-            throw lastError || new Error("有效连接样本不足 3 次");
+          if (latencies.length < PROTOCOL_CONNECTION_MINIMUM_SUCCESSES) {
+            throw lastError || new Error(
+              `有效连接样本不足 ${PROTOCOL_CONNECTION_MINIMUM_SUCCESSES} 次`
+            );
           }
           const latencyMs = median(latencies);
+          const p95Ms = percentile(latencies, 0.95);
           const jitterMs = connectionJitter(latencies);
           const sampleSummary = {
             count: PROTOCOL_CONNECTION_SAMPLE_COUNT,
@@ -506,8 +545,15 @@ export class ProtocolActivationManager {
             ...lastProbe,
             reachable: true,
             latencyMs,
+            p95Ms,
             jitterMs,
             samples: sampleSummary,
+            healthWindow: updateHealthWindow(
+              existing?.publicCheck,
+              sampleSummary,
+              checkedAt,
+              { latencyMs, p95Ms, jitterMs }
+            ),
             layers: protocolHealthLayers({
               reachable: true,
               probe: lastProbe?.probe,
@@ -555,6 +601,7 @@ export class ProtocolActivationManager {
             lastSuccessAt: previousCheck.lastSuccessAt
               || (previousCheck.reachable === true ? previousCheck.checkedAt : null),
             samples: sampleSummary,
+            healthWindow: updateHealthWindow(previousCheck, sampleSummary, checkedAt),
             layers: protocolHealthLayers({
               reachable: confirmedFailure ? false : null,
               probe: lastProbe?.probe || (this.protocolProbe ? "sing-box-tools-fetch" : ""),

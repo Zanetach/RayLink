@@ -806,6 +806,8 @@ test("node telemetry reports interval CPU, memory, network and service health", 
       cpu: { idle: 4_000, total: 10_000 },
       memoryUsedBytes: 2_000,
       memoryTotalBytes: 8_000,
+      diskUsedBytes: 20_000,
+      diskTotalBytes: 100_000,
       networkRxBytes: 10_000,
       networkTxBytes: 4_000
     },
@@ -813,6 +815,8 @@ test("node telemetry reports interval CPU, memory, network and service health", 
       cpu: { idle: 4_200, total: 11_000 },
       memoryUsedBytes: 2_500,
       memoryTotalBytes: 8_000,
+      diskUsedBytes: 21_000,
+      diskTotalBytes: 100_000,
       networkRxBytes: 1_010_000,
       networkTxBytes: 504_000
     }
@@ -831,6 +835,8 @@ test("node telemetry reports interval CPU, memory, network and service health", 
   assert.equal(current.cpuPercent, 80);
   assert.equal(current.memoryUsedBytes, 2_500);
   assert.equal(current.memoryTotalBytes, 8_000);
+  assert.equal(current.diskUsedBytes, 21_000);
+  assert.equal(current.diskTotalBytes, 100_000);
   assert.equal(current.networkRxBps, 8_000_000);
   assert.equal(current.networkTxBps, 4_000_000);
   assert.equal(current.serviceStatus, "running");

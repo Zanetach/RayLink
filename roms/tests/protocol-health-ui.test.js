@@ -21,8 +21,10 @@ test("protocol health presentation exposes availability, connection time, jitter
       availability: "available",
       reachable: true,
       latencyMs: 128,
+      p95Ms: 166,
       jitterMs: 14,
-      samples: { count: 5, successful: 4 },
+      samples: { count: 5, successful: 5 },
+      healthWindow: { successRate: 98.4 },
       layers: { port: "passed", handshake: "passed", public: "passed" },
       checkedAt: "2026-07-28T12:19:49.365Z"
     }
@@ -30,13 +32,40 @@ test("protocol health presentation exposes availability, connection time, jitter
 
   assert.equal(result.availabilityLabel, "可用");
   assert.equal(result.latencyLabel, "128 ms");
+  assert.equal(result.p95Label, "166 ms");
   assert.equal(result.jitterLabel, "14 ms");
-  assert.equal(result.availabilityRateLabel, "80%");
+  assert.equal(result.availabilityRateLabel, "100%");
+  assert.equal(result.rollingAvailabilityLabel, "98.4%");
   assert.match(result.summary, /连接耗时 128 ms/);
+  assert.match(result.summary, /P95 166 ms/);
   assert.match(result.summary, /抖动 14 ms/);
-  assert.match(result.summary, /可用率 80%/);
+  assert.match(result.summary, /本轮成功率 100%/);
+  assert.match(result.summary, /窗口成功率 98.4%/);
   assert.match(result.summary, /端口 通过 · 协议握手 通过 · 公网访问 通过/);
   assert.match(result.summary, /最近检测/);
+});
+
+test("a partially successful round is presented as quality degradation", () => {
+  const presenter = loadPresenter();
+  const result = presenter.present({
+    publicCheck: {
+      availability: "degraded",
+      reachable: true,
+      latencyMs: 95,
+      p95Ms: 180,
+      jitterMs: 28,
+      consecutiveFailures: 0,
+      samples: { count: 5, successful: 4 },
+      healthWindow: { successRate: 80 },
+      checkedAt: "2026-07-28T12:19:49.365Z"
+    }
+  });
+
+  assert.equal(result.label, "质量降级");
+  assert.equal(result.availabilityLabel, "质量降级");
+  assert.equal(result.className, "warning");
+  assert.match(result.summary, /本轮成功率 80%/);
+  assert.match(result.summary, /窗口成功率 80%/);
 });
 
 test("protocol health presentation shows a pending recheck before the third failure", () => {

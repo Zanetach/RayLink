@@ -41,6 +41,18 @@ function removesRuntimeCredentials(previousConfig, nextConfig) {
   return [...previous].some((credential) => !next.has(credential));
 }
 
+function deploymentCandidateMatchesSnapshot(candidate, snapshot) {
+  if (candidate.compiled.checksum !== snapshot.checksum) return false;
+  const expectedHosts = new Map(
+    candidate.hostSnapshots.map((host) => [host.hostId, host.checksum])
+  );
+  const activeHosts = new Map(
+    snapshot.hostSnapshots.map((host) => [host.hostId, host.checksum])
+  );
+  if (expectedHosts.size !== activeHosts.size) return false;
+  return [...expectedHosts].every(([hostId, checksum]) => activeHosts.get(hostId) === checksum);
+}
+
 export class RuntimeManager {
   constructor({ store, adapter, listenPort = 8388, tlsAssetPackager = null }) {
     this.store = store;
@@ -65,7 +77,7 @@ export class RuntimeManager {
     return compile(this.store, this.listenPort, hostId, protocols).config;
   }
 
-  async publish(publisherAdminId = null, options = {}) {
+  async prepareDeploymentCandidate() {
     const compiled = compile(this.store, this.listenPort);
     const remoteHosts = this.store.listHosts().filter((host) => host.kind === "remote" && host.enrolledAt);
     const remoteDeployments = [];
@@ -102,6 +114,19 @@ export class RuntimeManager {
       protocols: remote.protocols,
       ...(sealedTlsBundle ? { sealedTlsBundle, tlsAssets } : {})
     }));
+    return { compiled, remoteDeployments, hostSnapshots };
+  }
+
+  async publish(publisherAdminId = null, options = {}) {
+    return this.publishCandidate(
+      await this.prepareDeploymentCandidate(),
+      publisherAdminId,
+      options
+    );
+  }
+
+  async publishCandidate(candidate, publisherAdminId = null, options = {}) {
+    const { compiled, remoteDeployments, hostSnapshots } = candidate;
     const deployment = await this.publishCompiled({
       ...compiled,
       hostSnapshots,
@@ -130,7 +155,9 @@ export class RuntimeManager {
         maxAttempts: revokesCredentials ? 0 : 5
       });
     }
-    return { ...deployment, remoteQueued: remoteDeployments.length };
+    const current = this.store.listDeployments()
+      .find((candidate) => candidate.id === deployment.id) || deployment;
+    return { ...current, runtime: deployment.runtime, remoteQueued: remoteDeployments.length };
   }
 
   async reconcile(publisherAdminId = null, options = {}) {
@@ -138,17 +165,25 @@ export class RuntimeManager {
     const activeDeployment = this.store.listDeployments(100)
       .find((deployment) => deployment.status === "active");
     if (!activeDeployment) return { changed: false, reason: "initial-publication-required" };
-    const compiled = compile(this.store, this.listenPort);
-    if (compiled.checksum === activeDeployment.checksum && options.forceCritical !== true) {
+    const candidate = await this.prepareDeploymentCandidate();
+    const activeSnapshot = this.store.deploymentSnapshot(activeDeployment.id);
+    if (
+      deploymentCandidateMatchesSnapshot(candidate, activeSnapshot)
+      && options.forceCritical !== true
+    ) {
       return { changed: false, reason: "configuration-current" };
     }
     return {
       changed: true,
-      deployment: await this.publish(publisherAdminId, {
-        reason: options.reason || "entitlement-reconciliation",
-        detectRevocation: true,
-        forceCritical: options.forceCritical === true
-      })
+      deployment: await this.publishCandidate(
+        candidate,
+        publisherAdminId,
+        {
+          reason: options.reason || "entitlement-reconciliation",
+          detectRevocation: true,
+          forceCritical: options.forceCritical === true
+        }
+      )
     };
   }
 
@@ -190,7 +225,9 @@ export class RuntimeManager {
       });
       remoteQueued += 1;
     }
-    return { ...deployment, remoteQueued };
+    const current = this.store.listDeployments()
+      .find((candidate) => candidate.id === deployment.id) || deployment;
+    return { ...current, runtime: deployment.runtime, remoteQueued };
   }
 
   async publishCompiled({

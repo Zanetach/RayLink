@@ -5,6 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { promisify } from "node:util";
 
@@ -759,7 +760,10 @@ test("the release package keeps every installer dependency executable", async ()
     "../deploy/build-runtime-artifact.sh",
     "../deploy/install.sh",
     "../deploy/upgrade-control-plane.sh",
-    "../deploy/package-release.sh"
+    "../deploy/package-release.sh",
+    "../deploy/restore-database.sh",
+    "../deploy/check-database-compatibility.mjs",
+    "../deploy/generate-release-metadata.mjs"
   ]) {
     const dependency = await stat(new URL(relativePath, import.meta.url));
     assert.notEqual(
@@ -768,6 +772,99 @@ test("the release package keeps every installer dependency executable", async ()
       `${relativePath} must be executable in the release package`
     );
   }
+});
+
+test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-release-metadata-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const archivePath = join(directory, "raylink-0.2.17-linux-amd64.tar.gz");
+  const runtimePath = join(directory, "raylink-sing-box-1.13.14-linux-amd64");
+  await writeFile(archivePath, "known-raylink-archive");
+  await writeFile(runtimePath, "known-sing-box-runtime");
+
+  await execFile(process.execPath, [
+    new URL("../deploy/generate-release-metadata.mjs", import.meta.url).pathname,
+    archivePath,
+    runtimePath,
+    "0.2.17",
+    "1.13.14",
+    "amd64"
+  ]);
+
+  const manifest = JSON.parse(
+    await readFile(join(directory, "raylink-0.2.17-linux-amd64.manifest.json"), "utf8")
+  );
+  assert.equal(manifest.schemaVersion, 1);
+  assert.equal(manifest.version, "0.2.17");
+  assert.equal(manifest.architecture, "amd64");
+  assert.equal(manifest.archive.filename, "raylink-0.2.17-linux-amd64.tar.gz");
+  assert.match(manifest.archive.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(manifest.runtime.version, "1.13.14");
+  assert.match(manifest.runtime.sha256, /^[a-f0-9]{64}$/);
+
+  const sbom = JSON.parse(
+    await readFile(join(directory, "raylink-0.2.17-linux-amd64.spdx.json"), "utf8")
+  );
+  assert.equal(sbom.spdxVersion, "SPDX-2.3");
+  assert.ok(sbom.packages.some((entry) => (
+    entry.name === "RayLink" && entry.versionInfo === "0.2.17"
+  )));
+  assert.ok(sbom.packages.some((entry) => (
+    entry.name === "sing-box" && entry.versionInfo === "1.13.14"
+  )));
+  assert.ok(sbom.relationships.some((entry) => entry.relationshipType === "DEPENDS_ON"));
+});
+
+test("candidate database compatibility checks never mutate the upgrade backup", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "raylink-db-compatibility-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const databasePath = join(directory, "raylink.db");
+  const database = new DatabaseSync(databasePath);
+  database.exec(`
+    CREATE TABLE legacy_marker (value TEXT NOT NULL);
+    INSERT INTO legacy_marker (value) VALUES ('preserve-me');
+  `);
+  database.close();
+  const before = createHash("sha256").update(await readFile(databasePath)).digest("hex");
+
+  const result = await execFile(process.execPath, [
+    new URL("../deploy/check-database-compatibility.mjs", import.meta.url).pathname,
+    databasePath
+  ]);
+  assert.match(result.stdout, /"compatible":true/);
+  const after = createHash("sha256").update(await readFile(databasePath)).digest("hex");
+  assert.equal(after, before);
+
+  const invalidPath = join(directory, "invalid.db");
+  await writeFile(invalidPath, "not-a-sqlite-database");
+  await assert.rejects(
+    () => execFile(process.execPath, [
+      new URL("../deploy/check-database-compatibility.mjs", import.meta.url).pathname,
+      invalidPath
+    ]),
+    (error) => {
+      assert.match(error.stderr, /数据库兼容检查失败/);
+      return true;
+    }
+  );
+});
+
+test("repository workflows run RayLink checks from its real subdirectory and release both native architectures", async () => {
+  const [productionWorkflow, releaseWorkflow, packager] = await Promise.all([
+    readFile(new URL("../../.github/workflows/raylink-production-check.yml", import.meta.url), "utf8"),
+    readFile(new URL("../../.github/workflows/raylink-release.yml", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/package-release.sh", import.meta.url), "utf8")
+  ]);
+
+  assert.match(productionWorkflow, /working-directory:\s+roms/);
+  assert.match(releaseWorkflow, /runner:\s+ubuntu-24\.04-arm/);
+  assert.match(releaseWorkflow, /arch:\s+amd64/);
+  assert.match(releaseWorkflow, /arch:\s+arm64/);
+  assert.match(releaseWorkflow, /attest-build-provenance@v2/);
+  assert.match(releaseWorkflow, /needs:\s+verify/);
+  assert.match(releaseWorkflow, /npm run check:production/);
+  assert.match(packager, /generate-release-metadata\.mjs/);
+  assert.match(packager, /CHANGELOG\.md/);
 });
 
 async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
@@ -788,7 +885,12 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
     join(installRoot, "package.json"),
     JSON.stringify({ name: "raylink-control-plane", version: "0.2.12" })
   );
-  await writeFile(join(dataRoot, "raylink.db"), "durable-state");
+  const durableDatabase = new DatabaseSync(join(dataRoot, "raylink.db"));
+  durableDatabase.exec(`
+    CREATE TABLE upgrade_harness (value TEXT NOT NULL);
+    INSERT INTO upgrade_harness (value) VALUES ('durable-state');
+  `);
+  durableDatabase.close();
   const previousServiceUnit = "[Service]\nExecStart=/opt/raylink/server/old-index.js\n";
   await writeFile(serviceUnit, previousServiceUnit);
   const executables = {
@@ -813,6 +915,12 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
       "printf 'cp %s\\n' \"$*\" >> \"${ORDER_LOG:?}\"",
       "exec /bin/cp \"$@\"",
       ""
+    ].join("\n"),
+    mv: [
+      "#!/usr/bin/env bash",
+      "printf 'mv %s\\n' \"$*\" >> \"${ORDER_LOG:?}\"",
+      "exec /bin/mv \"$@\"",
+      ""
     ].join("\n")
   };
   for (const [name, source] of Object.entries(executables)) {
@@ -821,7 +929,12 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   }
   await writeFile(
     join(nodeRoot, "bin", "node"),
-    "#!/usr/bin/env bash\nexec \"${TEST_NODE_BIN:?}\" \"$@\"\n"
+    [
+      "#!/usr/bin/env bash",
+      "printf 'node %s\\n' \"$*\" >> \"${ORDER_LOG:?}\"",
+      "exec \"${TEST_NODE_BIN:?}\" \"$@\"",
+      ""
+    ].join("\n")
   );
   await chmod(join(nodeRoot, "bin", "node"), 0o755);
 
@@ -869,6 +982,23 @@ test("the control-plane upgrader stops writers before backing up durable data", 
   assert.ok(stopIndex < dataBackupIndex, "RayLink must stop SQLite writers before copying its data directory");
 });
 
+test("the control-plane upgrader validates candidate database migrations before switching applications", async (t) => {
+  const { error, operations } = await runControlPlaneUpgradeHarness(t);
+  assert.equal(error, null);
+  const compatibilityIndex = operations.findIndex((entry) => (
+    entry.includes("deploy/check-database-compatibility.mjs")
+  ));
+  const applicationSwitchIndex = operations.findIndex((entry) => (
+    entry.startsWith("mv ") && entry.includes("/installed ")
+  ));
+  assert.notEqual(compatibilityIndex, -1);
+  assert.notEqual(applicationSwitchIndex, -1);
+  assert.ok(
+    compatibilityIndex < applicationSwitchIndex,
+    "candidate migrations must be validated before the application switch"
+  );
+});
+
 test("a failed control-plane health check restores application, data and service unit", async (t) => {
   const {
     dataRoot,
@@ -885,7 +1015,17 @@ test("a failed control-plane health check restores application, data and service
     JSON.parse(await readFile(join(installRoot, "package.json"), "utf8")).version,
     "0.2.12"
   );
-  assert.equal(await readFile(join(dataRoot, "raylink.db"), "utf8"), "durable-state");
+  const restoredDatabase = new DatabaseSync(join(dataRoot, "raylink.db"), {
+    readOnly: true
+  });
+  try {
+    assert.equal(
+      restoredDatabase.prepare("SELECT value FROM upgrade_harness").get().value,
+      "durable-state"
+    );
+  } finally {
+    restoredDatabase.close();
+  }
   assert.equal(await readFile(serviceUnit, "utf8"), previousServiceUnit);
   assert.equal(
     operations.filter((entry) => entry === "systemctl start raylink").length,
@@ -1071,20 +1211,55 @@ test("one-command bootstrap verifies and prepares the matching release package",
       ""
     ].join("\n")
   );
-  await chmod(join(armBinDirectory, "uname"), 0o755);
-  await assert.rejects(
-    () => execFile("bash", [
-      new URL("../deploy/install.sh", import.meta.url).pathname,
-      "--dry-run"
-    ], {
-      env: {
-        ...process.env,
-        PATH: `${armBinDirectory}:${process.env.PATH}`
-      }
-    }),
-    (error) => {
-      assert.match(error.stderr, /官方发布包目前仅提供 linux-amd64/);
-      return true;
-    }
+  await writeFile(
+    join(armBinDirectory, "curl"),
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "output=''",
+      "url=''",
+      "while [ \"$#\" -gt 0 ]; do",
+      "  case \"$1\" in",
+      "    -o) output=\"$2\"; shift 2 ;;",
+      "    --retry|--retry-delay|--connect-timeout|--max-time) shift 2 ;;",
+      "    -*) shift ;;",
+      "    *) url=\"$1\"; shift ;;",
+      "  esac",
+      "done",
+      "cp \"${ARM_RELEASE_DIRECTORY:?}/$(basename -- \"$url\")\" \"$output\"",
+      ""
+    ].join("\n")
   );
+  await chmod(join(armBinDirectory, "uname"), 0o755);
+  await chmod(join(armBinDirectory, "curl"), 0o755);
+  const armArchiveName = `raylink-${version}-linux-arm64.tar.gz`;
+  const armArchivePath = join(releaseDirectory, armArchiveName);
+  if (armArchivePath !== archivePath) {
+    await execFile("tar", [
+      "-czf",
+      armArchivePath,
+      "-C",
+      directory,
+      `._raylink-${version}`,
+      `raylink-${version}`
+    ]);
+    const armDigest = createHash("sha256")
+      .update(await readFile(armArchivePath))
+      .digest("hex");
+    await writeFile(`${armArchivePath}.sha256`, `${armDigest}  ${armArchiveName}\n`);
+  }
+  const armDryRun = await execFile("bash", [
+      new URL("../deploy/install.sh", import.meta.url).pathname,
+      "--dry-run",
+      "--version",
+      version
+  ], {
+    env: {
+      ...process.env,
+      ARM_RELEASE_DIRECTORY: releaseDirectory,
+      PATH: `${armBinDirectory}:${process.env.PATH}`
+    }
+  });
+  assert.match(armDryRun.stdout, /linux-arm64/);
+  assert.match(armDryRun.stdout, /SHA-256 校验通过/);
 });

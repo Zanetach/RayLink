@@ -11,12 +11,12 @@ source_root="$(CDPATH= cd -- "$script_directory/.." && pwd)"
 release_version="${1:-0.2.16}"
 release_arches="${RAYLINK_RELEASE_ARCHES:-amd64}"
 runtime_version="${RAYLINK_RUNTIME_VERSION:-1.13.14}"
+release_arch_count="$(printf '%s\n' "$release_arches" | awk '{ print NF }')"
+[ "$release_arch_count" -eq 1 ] \
+  || fail "每个正式发布包必须只包含一个目标架构"
 if [ -n "${2:-}" ]; then
   output_path="$2"
 else
-  release_arch_count="$(printf '%s\n' "$release_arches" | awk '{ print NF }')"
-  [ "$release_arch_count" -eq 1 ] \
-    || fail "多架构发布必须显式指定输出文件名"
   output_path="$source_root/output/raylink-${release_version}-linux-${release_arches}.tar.gz"
 fi
 
@@ -25,6 +25,16 @@ printf '%s' "$release_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
 command -v sha256sum >/dev/null 2>&1 || fail "需要 sha256sum"
 command -v tar >/dev/null 2>&1 || fail "需要 tar"
 command -v git >/dev/null 2>&1 || fail "需要 git"
+command -v node >/dev/null 2>&1 || fail "需要 Node.js 22.5+"
+package_version="$(
+  node -e '
+    const fs = require("node:fs");
+    const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version;
+    process.stdout.write(String(value || ""));
+  ' "$source_root/package.json"
+)"
+[ "$package_version" = "$release_version" ] \
+  || fail "发布版本 v${release_version} 与 package.json v${package_version} 不一致"
 
 git_root="$(git -C "$source_root" rev-parse --show-toplevel 2>/dev/null)" \
   || fail "发布包必须从 Git 工作区构建"
@@ -39,6 +49,9 @@ output_directory="$(dirname -- "$output_path")"
 install -d -m 0755 "$output_directory"
 output_directory="$(CDPATH= cd -- "$output_directory" && pwd)"
 output_path="$output_directory/$(basename -- "$output_path")"
+expected_output_name="raylink-${release_version}-linux-${release_arches}.tar.gz"
+[ "$(basename -- "$output_path")" = "$expected_output_name" ] \
+  || fail "正式发布包文件名必须是 ${expected_output_name}"
 temporary_root="$(mktemp -d)"
 trap 'rm -rf "$temporary_root"' EXIT
 package_root="$temporary_root/raylink-${release_version}"
@@ -65,7 +78,8 @@ if [ -n "$source_prefix" ]; then
 else
   source_tree=HEAD
 fi
-git -C "$git_root" archive --format=tar "$source_tree" package.json server web deploy \
+git -C "$git_root" archive --format=tar "$source_tree" \
+  package.json README.md CHANGELOG.md server web deploy docs/production-readiness-plan.md \
   | tar -xf - -C "$package_root"
 
 install -d -m 0755 "$package_root/web/node/runtime"
@@ -86,6 +100,12 @@ mv -f "$candidate_path" "$output_path"
   cd "$output_directory"
   sha256sum "$(basename -- "$output_path")" > "$(basename -- "$output_path").sha256"
 )
+node "$source_root/deploy/generate-release-metadata.mjs" \
+  "$output_path" \
+  "$source_root/web/node/runtime/raylink-sing-box-${runtime_version}-linux-${release_arches}" \
+  "$release_version" \
+  "$runtime_version" \
+  "$release_arches"
 
 printf 'RayLink 发布包：%s\n' "$output_path"
 printf 'RayLink 发布包校验：%s.sha256\n' "$output_path"

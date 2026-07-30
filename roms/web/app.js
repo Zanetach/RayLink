@@ -33,6 +33,11 @@ const controlPlane = {
   runtimeUpdate: null,
   protocolCatalog: [],
   deployments: [],
+  backups: [],
+  alerts: [],
+  alertDelivery: null,
+  admins: [],
+  auditEvents: [],
   telemetry: { windowHours: 24, networkSeries: [] },
   access: null,
   certificate: { mode: null, email: "" },
@@ -197,6 +202,11 @@ function applyBootstrap(data) {
   controlPlane.runtimeUpdate = data.runtimeUpdate;
   controlPlane.protocolCatalog = data.protocolCatalog;
   controlPlane.deployments = data.deployments;
+  controlPlane.backups = data.backups || [];
+  controlPlane.alerts = data.alerts || [];
+  controlPlane.alertDelivery = data.alertDelivery || null;
+  controlPlane.admins = data.admins || [];
+  controlPlane.auditEvents = data.auditEvents || [];
   controlPlane.telemetry = data.telemetry || { windowHours: 24, networkSeries: [] };
   controlPlane.access = data.access || null;
   controlPlane.certificate = data.certificate || { mode: null, email: "" };
@@ -211,8 +221,17 @@ function applyBootstrap(data) {
   if (profileButton) {
     profileButton.querySelector(".avatar").textContent = data.currentAdmin.username.slice(0, 2).toUpperCase();
     profileButton.querySelector("strong").textContent = data.currentAdmin.username;
-    profileButton.querySelector("small").textContent = "管理员";
+    profileButton.querySelector("small").textContent = {
+      owner: "Owner",
+      operator: "运维管理员",
+      support: "客服管理员",
+      auditor: "审计员"
+    }[data.currentAdmin.role] || "管理员";
   }
+  document.body.dataset.adminRole = data.currentAdmin.role || "owner";
+  document.querySelectorAll("[data-owner-only]").forEach((element) => {
+    element.hidden = data.currentAdmin.role !== "owner";
+  });
   renderUsers();
   renderRuntime();
 }
@@ -309,20 +328,62 @@ function renderDashboard() {
       `${upgradableHosts.length} 台 Runtime 可升级；系统会先备份并校验，失败自动恢复旧版本。`
     );
   }
+  const alertNotice = document.querySelector("#operational-alert-notice");
+  const firstAlert = controlPlane.alerts[0];
+  if (alertNotice) {
+    alertNotice.hidden = !firstAlert;
+    setText(
+      "#operational-alert-title",
+      firstAlert
+        ? `${firstAlert.title}${controlPlane.alerts.length > 1 ? `（另有 ${controlPlane.alerts.length - 1} 项）` : ""}`
+        : "当前没有运行告警"
+    );
+    setText("#operational-alert-copy", firstAlert?.message || "节点、发布、协议、计量与备份状态正常。");
+  }
+  const notificationDot = document.querySelector("#notification-button .notification-dot");
+  if (notificationDot) notificationDot.hidden = controlPlane.alerts.length === 0;
   renderDashboardNodes({ hosts, runtime, ready });
   setText("#dashboard-deployment-version", activeDeployment?.version || "尚未发布");
   const deploymentStatus = document.querySelector("#dashboard-deployment-status");
   if (deploymentStatus) {
-    deploymentStatus.className = `status-badge ${activeDeployment ? "good" : "neutral"}`;
-    deploymentStatus.innerHTML = `<i></i>${activeDeployment ? "已生效" : "无记录"}`;
+    const rollout = activeDeployment?.rolloutStatus;
+    const rolloutPresentation = rollout === "complete"
+      ? { className: "good", label: "全部节点已应用" }
+      : rollout === "failed"
+        ? { className: "danger", label: "节点发布失败" }
+        : activeDeployment
+          ? { className: "warning", label: "节点同步中" }
+          : { className: "neutral", label: "无记录" };
+    deploymentStatus.className = `status-badge ${rolloutPresentation.className}`;
+    deploymentStatus.innerHTML = `<i></i>${rolloutPresentation.label}`;
   }
   setText("#dashboard-deployment-users", activeDeployment?.eligibleUsers || 0);
   setText("#dashboard-deployment-time", activeDeployment?.publishedAt
     ? `${activeDeployment.publisherUsername || "管理员"} · ${new Date(activeDeployment.publishedAt).toLocaleString("zh-CN")}`
     : "—");
+  const appliedTargets = activeDeployment?.targets?.filter(
+    (target) => target.status === "applied"
+  ).length || 0;
+  const targetCount = activeDeployment?.targets?.length || 0;
   setText("#dashboard-deployment-validation", latestAttempt?.status === "failed"
     ? `最近一次尝试失败：${latestAttempt.error}`
-    : runtime.runtimeVersion ? `sing-box ${runtime.runtimeVersion}` : runtime.mode);
+    : activeDeployment
+      ? `${appliedTargets}/${targetCount} 个目标已应用`
+      : runtime.runtimeVersion ? `sing-box ${runtime.runtimeVersion}` : runtime.mode);
+  const deploymentTrail = document.querySelector(".deployment-panel .change-log");
+  if (deploymentTrail && activeDeployment?.targets?.length) {
+    deploymentTrail.innerHTML = activeDeployment.targets.map((target) => {
+      const status = {
+        applied: "已应用",
+        pending: "等待节点",
+        deploying: "正在部署",
+        failed: "失败",
+        "not-queued": "未排队",
+        superseded: "已替换"
+      }[target.status] || target.status;
+      return `<span>${escapeHtml(target.name)} · ${escapeHtml(status)}</span>`;
+    }).join("");
+  }
   renderNetworkTrend();
   const policyStatus = activeDeployment ? `策略 ${activeDeployment.version} 已生效` : "尚未发布账号策略";
   const policyMeta = activeDeployment?.publishedAt
@@ -407,6 +468,9 @@ function renderDashboardNodes({ hosts, runtime, ready }) {
     const memoryPercent = Number.isFinite(telemetry.memoryUsedBytes) && Number.isFinite(telemetry.memoryTotalBytes)
       ? (telemetry.memoryUsedBytes / telemetry.memoryTotalBytes) * 100
       : null;
+    const diskPercent = Number.isFinite(telemetry.diskUsedBytes) && Number.isFinite(telemetry.diskTotalBytes)
+      ? (telemetry.diskUsedBytes / telemetry.diskTotalBytes) * 100
+      : null;
     const networkTotal = (telemetry.networkRxBps || 0) + (telemetry.networkTxBps || 0);
     return `
       <article class="node-health-card">
@@ -417,6 +481,7 @@ function renderDashboardNodes({ hosts, runtime, ready }) {
         <div class="node-health-metrics">
           <span><small>CPU</small><strong>${Number.isFinite(telemetry.cpuPercent) ? `${telemetry.cpuPercent.toFixed(1)}%` : "—"}</strong><i style="--load:${telemetry.cpuPercent || 0}%"></i></span>
           <span><small>内存</small><strong>${memoryPercent === null ? "—" : `${memoryPercent.toFixed(1)}%`}</strong><em>${formatBytes(telemetry.memoryUsedBytes)} / ${formatBytes(telemetry.memoryTotalBytes)}</em></span>
+          <span><small>磁盘</small><strong>${diskPercent === null ? "—" : `${diskPercent.toFixed(1)}%`}</strong><em>${formatBytes(telemetry.diskUsedBytes)} / ${formatBytes(telemetry.diskTotalBytes)}</em></span>
           <span><small>网络</small><strong>${formatBitRate(networkTotal)}</strong><em>↓ ${formatBitRate(telemetry.networkRxBps)} · ↑ ${formatBitRate(telemetry.networkTxBps)}</em></span>
           <span><small>sing-box 服务</small><strong>${escapeHtml({ running: "运行中", staged: "已暂存", stopped: "已停止", failed: "异常", unknown: "待上报" }[telemetry.serviceStatus] || "待上报")}</strong><em>${escapeHtml(runtimeVersion)}</em></span>
         </div>
@@ -742,7 +807,13 @@ function renderOperations() {
   setText("#operations-config-state", activeDeployment?.version || "尚未发布");
   setText(
     "#operations-validation-state",
-    latestDeployment?.status === "failed" ? "最近一次失败" : activeDeployment ? "最近发布通过" : "尚无记录"
+    latestDeployment?.status === "failed"
+      ? "最近一次失败"
+      : activeDeployment?.rolloutStatus === "complete"
+        ? "全部目标已应用"
+        : activeDeployment
+          ? "节点同步中"
+          : "尚无记录"
   );
   const facts = document.querySelector("#operations-runtime-facts");
   if (facts) {
@@ -756,7 +827,11 @@ function renderOperations() {
   if (log) {
     const entries = controlPlane.deployments.slice(0, 6).map((deployment) => {
       const time = deployment.publishedAt || deployment.createdAt;
-      return `<span><time>${time ? new Date(time).toLocaleString("zh-CN") : "—"}</time> ${escapeHtml(deployment.version)} · ${escapeHtml(deployment.status)}</span>`;
+      const status = deployment.rolloutStatus || deployment.status;
+      const targets = deployment.targets?.length
+        ? ` · ${deployment.targets.filter((target) => target.status === "applied").length}/${deployment.targets.length} 目标`
+        : "";
+      return `<span><time>${time ? new Date(time).toLocaleString("zh-CN") : "—"}</time> ${escapeHtml(deployment.version)} · ${escapeHtml(status)}${targets}</span>`;
     });
     log.innerHTML = entries.length
       ? entries.join("")
@@ -846,6 +921,121 @@ function renderSystem() {
     const configured = Boolean(controlPlane.certificate?.email);
     certificateMode.className = `status-badge ${configured ? "good" : "warning"}`;
     certificateMode.innerHTML = `<i></i>${configured ? "已配置" : "未配置"}`;
+  }
+  const latestBackup = controlPlane.backups[0];
+  const backupTitle = document.querySelector("#system-backup-title");
+  const backupState = document.querySelector("#system-backup-state");
+  if (backupTitle) {
+    backupTitle.textContent = latestBackup
+      ? `最近备份 ${new Date(latestBackup.createdAt).toLocaleString("zh-CN")}`
+      : "尚无在线备份";
+  }
+  if (backupState) {
+    backupState.textContent = latestBackup
+      ? `${(Number(latestBackup.sizeBytes || 0) / 1024 / 1024).toFixed(2)} MB · SHA-256 ${String(latestBackup.checksum || "").slice(0, 12)}… · 完整性 ${latestBackup.integrity}`
+      : "每天自动执行 SQLite 在线备份，并校验 SHA-256 与数据库完整性。";
+  }
+  renderAdminAccess();
+}
+
+function renderAdminAccess() {
+  const target = document.querySelector("#admin-access-list");
+  const auditTarget = document.querySelector("#audit-event-list");
+  if (target) {
+    target.innerHTML = controlPlane.admins.length
+      ? controlPlane.admins.map((admin) => `
+        <div class="admin-access-row" data-admin-row="${escapeHtml(admin.id)}">
+          <span><strong>${escapeHtml(admin.username)}</strong><small>创建于 ${new Date(admin.createdAt).toLocaleString("zh-CN")}</small></span>
+          <select data-admin-role aria-label="${escapeHtml(admin.username)} 的角色">
+            ${["owner", "operator", "support", "auditor"].map((role) => (
+              `<option value="${role}" ${admin.role === role ? "selected" : ""}>${role}</option>`
+            )).join("")}
+          </select>
+          <input data-admin-password type="password" minlength="12" autocomplete="new-password" placeholder="留空则不重置密码" aria-label="重置 ${escapeHtml(admin.username)} 的密码">
+          <button class="button secondary" data-save-admin="${escapeHtml(admin.id)}">保存</button>
+        </div>`).join("")
+      : '<div class="empty-state">当前角色不能查看管理员列表。</div>';
+  }
+  if (auditTarget) {
+    auditTarget.innerHTML = controlPlane.auditEvents.length
+      ? controlPlane.auditEvents.map((event) => `
+        <span><time>${new Date(event.createdAt).toLocaleString("zh-CN")}</time> ${escapeHtml(event.actorUsername)} · ${escapeHtml(event.action)} · ${escapeHtml(event.resourceType)}</span>
+      `).join("")
+      : "<span>尚无审计事件。</span>";
+  }
+}
+
+async function createAdministrator(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await api("/api/admins", {
+      method: "POST",
+      body: JSON.stringify({
+        username: form.elements.username.value.trim(),
+        password: form.elements.password.value,
+        role: form.elements.role.value
+      })
+    });
+    form.reset();
+    await loadBootstrap();
+    showToast("管理员已创建", "新账号已经按所选角色完成权限隔离。");
+  } catch (error) {
+    showToast("创建管理员失败", error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveAdministrator(adminId) {
+  const row = document.querySelector(
+    `[data-admin-row="${CSS.escape(adminId)}"]`
+  );
+  if (!row) return;
+  const button = row.querySelector("[data-save-admin]");
+  const password = row.querySelector("[data-admin-password]").value;
+  button.disabled = true;
+  try {
+    await api(`/api/admins/${encodeURIComponent(adminId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        role: row.querySelector("[data-admin-role]").value,
+        ...(password ? { password } : {})
+      })
+    });
+    if (password && adminId === controlPlane.currentAdmin?.id) {
+      showAdminLogin();
+      elements.authError.textContent = "密码已更新，请使用新密码重新登录。";
+      return;
+    }
+    await loadBootstrap();
+    showToast("管理员已更新", password ? "角色和登录密码已经更新。" : "管理员角色已经更新。");
+  } catch (error) {
+    showToast("更新管理员失败", error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function createDatabaseBackup() {
+  const button = document.querySelector("[data-create-backup]");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  button.innerHTML = `${icon("refresh")} 正在备份`;
+  try {
+    const backup = await api("/api/backups", { method: "POST" });
+    await loadBootstrap();
+    showToast(
+      "数据库备份完成",
+      `${backup.filename} 已通过 SHA-256 与 SQLite 完整性检查。`
+    );
+  } catch (error) {
+    showToast("数据库备份失败", error.message);
+  } finally {
+    button.disabled = false;
+    button.innerHTML = `${icon("rollback")} 立即备份`;
   }
 }
 
@@ -2432,6 +2622,11 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (event.target.closest("[data-create-backup]")) {
+    await createDatabaseBackup();
+    return;
+  }
+
   if (event.target.closest("#upgrade-local-runtime")) {
     await upgradeLocalRuntime();
     return;
@@ -2440,6 +2635,12 @@ document.addEventListener("click", async (event) => {
   const hostUpgradeButton = event.target.closest("[data-upgrade-host]");
   if (hostUpgradeButton) {
     await upgradeRemoteRuntime(hostUpgradeButton.dataset.upgradeHost);
+    return;
+  }
+
+  const saveAdminButton = event.target.closest("[data-save-admin]");
+  if (saveAdminButton) {
+    await saveAdministrator(saveAdminButton.dataset.saveAdmin);
     return;
   }
 
@@ -2538,6 +2739,7 @@ elements.drawerCancel.addEventListener("click", closeDrawer);
 elements.drawerScrim.addEventListener("click", closeDrawer);
 elements.drawerSave.addEventListener("click", saveDrawer);
 document.querySelector("#certificate-settings-form").addEventListener("submit", saveCertificateSettings);
+document.querySelector("#admin-create-form")?.addEventListener("submit", createAdministrator);
 
 document.querySelector("#publish-config").addEventListener("click", publishConfig);
 document.querySelector("#rollback-config").addEventListener("click", rollbackConfig);

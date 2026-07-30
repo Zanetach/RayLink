@@ -1,5 +1,7 @@
 import { createPrivateKey, createPublicKey } from "node:crypto";
 
+import { DEFAULT_ROUTE_PROBE_URL } from "../routing/policy.js";
+
 const supportedTypes = new Set([
   "shadowsocks",
   "vmess",
@@ -12,7 +14,7 @@ const supportedTypes = new Set([
   "hysteria2"
 ]);
 
-export const DEFAULT_PROTOCOL_PROBE_URL = "https://www.gstatic.com/generate_204";
+export const DEFAULT_PROTOCOL_PROBE_URL = DEFAULT_ROUTE_PROBE_URL;
 
 function realityPublicKey(privateKey) {
   const raw = Buffer.from(String(privateKey || ""), "base64url");

@@ -86,6 +86,7 @@ install -d -m 0700 "$backup_directory"
 switch_started=false
 upgrade_succeeded=false
 data_backup_ready=false
+data_migration_started=false
 service_backup_ready=false
 rollback() {
   status=$?
@@ -99,7 +100,7 @@ rollback() {
       fi
       mv "$previous_root" "$install_root"
     fi
-    if [ "$data_backup_ready" = true ]; then
+    if [ "$data_backup_ready" = true ] && [ "$data_migration_started" = true ]; then
       if [ -e "$data_root" ]; then
         mv "$data_root" "$backup_directory/failed-data" 2>/dev/null || true
       fi
@@ -125,11 +126,18 @@ if [ -f "$service_unit" ]; then
   cp -a "$service_unit" "$backup_directory/raylink.service"
   service_backup_ready=true
 fi
+if [ -f "$backup_directory/data/raylink.db" ]; then
+  "$node_root/bin/node" \
+    "$candidate_root/deploy/check-database-compatibility.mjs" \
+    "$backup_directory/data/raylink.db" \
+    || fail "候选版本数据库迁移兼容检查未通过"
+fi
 mv "$install_root" "$previous_root"
 switch_started=true
 mv "$candidate_root" "$install_root"
 install -m 0644 "$install_root/deploy/raylink.service" "$service_unit"
 systemctl daemon-reload
+data_migration_started=true
 systemctl start raylink
 
 if [ -z "$health_port" ] && [ -f /etc/raylink/raylink.env ]; then

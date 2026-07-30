@@ -225,7 +225,7 @@ test("Host latency measurement records TCP and UDP protocol results without chan
   assert.equal(activations.get("hysteria2").publicCheck.latencyMs, 61);
 });
 
-test("Host connection measurement reports the median and jitter from five samples", async () => {
+test("Host connection measurement reports P50, P95 and robust jitter from five samples", async () => {
   const { manager, activations } = fixture("shadowsocks", {
     profiles: [
       profile("shadowsocks", { enabled: true })
@@ -241,7 +241,7 @@ test("Host connection measurement reports the median and jitter from five sample
     type: "shadowsocks",
     status: "available",
     latencyMs: 30,
-    jitterMs: 19,
+    jitterMs: 10,
     sampleCount: 5,
     successfulSamples: 5
   }]);
@@ -256,7 +256,10 @@ test("Host connection measurement reports the median and jitter from five sample
     }
   );
   assert.equal(activations.get("shadowsocks").publicCheck.latencyMs, 30);
-  assert.equal(activations.get("shadowsocks").publicCheck.jitterMs, 19);
+  assert.equal(activations.get("shadowsocks").publicCheck.p95Ms, 50);
+  assert.equal(activations.get("shadowsocks").publicCheck.jitterMs, 10);
+  assert.equal(activations.get("shadowsocks").publicCheck.healthWindow.successRate, 100);
+  assert.equal(activations.get("shadowsocks").publicCheck.healthWindow.rounds.length, 1);
   assert.equal(activations.get("shadowsocks").publicCheck.consecutiveFailures, 0);
 });
 
@@ -308,7 +311,7 @@ test("Host connection measurement requires three consecutive failed rounds befor
   );
 });
 
-test("Host connection measurement requires at least three successful samples", async () => {
+test("Host connection measurement requires at least four successful samples", async () => {
   const { manager, activations } = fixture("shadowsocks", {
     profiles: [
       profile("shadowsocks", { enabled: true })
@@ -351,6 +354,42 @@ test("Host connection measurement requires at least three successful samples", a
     }
   );
   assert.equal(measured.results[0].successfulSamples, 2);
+});
+
+test("a three-of-five protocol round is degraded instead of being declared available", async () => {
+  const { manager, activations } = fixture("hysteria2", {
+    profiles: [
+      profile("hysteria2", { enabled: true })
+    ],
+    protocolActivations: [{
+      type: "hysteria2",
+      state: "public-ready",
+      publicCheck: {
+        reachable: true,
+        latencyMs: 70,
+        jitterMs: 5,
+        checkedAt: "2026-07-28T10:00:00.000Z",
+        consecutiveFailures: 0
+      }
+    }],
+    protocolSamples: {
+      hysteria2: [
+        40,
+        new Error("connection timed out"),
+        50,
+        new Error("connection timed out"),
+        60
+      ]
+    }
+  });
+
+  const measured = await manager.measureHost({ hostId: "local" });
+
+  assert.equal(measured.results[0].status, "degraded");
+  assert.equal(measured.results[0].successfulSamples, 3);
+  assert.equal(activations.get("hysteria2").publicCheck.availability, "degraded");
+  assert.equal(activations.get("hysteria2").publicCheck.consecutiveFailures, 1);
+  assert.equal(activations.get("hysteria2").publicCheck.healthWindow.successRate, 60);
 });
 
 test("Host latency measurement marks enabled local-only protocols as not applicable", async () => {

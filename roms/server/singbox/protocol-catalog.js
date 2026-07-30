@@ -1,5 +1,12 @@
 import { createHmac } from "node:crypto";
 
+import {
+  AI_DOMAIN_SUFFIXES,
+  CHINA_FALLBACK_DOMAIN_SUFFIXES,
+  DEFAULT_ROUTE_PROBE_URL,
+  ROUTE_POLICY_GROUPS
+} from "../routing/policy.js";
+
 const sourceRoot = "https://github.com/SagerNet/sing-box/tree/v1.13.14";
 const docsRoot = "https://sing-box.sagernet.org/configuration/inbound";
 const protocolProbeTypes = new Set([
@@ -343,13 +350,19 @@ export function buildProtocolInbounds({ profiles, users, masterPassword }) {
   });
 }
 
-export function buildProtocolClientConfig({ profiles, credential, server, ruleSetBaseUrl = null }) {
+export function buildProtocolClientConfig({
+  profiles,
+  credential,
+  server,
+  ruleSetBaseUrl = null,
+  probeUrl = DEFAULT_ROUTE_PROBE_URL
+}) {
   const managed = profiles.filter((profile) => {
     const catalog = protocolByType.get(profile.type);
     return profile.enabled && catalog?.clientCapable && catalog.exposure === "public";
   });
   const protocolOutbounds = managed.map((profile) => buildClientOutbound(profile, credential, server));
-  return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl });
+  return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl, probeUrl });
 }
 
 const udpClientProtocolTypes = new Set(["hysteria", "hysteria2", "tuic"]);
@@ -361,7 +374,9 @@ function protocolIsStableForSmartSelection(activation) {
   return check?.availability === "available"
     && check.reachable === true
     && Number(check.consecutiveFailures || 0) === 0
-    && Number(check.samples?.successful || 0) >= 3
+    && Number(check.samples?.successful || 0) >= 4
+    && Number(check.healthWindow?.rounds?.length || 0) >= 3
+    && Number(check.healthWindow?.successRate || 0) >= 95
     && Number.isFinite(Number(check.jitterMs))
     && Number(check.jitterMs) <= UDP_STABLE_JITTER_LIMIT_MS;
 }
@@ -369,7 +384,8 @@ function protocolIsStableForSmartSelection(activation) {
 export function buildMultiHostProtocolClientConfig({
   credential,
   hosts,
-  ruleSetBaseUrl = null
+  ruleSetBaseUrl = null,
+  probeUrl = DEFAULT_ROUTE_PROBE_URL
 }) {
   const smartExcludedTags = new Set();
   const protocolOutbounds = hosts.flatMap((host) => {
@@ -398,16 +414,17 @@ export function buildMultiHostProtocolClientConfig({
   });
   return clientConfigForOutbounds(protocolOutbounds, {
     ruleSetBaseUrl,
-    smartExcludedTags
+    smartExcludedTags,
+    probeUrl
   });
 }
 
-function urlTestOutbound(tag, outbounds, tolerance = 50) {
+function urlTestOutbound(tag, outbounds, probeUrl, tolerance = 50) {
   return {
     type: "urltest",
     tag,
     outbounds,
-    url: "https://www.gstatic.com/generate_204",
+    url: probeUrl,
     interval: "3m",
     tolerance,
     interrupt_exist_connections: true
@@ -416,7 +433,11 @@ function urlTestOutbound(tag, outbounds, tolerance = 50) {
 
 function clientConfigForOutbounds(
   protocolOutbounds,
-  { ruleSetBaseUrl = null, smartExcludedTags = new Set() } = {}
+  {
+    ruleSetBaseUrl = null,
+    smartExcludedTags = new Set(),
+    probeUrl = DEFAULT_ROUTE_PROBE_URL
+  } = {}
 ) {
   if (!protocolOutbounds.length) throw protocolError("NO_CLIENT_PROTOCOL", "当前没有可下发的用户协议", 409);
   const tags = protocolOutbounds.map((outbound) => outbound.tag);
@@ -430,10 +451,10 @@ function clientConfigForOutbounds(
   const smartTags = [...tcpTags, ...healthyUdpTags];
   const usableSmartTags = smartTags.length ? smartTags : tags;
   const automaticGroups = [
-    urlTestOutbound("raylink-smart", usableSmartTags, 80),
-    ...(tcpTags.length ? [urlTestOutbound("raylink-tcp", tcpTags)] : []),
-    ...(udpTags.length ? [urlTestOutbound("raylink-udp", udpTags)] : []),
-    urlTestOutbound("raylink-fastest", tags)
+    urlTestOutbound("raylink-smart", usableSmartTags, probeUrl, 80),
+    ...(tcpTags.length ? [urlTestOutbound("raylink-tcp", tcpTags, probeUrl)] : []),
+    ...(udpTags.length ? [urlTestOutbound("raylink-udp", udpTags, probeUrl)] : []),
+    urlTestOutbound("raylink-fastest", tags, probeUrl)
   ];
   const selectorGroups = automaticGroups.map((outbound) => outbound.tag);
   const ruleSets = ruleSetBaseUrl
@@ -460,27 +481,7 @@ function clientConfigForOutbounds(
           type: "inline",
           tag: "geosite-geolocation-cn",
           rules: [{
-            domain_suffix: [
-              ".cn",
-              "126.com",
-              "163.com",
-              "alipay.com",
-              "aliyun.com",
-              "baidu.com",
-              "bilibili.com",
-              "bytedance.com",
-              "douyin.com",
-              "huawei.com",
-              "jd.com",
-              "mi.com",
-              "qq.com",
-              "taobao.com",
-              "tmall.com",
-              "toutiao.com",
-              "weibo.com",
-              "xiaomi.com",
-              "zhihu.com"
-            ]
+            domain_suffix: [...CHINA_FALLBACK_DOMAIN_SUFFIXES]
           }]
         },
         {
@@ -542,9 +543,20 @@ function clientConfigForOutbounds(
       ...automaticGroups,
       {
         type: "selector",
-        tag: "raylink-auto",
+        tag: ROUTE_POLICY_GROUPS.proxy.tag,
         outbounds: [...selectorGroups, ...tags],
-        default: "raylink-smart",
+        default: ROUTE_POLICY_GROUPS.smart.tag,
+        interrupt_exist_connections: true
+      },
+      {
+        type: "selector",
+        tag: ROUTE_POLICY_GROUPS.ai.tag,
+        outbounds: [
+          ROUTE_POLICY_GROUPS.proxy.tag,
+          ...selectorGroups,
+          ...tags
+        ],
+        default: ROUTE_POLICY_GROUPS.proxy.tag,
         interrupt_exist_connections: true
       },
       { type: "direct", tag: "direct" }
@@ -564,21 +576,26 @@ function clientConfigForOutbounds(
         {
           ip_is_private: true,
           action: "route",
-          outbound: "direct"
+          outbound: ROUTE_POLICY_GROUPS.direct.tag
+        },
+        {
+          domain_suffix: [...AI_DOMAIN_SUFFIXES],
+          action: "route",
+          outbound: ROUTE_POLICY_GROUPS.ai.tag
         },
         {
           rule_set: "geosite-geolocation-cn",
           action: "route",
-          outbound: "direct"
+          outbound: ROUTE_POLICY_GROUPS.direct.tag
         },
         {
           rule_set: "geoip-cn",
           action: "route",
-          outbound: "direct"
+          outbound: ROUTE_POLICY_GROUPS.direct.tag
         }
       ],
       rule_set: ruleSets,
-      final: "raylink-auto",
+      final: ROUTE_POLICY_GROUPS.proxy.tag,
       default_domain_resolver: "dns-local",
       auto_detect_interface: true
     },

@@ -6,6 +6,9 @@ import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BbrManager } from "./bbr.js";
+import { BackupManager } from "./backup.js";
+import { evaluateOperationalAlerts } from "./alerts.js";
+import { AlertWebhookDispatcher } from "./alert-dispatcher.js";
 import { normalizeCertificateEmail } from "./certificate-settings.js";
 import { RayLinkStore } from "./database.js";
 import { validateNodeEncryptionPublicKey } from "./node-secrets.js";
@@ -42,6 +45,12 @@ const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
 const REQUIRED_NODE_AGENT_VERSION = "0.7.0";
 const defaultWebDir = fileURLToPath(new URL("../web", import.meta.url));
+const rolePermissions = new Map([
+  ["owner", new Set(["read", "users.manage", "runtime.manage", "system.manage", "admins.manage", "audit.read"])],
+  ["operator", new Set(["read", "users.manage", "runtime.manage", "audit.read"])],
+  ["support", new Set(["read", "users.manage"])],
+  ["auditor", new Set(["read", "audit.read"])]
+]);
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -52,6 +61,36 @@ const contentTypes = {
   ".sh": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml"
 };
+
+function adminPermissionForRequest(method, pathname) {
+  if (pathname === "/api/admins" || pathname.startsWith("/api/admins/")) {
+    return "admins.manage";
+  }
+  if (pathname === "/api/audit") return "audit.read";
+  if (["GET", "HEAD"].includes(method)) return "read";
+  if (pathname === "/api/users" || pathname.startsWith("/api/users/")) {
+    return "users.manage";
+  }
+  if (
+    pathname === "/api/runtime"
+    || pathname.startsWith("/api/runtime/")
+    || pathname === "/api/hosts"
+    || pathname.startsWith("/api/hosts/")
+    || pathname === "/api/deployments"
+    || pathname.startsWith("/api/deployments/")
+  ) {
+    return "runtime.manage";
+  }
+  return "system.manage";
+}
+
+function auditResource(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  return {
+    resourceType: parts[1] || "system",
+    resourceId: parts[2] || null
+  };
+}
 
 function parseCookies(header = "") {
   return Object.fromEntries(header.split(";").flatMap((entry) => {
@@ -549,6 +588,15 @@ export async function createRayLinkApp(options) {
     dataDir: options.dataDir,
     fetchImpl: options.ruleSetFetch
   });
+  const backupManager = options.backupManager || new BackupManager({
+    store,
+    backupDir: options.backupDir || join(options.dataDir || "./data", "backups"),
+    retentionCount: options.backupRetentionCount || 14
+  });
+  const alertDispatcher = options.alertDispatcher || new AlertWebhookDispatcher({
+    webhookUrl: options.alertWebhookUrl,
+    fetchImpl: options.alertFetch
+  });
   const refreshRuleSets = () => ruleSetCache.prepare().catch((error) => {
     console.warn(`[RayLink] Managed rule-set refresh failed: ${error.message}`);
   });
@@ -572,11 +620,44 @@ export async function createRayLinkApp(options) {
   let protocolLatencyStartupTimer = null;
   let protocolLatencyPromise = null;
   let operationalMaintenanceTimer = null;
+  let backupTimer = null;
+  let backupStartupTimer = null;
+  let alertTimer = null;
   let localRuntimeOperation = null;
   const operationalMaintenanceIntervalMs = Math.max(
     60_000,
     Number(options.operationalMaintenanceIntervalMs || 60 * 60 * 1000)
   );
+  const backupIntervalMs = Math.max(
+    0,
+    Number(options.backupIntervalMs ?? 24 * 60 * 60 * 1000)
+  );
+  const createScheduledBackup = () => backupManager.create().catch((error) => {
+    console.warn(`[RayLink] Scheduled database backup failed: ${error.message}`);
+  });
+  const createInitialBackup = async () => {
+    try {
+      if (!(await backupManager.list()).length) await backupManager.create();
+    } catch (error) {
+      console.warn(`[RayLink] Initial database backup failed: ${error.message}`);
+    }
+  };
+  const alertIntervalMs = Math.max(
+    0,
+    Number(options.alertIntervalMs ?? 60_000)
+  );
+  const currentAlerts = async () => evaluateOperationalAlerts({
+    hosts: store.listHosts(),
+    deployments: store.listDeployments(),
+    backups: await backupManager.list()
+  });
+  const dispatchOperationalAlerts = async () => {
+    try {
+      await alertDispatcher.dispatch(await currentAlerts());
+    } catch (error) {
+      console.warn(`[RayLink] Operational alert delivery failed: ${error.message}`);
+    }
+  };
   const runOperationalMaintenance = () => {
     try {
       return store.performOperationalMaintenance();
@@ -853,6 +934,7 @@ export async function createRayLinkApp(options) {
     return buildUserClientConfig({
       credential,
       hosts: eligibleHosts,
+      probeUrl: options.protocolProbeUrl,
       ruleSetBaseUrl: ruleSetCache.available()
         ? new URL("/rule-sets/", currentSubscriptionOrigin()).toString()
         : null
@@ -1457,10 +1539,104 @@ export async function createRayLinkApp(options) {
           return;
         }
 
+        const requiredPermission = adminPermissionForRequest(request.method, url.pathname);
+        const permissions = rolePermissions.get(admin.role || "owner") || new Set();
+        if (!permissions.has(requiredPermission)) {
+          sendJson(response, 403, {
+            error: {
+              code: "FORBIDDEN",
+              message: "当前管理员角色无权执行此操作"
+            }
+          });
+          return;
+        }
+
+        if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
+          const { resourceType, resourceId } = auditResource(url.pathname);
+          response.once("finish", () => {
+            if (response.statusCode >= 400) return;
+            try {
+              store.recordAuditEvent({
+                adminId: admin.id,
+                actorUsername: admin.username,
+                actorRole: admin.role || "owner",
+                action: `${request.method} ${url.pathname}`,
+                resourceType,
+                resourceId,
+                metadata: { statusCode: response.statusCode }
+              });
+            } catch (error) {
+              console.warn(`[RayLink] Audit event could not be recorded: ${error.message}`);
+            }
+          });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/admins") {
+          sendJson(response, 200, { admins: store.listAdmins() });
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/admins") {
+          sendJson(response, 201, store.createAdmin(await readJson(request)));
+          return;
+        }
+
+        const adminMatch = url.pathname.match(/^\/api\/admins\/([^/]+)$/);
+        if (request.method === "PATCH" && adminMatch) {
+          sendJson(
+            response,
+            200,
+            store.updateAdmin(
+              decodeURIComponent(adminMatch[1]),
+              await readJson(request)
+            )
+          );
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/audit") {
+          sendJson(response, 200, {
+            events: store.listAuditEvents(url.searchParams.get("limit"))
+          });
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/backups") {
+          sendJson(response, 200, { backups: await backupManager.list() });
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/alerts") {
+          sendJson(response, 200, {
+            alerts: await currentAlerts(),
+            delivery: alertDispatcher.status()
+          });
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/backups") {
+          sendJson(response, 201, await backupManager.create());
+          return;
+        }
+
+        const backupVerifyMatch = url.pathname.match(
+          /^\/api\/backups\/([^/]+)\/verify$/
+        );
+        if (request.method === "POST" && backupVerifyMatch) {
+          sendJson(
+            response,
+            200,
+            await backupManager.verify(decodeURIComponent(backupVerifyMatch[1]))
+          );
+          return;
+        }
+
         if (request.method === "GET" && url.pathname === "/api/bootstrap") {
           const installation = await refreshLocalRuntimeCapabilities();
           const runtime = await runtimeManager.status();
           const bootstrap = store.bootstrap(admin);
+          const deployments = store.listDeployments();
+          const backups = await backupManager.list();
           const hosts = bootstrap.hosts.map((host) => {
             const capabilities = host.id === "local"
               ? installation
@@ -1484,12 +1660,23 @@ export async function createRayLinkApp(options) {
           sendJson(response, 200, {
             ...bootstrap,
             hosts,
+            admins: admin.role === "owner" ? store.listAdmins() : [],
+            auditEvents: ["owner", "operator", "auditor"].includes(admin.role)
+              ? store.listAuditEvents(30)
+              : [],
             access: store.setupStatus().access,
             certificate: store.certificateSettings(),
             telemetry: store.telemetryOverview(),
             runtime,
             runtimePreview: runtimeManager.preview(),
-            deployments: store.listDeployments(),
+            deployments,
+            backups,
+            alerts: evaluateOperationalAlerts({
+              hosts,
+              deployments,
+              backups
+            }),
+            alertDelivery: alertDispatcher.status(),
             installation,
             runtimeUpdate: typeof installer.releaseStatus === "function"
               ? installer.releaseStatus()
@@ -1866,6 +2053,20 @@ export async function createRayLinkApp(options) {
         operationalMaintenanceIntervalMs
       );
       operationalMaintenanceTimer.unref?.();
+      if (backupIntervalMs > 0) {
+        backupStartupTimer = setTimeout(
+          createInitialBackup,
+          Math.max(0, Number(options.backupStartupDelayMs ?? 1_000))
+        );
+        backupStartupTimer.unref?.();
+        backupTimer = setInterval(createScheduledBackup, backupIntervalMs);
+        backupTimer.unref?.();
+      }
+      if (alertIntervalMs > 0) {
+        await dispatchOperationalAlerts();
+        alertTimer = setInterval(dispatchOperationalAlerts, alertIntervalMs);
+        alertTimer.unref?.();
+      }
       telemetryTimer = setInterval(sampleLocalTelemetry, telemetryIntervalMs);
       telemetryTimer.unref?.();
       usageMeteringTimer = setInterval(sampleLocalUsage, usageMeteringIntervalMs);
@@ -1894,6 +2095,18 @@ export async function createRayLinkApp(options) {
       }
     },
     async close() {
+      if (alertTimer) {
+        clearInterval(alertTimer);
+        alertTimer = null;
+      }
+      if (backupTimer) {
+        clearInterval(backupTimer);
+        backupTimer = null;
+      }
+      if (backupStartupTimer) {
+        clearTimeout(backupStartupTimer);
+        backupStartupTimer = null;
+      }
       if (protocolLatencyStartupTimer) {
         clearTimeout(protocolLatencyStartupTimer);
         protocolLatencyStartupTimer = null;

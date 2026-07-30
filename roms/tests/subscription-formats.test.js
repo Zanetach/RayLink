@@ -159,14 +159,42 @@ test("Egern profile adds smart TCP UDP manual policies, routing and encrypted DN
   assert.match(artifact.body, /default_policy: "RayLink 智能"/);
   assert.match(artifact.body, /- select:/);
   assert.match(artifact.body, /name: "手动选择"/);
+  assert.match(artifact.body, /name: "AI 网站代理"/);
   assert.match(artifact.body, /^rules:/m);
   assert.match(artifact.body, /match: "openai.com"/);
-  assert.match(artifact.body, /policy: "网络环境"/);
+  assert.match(
+    artifact.body,
+    /match: "openai\.com"[\s\S]*?policy: "AI 网站代理"/
+  );
   assert.match(artifact.body, /match: "cn"/);
   assert.match(artifact.body, /policy: "DIRECT"/);
   assert.match(artifact.body, /default:[\s\S]*?policy: "网络环境"/);
   assert.match(artifact.body, /^dns:/m);
   assert.ok(artifact.body.includes("https://1.1.1.1/dns-query"));
+});
+
+test("Mihomo and Egern inherit the probe URL from the unified sing-box route policy", () => {
+  const probeUrl = "https://probe.example.com/generate_204";
+  const configured = {
+    ...singBoxConfig,
+    outbounds: singBoxConfig.outbounds.map((outbound) => (
+      outbound.type === "urltest" ? { ...outbound, url: probeUrl } : outbound
+    ))
+  };
+
+  const mihomo = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig: configured
+  }).body;
+  const egern = buildSubscriptionArtifact({
+    format: "egern-profile",
+    singBoxConfig: configured
+  }).body;
+
+  assert.ok(mihomo.includes(`url: "${probeUrl}"`));
+  assert.ok(egern.includes(`latency_test_url: "${probeUrl}"`));
+  assert.ok(!mihomo.includes("https://www.gstatic.com/generate_204"));
+  assert.ok(!egern.includes("https://www.gstatic.com/generate_204"));
 });
 
 test("Mihomo and Egern exporters cover every shared RayLink public protocol", () => {

@@ -25,6 +25,12 @@ window.RayLinkProtocolHealth = (() => {
     return `${Math.round(Math.max(0, Math.min(count, successful)) / count * 100)}%`;
   }
 
+  function percentage(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "—";
+    return `${Math.max(0, Math.min(100, Math.round(numeric * 10) / 10))}%`;
+  }
+
   function layerSummary(layers) {
     if (!layers) return "";
     const status = {
@@ -48,8 +54,10 @@ window.RayLinkProtocolHealth = (() => {
         label: "待检测",
         availabilityLabel: "待检测",
         latencyLabel: "—",
+        p95Label: "—",
         jitterLabel: "—",
         availabilityRateLabel: "—",
+        rollingAvailabilityLabel: "—",
         layersLabel: "",
         checkedLabel: "尚未检测",
         className: "neutral",
@@ -64,8 +72,10 @@ window.RayLinkProtocolHealth = (() => {
         label: "不适用",
         availabilityLabel: "不适用",
         latencyLabel: "—",
+        p95Label: "—",
         jitterLabel: "—",
         availabilityRateLabel: "—",
+        rollingAvailabilityLabel: "—",
         layersLabel: "",
         checkedLabel,
         className: "neutral",
@@ -80,10 +90,18 @@ window.RayLinkProtocolHealth = (() => {
         ? "TCP 连接"
         : "协议连接";
     const latencyLabel = finiteMilliseconds(check.latencyMs);
+    const p95Label = finiteMilliseconds(check.p95Ms);
     const jitterLabel = finiteMilliseconds(check.jitterMs);
     const availabilityRateLabel = availabilityRate(check.samples);
+    const rollingAvailabilityLabel = percentage(check.healthWindow?.successRate);
     const layersLabel = layerSummary(check.layers);
-    const rateSummary = availabilityRateLabel === "—" ? "" : ` · 可用率 ${availabilityRateLabel}`;
+    const rateSummary = availabilityRateLabel === "—"
+      ? ""
+      : ` · 本轮成功率 ${availabilityRateLabel}`;
+    const rollingSummary = rollingAvailabilityLabel === "—"
+      ? ""
+      : ` · 窗口成功率 ${rollingAvailabilityLabel}`;
+    const p95Summary = p95Label === "—" ? "" : ` · P95 ${p95Label}`;
     const layerText = layersLabel ? ` · ${layersLabel}` : "";
     const legacyUnconfirmedFailure = check.reachable === false
       && check.availability === undefined
@@ -93,13 +111,15 @@ window.RayLinkProtocolHealth = (() => {
       : Math.min(3, Math.max(0, Number(check.consecutiveFailures || 0)));
 
     if ((check.availability === "degraded" || legacyUnconfirmedFailure) && failures > 0) {
-      const summary = `复检中 ${failures}/3 · 最近成功 ${latencyLabel} · 抖动 ${jitterLabel}${rateSummary}${layerText} · 最近检测 ${checkedLabel}`;
+      const summary = `复检中 ${failures}/3 · 最近成功 ${latencyLabel}${p95Summary} · 抖动 ${jitterLabel}${rateSummary}${rollingSummary}${layerText} · 最近检测 ${checkedLabel}`;
       return {
         label: `复检 ${failures}/3`,
         availabilityLabel: "复检中",
         latencyLabel,
+        p95Label,
         jitterLabel,
         availabilityRateLabel,
+        rollingAvailabilityLabel,
         layersLabel,
         checkedLabel,
         className: "warning",
@@ -108,15 +128,35 @@ window.RayLinkProtocolHealth = (() => {
       };
     }
 
+    if (check.availability === "degraded") {
+      const summary = `质量降级 · 连接耗时 ${latencyLabel}${p95Summary} · 抖动 ${jitterLabel}${rateSummary}${rollingSummary}${layerText} · 最近检测 ${checkedLabel}`;
+      return {
+        label: "质量降级",
+        availabilityLabel: "质量降级",
+        latencyLabel,
+        p95Label,
+        jitterLabel,
+        availabilityRateLabel,
+        rollingAvailabilityLabel,
+        layersLabel,
+        checkedLabel,
+        className: "warning",
+        summary,
+        title: `${probeLabel} · ${summary}`
+      };
+    }
+
     if (check.reachable === true && latencyLabel !== "—") {
       const latencyMs = Math.max(0, Math.round(Number(check.latencyMs)));
-      const summary = `可用 · 连接耗时 ${latencyLabel} · 抖动 ${jitterLabel}${rateSummary}${layerText} · 最近检测 ${checkedLabel}`;
+      const summary = `可用 · 连接耗时 ${latencyLabel}${p95Summary} · 抖动 ${jitterLabel}${rateSummary}${rollingSummary}${layerText} · 最近检测 ${checkedLabel}`;
       return {
         label: latencyLabel,
         availabilityLabel: "可用",
         latencyLabel,
+        p95Label,
         jitterLabel,
         availabilityRateLabel,
+        rollingAvailabilityLabel,
         layersLabel,
         checkedLabel,
         className: latencyMs <= 120 ? "good" : "warning",
@@ -129,13 +169,15 @@ window.RayLinkProtocolHealth = (() => {
     const label = timedOut ? "超时" : "不可达";
     const lastSuccess = latencyLabel === "—" ? "" : ` · 最近成功 ${latencyLabel}`;
     const lastJitter = jitterLabel === "—" ? "" : ` · 抖动 ${jitterLabel}`;
-    const summary = `${label}${lastSuccess}${lastJitter}${rateSummary}${layerText} · 连续失败 ${failures}/3 · 最近检测 ${checkedLabel}`;
+    const summary = `${label}${lastSuccess}${p95Summary}${lastJitter}${rateSummary}${rollingSummary}${layerText} · 连续失败 ${failures}/3 · 最近检测 ${checkedLabel}`;
     return {
       label,
       availabilityLabel: "不可用",
       latencyLabel,
+      p95Label,
       jitterLabel,
       availabilityRateLabel,
+      rollingAvailabilityLabel,
       layersLabel,
       checkedLabel,
       className: "danger",

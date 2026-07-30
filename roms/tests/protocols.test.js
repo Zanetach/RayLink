@@ -196,6 +196,14 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.equal(config.dns.final, "dns-remote");
   assert.equal(config.route.rules[0].action, "sniff");
   assert.equal(config.route.rules[1].action, "hijack-dns");
+  assert.equal(
+    config.outbounds.find((outbound) => outbound.tag === "raylink-ai").default,
+    "raylink-auto"
+  );
+  assert.deepEqual(
+    config.route.rules.find((rule) => rule.outbound === "raylink-ai").domain_suffix.slice(0, 2),
+    ["openai.com", "chatgpt.com"]
+  );
   assert.deepEqual(
     config.route.rule_set.map((ruleSet) => ruleSet.tag),
     ["geosite-geolocation-cn", "geoip-cn"]
@@ -203,6 +211,25 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.ok(config.route.rule_set.every((ruleSet) => ruleSet.type === "inline"));
   assert.ok(config.route.rule_set.every((ruleSet) => !Object.hasOwn(ruleSet, "url")));
   assert.equal(config.experimental.cache_file.enabled, true);
+});
+
+test("all sing-box route policy probes inherit the configured RayLink probe URL", () => {
+  const probeUrl = "https://probe.example.com/generate_204";
+  const config = buildProtocolClientConfig({
+    profiles: defaultProtocolConfigs(),
+    credential: {
+      email: eligibleUsers[0].email,
+      runtimeUuid: eligibleUsers[0].runtimeUuid,
+      runtimePassword: eligibleUsers[0].runtimePassword,
+      serverPassword: "c2VydmVyLWtleS0xNg=="
+    },
+    server: "node.example.com",
+    probeUrl
+  });
+
+  const policyProbes = config.outbounds.filter((outbound) => outbound.type === "urltest");
+  assert.ok(policyProbes.length > 0);
+  assert.ok(policyProbes.every((outbound) => outbound.url === probeUrl));
 });
 
 test("loopback-only proxy inbounds are never published in a remote user subscription", () => {
@@ -319,7 +346,11 @@ test("client subscription separates TCP and UDP and excludes unhealthy UDP from 
             reachable: true,
             jitterMs: 18,
             consecutiveFailures: 0,
-            samples: { count: 5, successful: 5, failed: 0 }
+            samples: { count: 5, successful: 5, failed: 0 },
+            healthWindow: {
+              successRate: 100,
+              rounds: [{}, {}, {}]
+            }
           }
         },
         {

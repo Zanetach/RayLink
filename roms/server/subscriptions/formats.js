@@ -1,3 +1,11 @@
+import {
+  AI_DOMAIN_SUFFIXES,
+  CHINA_FALLBACK_DOMAIN_SUFFIXES,
+  createRoutePolicyCandidates,
+  routeProbeUrlFromConfig,
+  ROUTE_POLICY_GROUPS
+} from "../routing/policy.js";
+
 const generatedNodeTypes = new Set([
   "shadowsocks",
   "vmess",
@@ -177,46 +185,43 @@ function mihomoProxy(outbound) {
   }, outbound), outbound);
 }
 
-function uniqueExisting(members, names) {
-  const available = new Set(names);
-  return [...new Set(members)].filter((name) => available.has(name));
-}
-
 function buildMihomoConfig(singBoxConfig) {
   const proxies = nodeOutbounds(singBoxConfig)
     .filter((outbound) => mihomoCompatibleTypes.has(outbound.type))
     .map(mihomoProxy);
   if (!proxies.length) throw subscriptionError("NO_COMPATIBLE_NODES", "当前没有 Mihomo 可用节点");
   const names = proxies.map((proxy) => proxy.name);
-  const smart = uniqueExisting(groupMembers(singBoxConfig, "raylink-smart", names), names);
-  const tcp = uniqueExisting(groupMembers(singBoxConfig, "raylink-tcp"), names);
-  const udp = uniqueExisting(groupMembers(singBoxConfig, "raylink-udp"), names);
-  const automatic = smart.length ? smart : names;
-  const stableCandidates = [...new Set([...(tcp.length ? tcp : automatic), ...udp])];
-  const manualCandidates = [...new Set([...stableCandidates, ...names])];
-  const policyChoices = [
-    "故障回退",
-    "RayLink 智能",
-    "TCP 稳定",
-    ...(udp.length ? ["UDP 高速"] : []),
-    "手动选择"
-  ];
+  const candidates = createRoutePolicyCandidates({
+    names,
+    smart: groupMembers(singBoxConfig, ROUTE_POLICY_GROUPS.smart.tag, names),
+    tcp: groupMembers(singBoxConfig, ROUTE_POLICY_GROUPS.tcp.tag),
+    udp: groupMembers(singBoxConfig, ROUTE_POLICY_GROUPS.udp.tag)
+  });
+  const {
+    automatic,
+    tcp,
+    udp,
+    stable: stableCandidates,
+    manual: manualCandidates,
+    policyChoices
+  } = candidates;
+  const probeUrl = routeProbeUrlFromConfig(singBoxConfig);
   const proxyGroups = [
     {
-      name: "RayLink 代理",
+      name: ROUTE_POLICY_GROUPS.proxy.name,
       type: "select",
       proxies: policyChoices
     },
     {
-      name: "AI 网站代理",
+      name: ROUTE_POLICY_GROUPS.ai.name,
       type: "select",
       proxies: policyChoices
     },
     {
-      name: "RayLink 智能",
+      name: ROUTE_POLICY_GROUPS.smart.name,
       type: "url-test",
       proxies: automatic,
-      url: "https://www.gstatic.com/generate_204",
+      url: probeUrl,
       interval: 180,
       tolerance: 80,
       lazy: false,
@@ -225,10 +230,10 @@ function buildMihomoConfig(singBoxConfig) {
       "expected-status": 204
     },
     {
-      name: "TCP 稳定",
+      name: ROUTE_POLICY_GROUPS.tcp.name,
       type: "url-test",
       proxies: tcp.length ? tcp : automatic,
-      url: "https://www.gstatic.com/generate_204",
+      url: probeUrl,
       interval: 180,
       tolerance: 50,
       lazy: false,
@@ -237,10 +242,10 @@ function buildMihomoConfig(singBoxConfig) {
       "expected-status": 204
     },
     ...(udp.length ? [{
-      name: "UDP 高速",
+      name: ROUTE_POLICY_GROUPS.udp.name,
       type: "url-test",
       proxies: udp,
-      url: "https://www.gstatic.com/generate_204",
+      url: probeUrl,
       interval: 180,
       tolerance: 80,
       lazy: false,
@@ -249,10 +254,10 @@ function buildMihomoConfig(singBoxConfig) {
       "expected-status": 204
     }] : []),
     {
-      name: "故障回退",
+      name: ROUTE_POLICY_GROUPS.fallback.name,
       type: "fallback",
       proxies: stableCandidates,
-      url: "https://www.gstatic.com/generate_204",
+      url: probeUrl,
       interval: 180,
       lazy: false,
       timeout: 5000,
@@ -260,7 +265,7 @@ function buildMihomoConfig(singBoxConfig) {
       "expected-status": 204
     },
     {
-      name: "手动选择",
+      name: ROUTE_POLICY_GROUPS.manual.name,
       type: "select",
       proxies: manualCandidates
     }
@@ -285,7 +290,7 @@ function buildMihomoConfig(singBoxConfig) {
       "respect-rules": true,
       "default-nameserver": ["223.5.5.5"],
       nameserver: [
-        "https://1.1.1.1/dns-query#RayLink 代理"
+        `https://1.1.1.1/dns-query#${ROUTE_POLICY_GROUPS.proxy.name}`
       ],
       "nameserver-policy": {
         "geosite:cn": ["https://223.5.5.5/dns-query"]
@@ -297,23 +302,14 @@ function buildMihomoConfig(singBoxConfig) {
     proxies,
     "proxy-groups": proxyGroups,
     rules: [
-      "DOMAIN-SUFFIX,openai.com,AI 网站代理",
-      "DOMAIN-SUFFIX,chatgpt.com,AI 网站代理",
-      "DOMAIN-SUFFIX,oaistatic.com,AI 网站代理",
-      "DOMAIN-SUFFIX,oaiusercontent.com,AI 网站代理",
-      "DOMAIN-SUFFIX,anthropic.com,AI 网站代理",
-      "DOMAIN-SUFFIX,claude.ai,AI 网站代理",
-      "DOMAIN-SUFFIX,perplexity.ai,AI 网站代理",
-      "DOMAIN-SUFFIX,poe.com,AI 网站代理",
-      "DOMAIN-SUFFIX,x.ai,AI 网站代理",
-      "DOMAIN-SUFFIX,grok.com,AI 网站代理",
-      "DOMAIN-SUFFIX,gemini.google.com,AI 网站代理",
-      "DOMAIN-SUFFIX,generativelanguage.googleapis.com,AI 网站代理",
-      "DOMAIN-SUFFIX,google.com,RayLink 智能",
-      "DOMAIN-SUFFIX,youtube.com,RayLink 智能",
+      ...AI_DOMAIN_SUFFIXES.map(
+        (domain) => `DOMAIN-SUFFIX,${domain},${ROUTE_POLICY_GROUPS.ai.name}`
+      ),
+      `DOMAIN-SUFFIX,google.com,${ROUTE_POLICY_GROUPS.smart.name}`,
+      `DOMAIN-SUFFIX,youtube.com,${ROUTE_POLICY_GROUPS.smart.name}`,
       "GEOSITE,CN,DIRECT",
       "GEOIP,CN,DIRECT,no-resolve",
-      "MATCH,RayLink 代理"
+      `MATCH,${ROUTE_POLICY_GROUPS.proxy.name}`
     ]
   };
 }
@@ -456,10 +452,16 @@ function buildEgernProfile(singBoxConfig) {
   const proxies = egernProxies(singBoxConfig);
   if (!proxies.length) throw subscriptionError("NO_COMPATIBLE_NODES", "当前没有 Egern 可用节点");
   const names = egernProxyNames(proxies);
-  const smart = uniqueExisting(groupMembers(singBoxConfig, "raylink-smart", names), names);
-  const tcp = uniqueExisting(groupMembers(singBoxConfig, "raylink-tcp"), names);
-  const udp = uniqueExisting(groupMembers(singBoxConfig, "raylink-udp"), names);
-  const smartNames = smart.length ? smart : names;
+  const candidates = createRoutePolicyCandidates({
+    names,
+    smart: groupMembers(singBoxConfig, ROUTE_POLICY_GROUPS.smart.tag, names),
+    tcp: groupMembers(singBoxConfig, ROUTE_POLICY_GROUPS.tcp.tag),
+    udp: groupMembers(singBoxConfig, ROUTE_POLICY_GROUPS.udp.tag)
+  });
+  const smartNames = candidates.automatic;
+  const tcp = candidates.tcp;
+  const udp = candidates.udp;
+  const probeUrl = routeProbeUrlFromConfig(singBoxConfig);
   return {
     ipv6: false,
     close_connections_on_policy_change: true,
@@ -474,7 +476,12 @@ function buildEgernProfile(singBoxConfig) {
         ]
       },
       forward: [
-        { domain_suffix: { match: "cn", value: "domestic" } },
+        ...CHINA_FALLBACK_DOMAIN_SUFFIXES.map((domain) => ({
+          domain_suffix: {
+            match: domain === ".cn" ? "cn" : domain,
+            value: "domestic"
+          }
+        })),
         { domain_wildcard: { match: "*", value: "overseas" } }
       ],
       proxy_nameservers: ["https://223.5.5.5/dns-query"],
@@ -484,18 +491,18 @@ function buildEgernProfile(singBoxConfig) {
     policy_groups: [
       {
         smart: {
-          name: "RayLink 智能",
+          name: ROUTE_POLICY_GROUPS.smart.name,
           policies: smartNames,
           priorities: {
             "(?i)VLESS|TROJAN|ANYTLS|VMESS": 0.85,
             "(?i)HYSTERIA2|TUIC": 1
           },
-          latency_test_url: "https://www.gstatic.com/generate_204"
+          latency_test_url: probeUrl
         }
       },
       {
         auto_test: {
-          name: "TCP 稳定",
+          name: ROUTE_POLICY_GROUPS.tcp.name,
           policies: tcp.length ? tcp : smartNames,
           interval: 300,
           tolerance: 100,
@@ -504,7 +511,7 @@ function buildEgernProfile(singBoxConfig) {
       },
       ...(udp.length ? [{
         auto_test: {
-          name: "UDP 高速",
+          name: ROUTE_POLICY_GROUPS.udp.name,
           policies: udp,
           interval: 300,
           tolerance: 120,
@@ -513,7 +520,7 @@ function buildEgernProfile(singBoxConfig) {
       }] : []),
       {
         fallback: {
-          name: "故障回退",
+          name: ROUTE_POLICY_GROUPS.fallback.name,
           policies: udp.length
             ? ["UDP 高速", "TCP 稳定"]
             : ["TCP 稳定", "RayLink 智能"],
@@ -533,24 +540,34 @@ function buildEgernProfile(singBoxConfig) {
       },
       {
         select: {
-          name: "手动选择",
+          name: ROUTE_POLICY_GROUPS.ai.name,
           policies: [
             "网络环境",
-            "RayLink 智能",
-            "TCP 稳定",
-            ...(udp.length ? ["UDP 高速"] : []),
-            "故障回退",
+            ROUTE_POLICY_GROUPS.fallback.name,
+            ROUTE_POLICY_GROUPS.smart.name,
+            ROUTE_POLICY_GROUPS.tcp.name,
+            ...(udp.length ? [ROUTE_POLICY_GROUPS.udp.name] : [])
+          ]
+        }
+      },
+      {
+        select: {
+          name: ROUTE_POLICY_GROUPS.manual.name,
+          policies: [
+            "网络环境",
+            ROUTE_POLICY_GROUPS.smart.name,
+            ROUTE_POLICY_GROUPS.tcp.name,
+            ...(udp.length ? [ROUTE_POLICY_GROUPS.udp.name] : []),
+            ROUTE_POLICY_GROUPS.fallback.name,
             ...names
           ]
         }
       }
     ],
     rules: [
-      { domain_suffix: { match: "openai.com", policy: "网络环境" } },
-      { domain_suffix: { match: "anthropic.com", policy: "网络环境" } },
-      { domain_suffix: { match: "claude.ai", policy: "网络环境" } },
-      { domain_suffix: { match: "google.com", policy: "网络环境" } },
-      { domain_suffix: { match: "youtube.com", policy: "网络环境" } },
+      ...AI_DOMAIN_SUFFIXES.map((domain) => ({
+        domain_suffix: { match: domain, policy: ROUTE_POLICY_GROUPS.ai.name }
+      })),
       { domain_suffix: { match: "cn", policy: "DIRECT" } },
       { geoip: { match: "CN", policy: "DIRECT", no_resolve: true } },
       { default: { policy: "网络环境" } }

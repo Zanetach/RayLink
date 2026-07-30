@@ -3,6 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 
 import { RayLinkStore } from "../server/database.js";
 import { RuntimeManager } from "../server/singbox/runtime-manager.js";
@@ -201,7 +203,24 @@ test("rollback queues the matching historical protocol snapshot for remote Hosts
     runtimeVersion: "1.13.12"
   });
   const adapter = new RecordingRuntimeAdapter();
-  const manager = new RuntimeManager({ store, adapter, listenPort: 8388 });
+  const manager = new RuntimeManager({
+    store,
+    adapter,
+    listenPort: 8388,
+    tlsAssetPackager: {
+      async prepare(config) {
+        return {
+          config,
+          sealedTlsBundle: "sealed-test-bundle",
+          tlsAssets: [{
+            name: "raylink-trojan",
+            fingerprint256: "AA:BB",
+            validTo: "2026-08-05T12:00:00.000Z"
+          }]
+        };
+      }
+    }
+  });
   t.after(async () => {
     store.close();
     await rm(dataDir, { recursive: true, force: true });
@@ -209,12 +228,36 @@ test("rollback queues the matching historical protocol snapshot for remote Hosts
 
   store.updateHostProtocolConfig(enrolled.hostId, "shadowsocks", { enabled: true });
   const first = await manager.publish();
+  assert.equal(first.rolloutStatus, "pending");
+  assert.deepEqual(
+    first.targets.map((target) => [target.hostId, target.status]),
+    [["local", "applied"], [enrolled.hostId, "pending"]]
+  );
+  assert.deepEqual(
+    first.targets.find((target) => target.hostId === enrolled.hostId).certificates,
+    [{
+      name: "raylink-trojan",
+      fingerprint256: "AA:BB",
+      validTo: "2026-08-05T12:00:00.000Z"
+    }]
+  );
   const firstTask = store.nextNodeTask(enrolled.hostId);
+  assert.equal(
+    store.listDeployments().find((deployment) => deployment.id === first.id)
+      .targets.find((target) => target.hostId === enrolled.hostId).status,
+    "deploying"
+  );
   store.completeNodeTask(enrolled.hostId, firstTask.id, {
     attempt: firstTask.attempt,
     status: "succeeded",
     runtimeVersion: "1.13.12"
   });
+  const appliedFirst = store.listDeployments().find((deployment) => deployment.id === first.id);
+  assert.equal(appliedFirst.rolloutStatus, "complete");
+  assert.equal(
+    appliedFirst.targets.find((target) => target.hostId === enrolled.hostId).status,
+    "applied"
+  );
 
   store.updateHostProtocolConfig(enrolled.hostId, "vless", {
     enabled: true,
@@ -246,4 +289,90 @@ test("rollback queues the matching historical protocol snapshot for remote Hosts
     JSON.parse(rollbackTask.payload.configText).inbounds.map((inbound) => inbound.type),
     ["shadowsocks"]
   );
+});
+
+test("concurrent control-plane processes cannot claim the same RayLink Node task", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "raylink-task-claim-"));
+  const dbPath = join(dataDir, "raylink.db");
+  const store = new RayLinkStore({
+    dbPath,
+    adminUsername: "admin",
+    adminPassword: "Admin@2026",
+    seedDemoData: false
+  });
+  const created = store.createRemoteHost({
+    name: "Concurrent claim Host",
+    address: "claim.example.com",
+    region: "singapore"
+  });
+  const enrolled = store.enrollNode(created.enrollmentToken, {
+    hostname: "claim-01",
+    platform: "linux",
+    architecture: "amd64",
+    agentVersion: "0.7.0",
+    runtimeVersion: "1.13.14"
+  });
+  const taskId = store.queueNodeTask(enrolled.hostId, "publish-config", {
+    version: "concurrent-claim",
+    checksum: "sha256:claim",
+    configText: "{}"
+  });
+  store.close();
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const barrier = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+  const moduleUrl = pathToFileURL(join(process.cwd(), "server/database.js")).href;
+  const workerSource = `
+    const { parentPort, workerData } = require("node:worker_threads");
+    (async () => {
+      const { RayLinkStore } = await import(workerData.moduleUrl);
+      const store = new RayLinkStore({
+        dbPath: workerData.dbPath,
+        adminUsername: "admin",
+        adminPassword: "Admin@2026",
+        seedDemoData: false
+      });
+      parentPort.postMessage({ type: "ready" });
+      Atomics.wait(new Int32Array(workerData.barrier), 0, 0);
+      try {
+        parentPort.postMessage({ type: "result", task: store.nextNodeTask(workerData.hostId) });
+      } catch (error) {
+        parentPort.postMessage({ type: "error", error: error.message });
+      } finally {
+        store.close();
+      }
+    })();
+  `;
+  const claims = Array.from({ length: 2 }, () => {
+    const worker = new Worker(workerSource, {
+      eval: true,
+      workerData: { barrier, dbPath, hostId: enrolled.hostId, moduleUrl }
+    });
+    let markReady;
+    let finish;
+    const ready = new Promise((resolve) => {
+      markReady = resolve;
+    });
+    const result = new Promise((resolve, reject) => {
+      finish = { resolve, reject };
+    });
+    worker.on("message", (message) => {
+      if (message.type === "ready") markReady();
+      if (message.type === "result") finish.resolve(message.task);
+      if (message.type === "error") finish.reject(new Error(message.error));
+    });
+    worker.on("error", finish.reject);
+    return { worker, ready, result };
+  });
+
+  await Promise.all(claims.map((claim) => claim.ready));
+  Atomics.store(new Int32Array(barrier), 0, 1);
+  Atomics.notify(new Int32Array(barrier), 0);
+  const results = await Promise.all(claims.map((claim) => claim.result));
+  await Promise.all(claims.map((claim) => claim.worker.terminate()));
+
+  assert.equal(results.filter((task) => task?.id === taskId).length, 1);
+  assert.equal(results.filter((task) => task === null).length, 1);
 });
