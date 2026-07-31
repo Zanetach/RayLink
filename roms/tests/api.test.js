@@ -11,6 +11,27 @@ const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
 ).version;
 
+function createTestInstaller() {
+  return {
+    async status() {
+      return {
+        installed: true,
+        version: "1.13.14",
+        platform: "linux",
+        architecture: "amd64",
+        tags: ["with_utls", "with_acme", "with_quic"],
+        binaryPath: "/test/raylink-sing-box"
+      };
+    },
+    async generateRealityKeypair() {
+      return { privateKey: "test-private-key", publicKey: "test-public-key" };
+    },
+    releaseStatus() {
+      return null;
+    }
+  };
+}
+
 async function startTestApp(overrides = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "raylink-api-"));
   const app = await createRayLinkApp({
@@ -21,6 +42,7 @@ async function startTestApp(overrides = {}) {
     runtimeMode: "dry-run",
     nodeHeartbeatMinIntervalMs: 0,
     runtimeUpdateCheckIntervalMs: 0,
+    installer: createTestInstaller(),
     ruleSetCache: {
       prepare: async () => {},
       available: () => false,
