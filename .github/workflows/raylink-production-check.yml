@@ -31,20 +31,21 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build and verify metered sing-box Runtime
         run: |
+          runtime_directory="${RUNNER_TEMP}/raylink-protocol-runtime"
           sudo bash deploy/build-runtime-artifact.sh \
             1.13.14 \
-            web/node/runtime \
+            "$runtime_directory" \
             amd64
           (
-            cd web/node/runtime
+            cd "$runtime_directory"
             sha256sum -c raylink-sing-box-1.13.14-linux-amd64.sha256
           )
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: raylink-protocol-runtime-amd64
           path: |
-            roms/web/node/runtime/raylink-sing-box-1.13.14-linux-amd64
-            roms/web/node/runtime/raylink-sing-box-1.13.14-linux-amd64.sha256
+            ${{ runner.temp }}/raylink-protocol-runtime/raylink-sing-box-1.13.14-linux-amd64
+            ${{ runner.temp }}/raylink-protocol-runtime/raylink-sing-box-1.13.14-linux-amd64.sha256
           if-no-files-found: error
           retention-days: 1
 
@@ -65,17 +66,19 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: raylink-protocol-runtime-amd64
-          path: roms/web/node/runtime
+          path: ${{ runner.temp }}/raylink-protocol-runtime
       - name: Verify downloaded protocol Runtime
         run: |
-          chmod 0755 web/node/runtime/raylink-sing-box-1.13.14-linux-amd64
+          runtime_directory="${RUNNER_TEMP}/raylink-protocol-runtime"
+          chmod 0755 "$runtime_directory/raylink-sing-box-1.13.14-linux-amd64"
           (
-            cd web/node/runtime
+            cd "$runtime_directory"
             sha256sum -c raylink-sing-box-1.13.14-linux-amd64.sha256
           )
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Syntax, API, protocol and memory checks
-        env:
-          SING_BOX_BIN: ${{ github.workspace }}/roms/web/node/runtime/raylink-sing-box-1.13.14-linux-amd64
-        run: npm run check:production
+        run: |
+          npm run check
+          SING_BOX_BIN="${RUNNER_TEMP}/raylink-protocol-runtime/raylink-sing-box-1.13.14-linux-amd64" npm run check:protocols
+          npm run check:soak
