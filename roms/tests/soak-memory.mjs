@@ -93,30 +93,45 @@ try {
     }
   };
 
-  for (let index = 0; index < 10; index += 1) await requestBatch(50);
-  global.gc();
-  await new Promise((resolve) => setTimeout(resolve, 25));
-  global.gc();
-  const baselineMemory = process.memoryUsage();
+  const stabilizedMemory = async () => {
+    global.gc();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    global.gc();
+    return process.memoryUsage();
+  };
+
+  for (let index = 0; index < 20; index += 1) await requestBatch(50);
+  const baselineMemory = await stabilizedMemory();
   const baselineHandles = process._getActiveHandles().length;
 
-  for (let index = 0; index < 60; index += 1) await requestBatch(50);
-  global.gc();
-  await new Promise((resolve) => setTimeout(resolve, 25));
-  global.gc();
-  const finalMemory = process.memoryUsage();
+  for (let index = 0; index < 30; index += 1) await requestBatch(50);
+  const midpointMemory = await stabilizedMemory();
+  for (let index = 0; index < 30; index += 1) await requestBatch(50);
+  const finalMemory = await stabilizedMemory();
   const finalHandles = process._getActiveHandles().length;
   const heapGrowthBytes = finalMemory.heapUsed - baselineMemory.heapUsed;
   const rssGrowthBytes = finalMemory.rss - baselineMemory.rss;
+  const tailRssGrowthBytes = finalMemory.rss - midpointMemory.rss;
   const externalGrowthBytes = finalMemory.external - baselineMemory.external;
 
+  // RSS includes V8 JIT pages, SQLite native pages and allocator high-water
+  // marks. Bound both the absolute process size and the post-warmup slope so a
+  // genuine native leak cannot hide behind a looser startup allowance.
   assert.ok(
     heapGrowthBytes <= 16 * 1024 * 1024,
     `heap grew by ${(heapGrowthBytes / 1024 / 1024).toFixed(2)} MiB; limit is 16 MiB`
   );
   assert.ok(
-    rssGrowthBytes <= 64 * 1024 * 1024,
-    `RSS grew by ${(rssGrowthBytes / 1024 / 1024).toFixed(2)} MiB; limit is 64 MiB`
+    rssGrowthBytes <= 160 * 1024 * 1024,
+    `RSS grew by ${(rssGrowthBytes / 1024 / 1024).toFixed(2)} MiB after warmup; high-water limit is 160 MiB`
+  );
+  assert.ok(
+    tailRssGrowthBytes <= 32 * 1024 * 1024,
+    `RSS kept growing by ${(tailRssGrowthBytes / 1024 / 1024).toFixed(2)} MiB in the final 1,500 requests; stable-tail limit is 32 MiB`
+  );
+  assert.ok(
+    finalMemory.rss <= 512 * 1024 * 1024,
+    `final RSS is ${(finalMemory.rss / 1024 / 1024).toFixed(2)} MiB; process ceiling is 512 MiB`
   );
   assert.ok(
     externalGrowthBytes <= 8 * 1024 * 1024,
@@ -127,13 +142,17 @@ try {
     `active handles grew from ${baselineHandles} to ${finalHandles}`
   );
   console.log(JSON.stringify({
-    requests: 3_500,
+    requests: 4_000,
+    warmupRequests: 1_000,
+    measuredRequests: 3_000,
     usersPerResponse: 6,
     baselineMemory,
+    midpointMemory,
     finalMemory,
     growth: {
       heapUsedBytes: heapGrowthBytes,
       rssBytes: rssGrowthBytes,
+      tailRssBytes: tailRssGrowthBytes,
       externalBytes: externalGrowthBytes,
       activeHandles: finalHandles - baselineHandles
     }
