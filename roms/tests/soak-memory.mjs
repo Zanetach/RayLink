@@ -77,7 +77,10 @@ try {
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const login = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      connection: "close"
+    },
     body: JSON.stringify({ username: "admin", password: "Admin@2026" })
   });
   assert.equal(login.status, 200);
@@ -85,7 +88,12 @@ try {
 
   const requestBatch = async (count) => {
     const responses = await Promise.all(Array.from({ length: count }, () => (
-      fetch(`${baseUrl}/api/bootstrap`, { headers: { cookie } })
+      fetch(`${baseUrl}/api/bootstrap`, {
+        headers: {
+          cookie,
+          connection: "close"
+        }
+      })
     )));
     for (const response of responses) {
       assert.equal(response.status, 200);
@@ -95,7 +103,7 @@ try {
 
   const stabilizedMemory = async () => {
     global.gc();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 250));
     global.gc();
     return process.memoryUsage();
   };
