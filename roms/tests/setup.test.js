@@ -857,12 +857,17 @@ test("repository workflows run RayLink checks from its real subdirectory and rel
   ]);
 
   assert.match(productionWorkflow, /working-directory:\s+roms/);
+  assert.match(productionWorkflow, /build-runtime-artifact\.sh/);
+  assert.match(productionWorkflow, /needs:\s+runtime/);
+  assert.match(productionWorkflow, /SING_BOX_BIN:/);
   assert.match(releaseWorkflow, /runner:\s+ubuntu-24\.04-arm/);
   assert.match(releaseWorkflow, /arch:\s+amd64/);
   assert.match(releaseWorkflow, /arch:\s+arm64/);
   assert.match(releaseWorkflow, /attest-build-provenance@v2/);
   assert.match(releaseWorkflow, /needs:\s+verify/);
   assert.match(releaseWorkflow, /npm run check:production/);
+  assert.match(releaseWorkflow, /build-runtime-artifact\.sh/);
+  assert.match(releaseWorkflow, /SING_BOX_BIN:/);
   assert.match(packager, /generate-release-metadata\.mjs/);
   assert.match(packager, /CHANGELOG\.md/);
 });
