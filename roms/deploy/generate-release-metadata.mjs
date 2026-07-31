@@ -27,11 +27,12 @@ const [
   runtimeArgument,
   version = "",
   runtimeVersion = "",
-  architecture = ""
+  architecture = "",
+  cronetArgument
 ] = process.argv.slice(2);
 
-if (!archiveArgument || !runtimeArgument) {
-  fail("用法：generate-release-metadata.mjs ARCHIVE RUNTIME VERSION RUNTIME_VERSION ARCH");
+if (!archiveArgument || !runtimeArgument || !cronetArgument) {
+  fail("用法：generate-release-metadata.mjs ARCHIVE RUNTIME VERSION RUNTIME_VERSION ARCH CRONET");
 }
 if (!/^\d+\.\d+\.\d+$/.test(version)) fail("RayLink 版本格式无效");
 if (!/^1\.13\.\d+$/.test(runtimeVersion)) fail("sing-box Runtime 版本格式无效");
@@ -39,16 +40,28 @@ if (!["amd64", "arm64"].includes(architecture)) fail("发布架构必须是 amd6
 
 const archivePath = resolve(archiveArgument);
 const runtimePath = resolve(runtimeArgument);
+const cronetPath = resolve(cronetArgument);
 const expectedArchiveName = `raylink-${version}-linux-${architecture}.tar.gz`;
 const expectedRuntimeName = `raylink-sing-box-${runtimeVersion}-linux-${architecture}`;
+const expectedCronetName = `raylink-libcronet-${runtimeVersion}-linux-${architecture}.so`;
 if (basename(archivePath) !== expectedArchiveName) fail("发布包名称与版本或架构不一致");
 if (basename(runtimePath) !== expectedRuntimeName) fail("Runtime 名称与版本或架构不一致");
+if (basename(cronetPath) !== expectedCronetName) fail("Cronet 名称与版本或架构不一致");
 
-const [archiveStats, runtimeStats, archiveSha256, runtimeSha256] = await Promise.all([
+const [
+  archiveStats,
+  runtimeStats,
+  cronetStats,
+  archiveSha256,
+  runtimeSha256,
+  cronetSha256
+] = await Promise.all([
   stat(archivePath),
   stat(runtimePath),
+  stat(cronetPath),
   sha256(archivePath),
-  sha256(runtimePath)
+  sha256(runtimePath),
+  sha256(cronetPath)
 ]).catch((error) => fail(error.message || "无法读取发布产物"));
 const createdAt = new Date().toISOString();
 const assetPrefix = expectedArchiveName.replace(/\.tar\.gz$/, "");
@@ -73,13 +86,20 @@ const manifest = {
     version: runtimeVersion,
     filename: expectedRuntimeName,
     sizeBytes: runtimeStats.size,
-    sha256: runtimeSha256
+    sha256: runtimeSha256,
+    companions: [{
+      name: "Cronet",
+      filename: expectedCronetName,
+      sizeBytes: cronetStats.size,
+      sha256: cronetSha256
+    }]
   }
 };
 
 const documentId = `SPDXRef-DOCUMENT`;
 const rayLinkId = "SPDXRef-Package-RayLink";
 const singBoxId = "SPDXRef-Package-sing-box";
+const cronetId = "SPDXRef-Package-Cronet";
 const sbom = {
   spdxVersion: "SPDX-2.3",
   dataLicense: "CC0-1.0",
@@ -114,6 +134,18 @@ const sbom = {
       licenseDeclared: "GPL-3.0-or-later",
       copyrightText: "NOASSERTION",
       checksums: [{ algorithm: "SHA256", checksumValue: runtimeSha256 }]
+    },
+    {
+      name: "Cronet",
+      SPDXID: cronetId,
+      versionInfo: runtimeVersion,
+      supplier: "Organization: SagerNet",
+      downloadLocation: `https://github.com/SagerNet/sing-box/releases/tag/v${runtimeVersion}`,
+      filesAnalyzed: false,
+      licenseConcluded: "NOASSERTION",
+      licenseDeclared: "NOASSERTION",
+      copyrightText: "NOASSERTION",
+      checksums: [{ algorithm: "SHA256", checksumValue: cronetSha256 }]
     }
   ],
   relationships: [
@@ -126,6 +158,11 @@ const sbom = {
       spdxElementId: rayLinkId,
       relationshipType: "DEPENDS_ON",
       relatedSpdxElement: singBoxId
+    },
+    {
+      spdxElementId: singBoxId,
+      relationshipType: "DEPENDS_ON",
+      relatedSpdxElement: cronetId
     }
   ]
 };

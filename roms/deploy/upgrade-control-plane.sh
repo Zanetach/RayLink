@@ -11,6 +11,7 @@ fail() {
 command -v systemctl >/dev/null 2>&1 || fail "当前系统未使用 systemd"
 command -v curl >/dev/null 2>&1 || fail "需要 curl"
 command -v tar >/dev/null 2>&1 || fail "需要 tar"
+command -v sha256sum >/dev/null 2>&1 || fail "需要 sha256sum"
 
 install_root="${RAYLINK_INSTALL_ROOT:-/opt/raylink}"
 data_root="${RAYLINK_DATA_ROOT:-/var/lib/raylink}"
@@ -20,6 +21,14 @@ service_unit="${RAYLINK_SERVICE_UNIT:-/etc/systemd/system/raylink.service}"
 source_root="${RAYLINK_SOURCE_DIR:-}"
 health_port="${RAYLINK_PORT:-}"
 force_upgrade="${RAYLINK_FORCE_UPGRADE:-false}"
+runtime_version=1.13.14
+cronet_install_path="${RAYLINK_CRONET_PATH:-/usr/local/bin/libcronet.so}"
+cronet_candidate_path="${cronet_install_path}.candidate.$$"
+case "$(uname -m)" in
+  x86_64|amd64) runtime_arch=amd64 ;;
+  aarch64|arm64) runtime_arch=arm64 ;;
+  *) fail "不支持的 CPU 架构：$(uname -m)" ;;
+esac
 
 [ -f "$install_root/package.json" ] || fail "未检测到现有 RayLink 控制面：$install_root"
 [ -x "$node_root/bin/node" ] || fail "未检测到 RayLink Node.js：$node_root/bin/node"
@@ -33,6 +42,14 @@ fi
 [ -f "$source_root/server/index.js" ] || fail "升级包缺少 server/index.js"
 [ -f "$source_root/web/index.html" ] || fail "升级包缺少 web/index.html"
 [ -f "$source_root/deploy/raylink.service" ] || fail "升级包缺少 raylink.service"
+cronet_source="${RAYLINK_CRONET_SOURCE:-$source_root/web/node/runtime/raylink-libcronet-${runtime_version}-linux-${runtime_arch}.so}"
+cronet_checksum="${cronet_source}.sha256"
+[ -f "$cronet_source" ] && [ -f "$cronet_checksum" ] \
+  || fail "升级包缺少 linux-${runtime_arch} Cronet 依赖或校验文件"
+expected_cronet_sha256="$(awk 'NR == 1 { print $1 }' "$cronet_checksum")"
+printf '%s' "$expected_cronet_sha256" | grep -Eq '^[a-f0-9]{64}$' \
+  || fail "Cronet 校验文件格式错误"
+printf '%s  %s\n' "$expected_cronet_sha256" "$cronet_source" | sha256sum -c -
 if find "$source_root/package.json" "$source_root/server" "$source_root/web" "$source_root/deploy" \
   -type l -print -quit | grep -q .; then
   fail "升级包不能包含符号链接"
@@ -88,9 +105,12 @@ upgrade_succeeded=false
 data_backup_ready=false
 data_migration_started=false
 service_backup_ready=false
+cronet_changed=false
+cronet_had_previous=false
 rollback() {
   status=$?
   trap - EXIT
+  rm -f "$cronet_candidate_path"
   if [ "$upgrade_succeeded" != true ]; then
     printf '升级未通过健康检查，正在恢复 RayLink v%s…\n' "$current_version" >&2
     systemctl stop raylink >/dev/null 2>&1 || true
@@ -109,6 +129,13 @@ rollback() {
     if [ "$service_backup_ready" = true ]; then
       cp -a "$backup_directory/raylink.service" "$service_unit"
     fi
+    if [ "$cronet_changed" = true ]; then
+      if [ "$cronet_had_previous" = true ]; then
+        cp -a "$backup_directory/libcronet.so" "$cronet_install_path"
+      else
+        rm -f "$cronet_install_path"
+      fi
+    fi
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl start raylink >/dev/null 2>&1 || true
   fi
@@ -126,6 +153,10 @@ if [ -f "$service_unit" ]; then
   cp -a "$service_unit" "$backup_directory/raylink.service"
   service_backup_ready=true
 fi
+if [ -f "$cronet_install_path" ]; then
+  cp -a "$cronet_install_path" "$backup_directory/libcronet.so"
+  cronet_had_previous=true
+fi
 if [ -f "$backup_directory/data/raylink.db" ]; then
   "$node_root/bin/node" \
     "$candidate_root/deploy/check-database-compatibility.mjs" \
@@ -136,6 +167,9 @@ mv "$install_root" "$previous_root"
 switch_started=true
 mv "$candidate_root" "$install_root"
 install -m 0644 "$install_root/deploy/raylink.service" "$service_unit"
+install -m 0644 "$cronet_source" "$cronet_candidate_path"
+mv -f "$cronet_candidate_path" "$cronet_install_path"
+cronet_changed=true
 systemctl daemon-reload
 data_migration_started=true
 systemctl start raylink

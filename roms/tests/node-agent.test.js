@@ -741,7 +741,9 @@ test("managed node upgrades from the signed release artifact without compiling",
   await writeFile(binaryPath, "previous-binary");
   await writeFile(join(directory, "config.json"), "{}");
   const artifact = Buffer.from("precompiled-runtime");
+  const cronetArtifact = Buffer.from("precompiled-cronet");
   const checksum = createHash("sha256").update(artifact).digest("hex");
+  const cronetChecksum = createHash("sha256").update(cronetArtifact).digest("hex");
   const downloads = [];
   let installed = false;
   let builderCalls = 0;
@@ -753,8 +755,14 @@ test("managed node upgrades from the signed release artifact without compiling",
     runtimeArch: "arm64",
     fetchFn: async (url) => {
       downloads.push(url);
-      if (url.endsWith(".sha256")) {
+      if (url.endsWith("raylink-libcronet-1.13.14-linux-arm64.so.sha256")) {
         installed = true;
+        return new Response(`${cronetChecksum}  raylink-libcronet.so\n`);
+      }
+      if (url.endsWith("raylink-libcronet-1.13.14-linux-arm64.so")) {
+        return new Response(cronetArtifact);
+      }
+      if (url.endsWith(".sha256")) {
         return new Response(`${checksum}  raylink-sing-box\n`);
       }
       return new Response(artifact);
@@ -785,9 +793,12 @@ test("managed node upgrades from the signed release artifact without compiling",
   assert.equal(builderCalls, 0);
   assert.deepEqual(downloads, [
     "https://panel.example.com/node/runtime/raylink-sing-box-1.13.14-linux-arm64",
-    "https://panel.example.com/node/runtime/raylink-sing-box-1.13.14-linux-arm64.sha256"
+    "https://panel.example.com/node/runtime/raylink-sing-box-1.13.14-linux-arm64.sha256",
+    "https://panel.example.com/node/runtime/raylink-libcronet-1.13.14-linux-arm64.so",
+    "https://panel.example.com/node/runtime/raylink-libcronet-1.13.14-linux-arm64.so.sha256"
   ]);
   assert.deepEqual(await readFile(binaryPath), artifact);
+  assert.deepEqual(await readFile(join(directory, "libcronet.so")), cronetArtifact);
 });
 
 test("RayLink Node rejects non-loopback HTTP control planes by default", () => {

@@ -46,6 +46,8 @@ jobs:
           path: |
             ${{ runner.temp }}/raylink-protocol-runtime/raylink-sing-box-1.13.14-linux-amd64
             ${{ runner.temp }}/raylink-protocol-runtime/raylink-sing-box-1.13.14-linux-amd64.sha256
+            ${{ runner.temp }}/raylink-protocol-runtime/raylink-libcronet-1.13.14-linux-amd64.so
+            ${{ runner.temp }}/raylink-protocol-runtime/raylink-libcronet-1.13.14-linux-amd64.so.sha256
           if-no-files-found: error
           retention-days: 1
 
@@ -71,9 +73,13 @@ jobs:
         run: |
           runtime_directory="${RUNNER_TEMP}/raylink-protocol-runtime"
           chmod 0755 "$runtime_directory/raylink-sing-box-1.13.14-linux-amd64"
+          cp \
+            "$runtime_directory/raylink-libcronet-1.13.14-linux-amd64.so" \
+            "$runtime_directory/libcronet.so"
           (
             cd "$runtime_directory"
             sha256sum -c raylink-sing-box-1.13.14-linux-amd64.sha256
+            sha256sum -c raylink-libcronet-1.13.14-linux-amd64.so.sha256
           )
       - name: Install dependencies
         run: npm install --ignore-scripts

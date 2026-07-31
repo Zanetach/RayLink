@@ -158,11 +158,18 @@ install -d -m 0750 -o root -g caddy /etc/caddy/raylink
 runtime_version=1.13.14
 runtime_artifact="$source_root/web/node/runtime/raylink-sing-box-${runtime_version}-linux-${runtime_arch}"
 runtime_checksum="${runtime_artifact}.sha256"
-if [ -f "$runtime_artifact" ] && [ -f "$runtime_checksum" ]; then
+cronet_artifact="$source_root/web/node/runtime/raylink-libcronet-${runtime_version}-linux-${runtime_arch}.so"
+cronet_checksum="${cronet_artifact}.sha256"
+if [ -f "$runtime_artifact" ] && [ -f "$runtime_checksum" ] \
+  && [ -f "$cronet_artifact" ] && [ -f "$cronet_checksum" ]; then
   expected_runtime_sha256="$(awk 'NR == 1 { print $1 }' "$runtime_checksum")"
   printf '%s' "$expected_runtime_sha256" | grep -Eq '^[a-f0-9]{64}$' \
     || fail "预编译 Runtime 校验文件格式错误"
   printf '%s  %s\n' "$expected_runtime_sha256" "$runtime_artifact" | sha256sum -c -
+  expected_cronet_sha256="$(awk 'NR == 1 { print $1 }' "$cronet_checksum")"
+  printf '%s' "$expected_cronet_sha256" | grep -Eq '^[a-f0-9]{64}$' \
+    || fail "预编译 Cronet 校验文件格式错误"
+  printf '%s  %s\n' "$expected_cronet_sha256" "$cronet_artifact" | sha256sum -c -
   runtime_candidate="$temporary_root/raylink-sing-box"
   install -m 0755 "$runtime_artifact" "$runtime_candidate"
   runtime_details="$("$runtime_candidate" version)" \
@@ -175,10 +182,11 @@ if [ -f "$runtime_artifact" ] && [ -f "$runtime_checksum" ]; then
     printf ',%s,' "$runtime_tags" | grep -Fq ",${required_runtime_tag}," \
       || fail "预编译 Runtime 缺少 ${required_runtime_tag}"
   done
+  install -m 0644 "$cronet_artifact" /usr/local/bin/libcronet.so
   install -m 0755 "$runtime_candidate" /usr/local/bin/raylink-sing-box
   printf '已安装预编译 RayLink Runtime（linux-%s）\n' "$runtime_arch"
 else
-  printf '未找到预编译 Runtime，回退到本机编译\n'
+  printf '未找到完整预编译 Runtime 或 Cronet 依赖，回退到本机编译\n'
   "$install_root/web/node/build-metered-runtime.sh" \
     "$runtime_version" \
     /usr/local/bin/raylink-sing-box

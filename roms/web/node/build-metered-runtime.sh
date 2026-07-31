@@ -45,6 +45,11 @@ case "${GO_VERSION}:${go_arch}" in
   1.24.7:arm64) expected_go_sha256="fd2bccce882e29369f56c86487663bb78ba7ea9e02188a5b0269303a0c3d33ab" ;;
   *) fail "该 Go 版本或架构尚未进入 RayLink 审批清单" ;;
 esac
+case "${SING_BOX_VERSION}:${target_arch}" in
+  1.13.14:amd64) expected_official_archive_sha256="f48703461a15476951ac4967cdad339d986f4b8096b4eb3ff0829a500502d697" ;;
+  1.13.14:arm64) expected_official_archive_sha256="4742df6a4314e8ecc41736849fca6d73b8f9e91b6e8b06ee794ff17ba180579e" ;;
+  *) fail "该 sing-box 版本或架构缺少已审批的 Cronet 依赖校验值" ;;
+esac
 
 go_root="$RAYLINK_NODE_ROOT/go"
 go_binary="$go_root/bin/go"
@@ -89,8 +94,26 @@ CGO_ENABLED=0 "$go_binary" build \
   ./cmd/sing-box
 )
 
+official_archive="sing-box-${SING_BOX_VERSION}-linux-${target_arch}.tar.gz"
+curl -fsSL \
+  "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/${official_archive}" \
+  -o "$build_dir/$official_archive"
+printf '%s  %s\n' \
+  "$expected_official_archive_sha256" \
+  "$build_dir/$official_archive" \
+  | sha256sum -c -
+tar -xzf "$build_dir/$official_archive" \
+  -C "$build_dir" \
+  --strip-components=1 \
+  "sing-box-${SING_BOX_VERSION}-linux-${target_arch}/libcronet.so"
+[ -s "$build_dir/libcronet.so" ] \
+  || fail "官方发布包缺少 Naive 外部探针所需的 libcronet.so"
+
 candidate="${OUTPUT_PATH}.candidate"
+library_output="$(dirname -- "$OUTPUT_PATH")/libcronet.so"
+library_candidate="${library_output}.candidate"
 install -m 0755 "$build_dir/sing-box" "$candidate"
+install -m 0644 "$build_dir/libcronet.so" "$library_candidate"
 if [ "$target_arch" = "$go_arch" ]; then
   runtime_details="$("$candidate" version)" || fail "构建结果无法执行"
   printf '%s\n' "$runtime_details" | grep -q "sing-box version ${SING_BOX_VERSION}" \
@@ -114,5 +137,7 @@ else
   printf '交叉构建已验证 ELF 架构；发布前必须在 linux-%s 用户空间运行 version 校验\n' \
     "$target_arch"
 fi
+mv -f "$library_candidate" "$library_output"
 mv -f "$candidate" "$OUTPUT_PATH"
 printf 'RayLink 计量版 sing-box %s 已安装到 %s\n' "$SING_BOX_VERSION" "$OUTPUT_PATH"
+printf 'RayLink Naive 探针依赖已安装到 %s\n' "$library_output"

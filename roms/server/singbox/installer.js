@@ -2,7 +2,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { access, chmod, copyFile, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { arch as currentArch, platform as currentPlatform, tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -274,6 +274,9 @@ export class SingBoxInstaller {
     let meteredUpgrade = false;
     const backupDir = join(this.dataDir, "sing-box-upgrade");
     const backupPath = join(backupDir, "sing-box.previous");
+    const backupCronetPath = join(backupDir, "libcronet.previous.so");
+    let cronetPath = null;
+    let cronetBackupCreated = false;
     try {
       previous = await this.status();
       if (!previous.installed) {
@@ -313,6 +316,12 @@ export class SingBoxInstaller {
       await mkdir(backupDir, { recursive: true, mode: 0o700 });
       await copyFile(resolvedBinaryPath, backupPath);
       await chmod(backupPath, 0o700);
+      cronetPath = join(dirname(resolvedBinaryPath), "libcronet.so");
+      if (await pathExists(cronetPath)) {
+        await copyFile(cronetPath, backupCronetPath);
+        await chmod(backupCronetPath, 0o600);
+        cronetBackupCreated = true;
+      }
       backupCreated = true;
 
       meteredUpgrade = true;
@@ -359,6 +368,12 @@ export class SingBoxInstaller {
       try {
         await copyFile(backupPath, resolvedBinaryPath);
         await chmod(resolvedBinaryPath, 0o755);
+        if (cronetBackupCreated) {
+          await copyFile(backupCronetPath, cronetPath);
+          await chmod(cronetPath, 0o644);
+        } else if (cronetPath) {
+          await rm(cronetPath, { force: true });
+        }
         await this.restoreConflictingSystemdService(conflictingServiceState);
         if (this.runtimeMode === "systemd") await this.restartAndVerify(previous?.version);
       } catch (rollbackError) {
@@ -434,23 +449,38 @@ export class SingBoxInstaller {
     const artifactName = `raylink-sing-box-${version}-linux-${runtimeArch}`;
     const artifactPath = join(this.runtimeArtifactDir, artifactName);
     const checksumPath = `${artifactPath}.sha256`;
+    const cronetName = `raylink-libcronet-${version}-linux-${runtimeArch}.so`;
+    const cronetPath = join(this.runtimeArtifactDir, cronetName);
+    const cronetChecksumPath = `${cronetPath}.sha256`;
     if (!await pathExists(artifactPath) || !await pathExists(checksumPath)) return false;
-    const expectedChecksum = String(await readFile(checksumPath, "utf8")).trim().split(/\s+/)[0];
-    if (!/^[a-f0-9]{64}$/.test(expectedChecksum)) {
-      throw new Error("预编译 Runtime 校验文件格式错误");
+    if (!await pathExists(cronetPath) || !await pathExists(cronetChecksumPath)) {
+      throw new Error("预编译 Runtime 缺少 Naive 探针依赖");
     }
+    const expectedChecksum = await readArtifactChecksum(checksumPath, "Runtime");
+    const expectedCronetChecksum = await readArtifactChecksum(cronetChecksumPath, "Cronet");
     const artifact = await readFile(artifactPath);
     const actualChecksum = createHash("sha256").update(artifact).digest("hex");
     if (actualChecksum !== expectedChecksum) {
       throw new Error("预编译 Runtime SHA-256 校验失败");
     }
+    const cronetArtifact = await readFile(cronetPath);
+    const actualCronetChecksum = createHash("sha256").update(cronetArtifact).digest("hex");
+    if (actualCronetChecksum !== expectedCronetChecksum) {
+      throw new Error("预编译 Cronet SHA-256 校验失败");
+    }
     const candidatePath = `${outputPath}.release-${process.pid}-${Date.now()}`;
+    const cronetOutputPath = join(dirname(outputPath), "libcronet.so");
+    const cronetCandidatePath = `${cronetOutputPath}.release-${process.pid}-${Date.now()}`;
     try {
       await copyFile(artifactPath, candidatePath);
       await chmod(candidatePath, 0o755);
+      await copyFile(cronetPath, cronetCandidatePath);
+      await chmod(cronetCandidatePath, 0o644);
+      await rename(cronetCandidatePath, cronetOutputPath);
       await rename(candidatePath, outputPath);
     } finally {
       await rm(candidatePath, { force: true });
+      await rm(cronetCandidatePath, { force: true });
     }
     return true;
   }
@@ -534,6 +564,14 @@ export class SingBoxInstaller {
     }
     return { privateKey, publicKey, shortId: randomBytes(8).toString("hex") };
   }
+}
+
+async function readArtifactChecksum(path, label) {
+  const expected = String(await readFile(path, "utf8")).trim().split(/\s+/)[0];
+  if (!/^[a-f0-9]{64}$/.test(expected)) {
+    throw new Error(`预编译 ${label} 校验文件格式错误`);
+  }
+  return expected;
 }
 
 function parseVersionOutput(stdout, binaryPath, fallbackPlatform) {

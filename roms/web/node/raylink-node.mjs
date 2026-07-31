@@ -1028,6 +1028,8 @@ export class NodeRuntimeAdapter {
     }
     const artifactName = `raylink-sing-box-${version}-linux-${runtimeArch}`;
     const artifactUrl = `${this.runtimeArtifactBaseUrl}/${artifactName}`;
+    const cronetName = `raylink-libcronet-${version}-linux-${runtimeArch}.so`;
+    const cronetUrl = `${this.runtimeArtifactBaseUrl}/${cronetName}`;
     const artifactResponse = await this.fetchFn(artifactUrl);
     if (artifactResponse.status === 404) return false;
     if (!artifactResponse.ok) {
@@ -1038,22 +1040,47 @@ export class NodeRuntimeAdapter {
     if (!checksumResponse.ok) {
       throw new Error(`下载 Runtime 校验文件失败：HTTP ${checksumResponse.status}`);
     }
+    const cronetResponse = await this.fetchFn(cronetUrl);
+    if (!cronetResponse.ok) {
+      throw new Error(`下载 Cronet 依赖失败：HTTP ${cronetResponse.status}`);
+    }
+    const cronetChecksumResponse = await this.fetchFn(`${cronetUrl}.sha256`);
+    if (!cronetChecksumResponse.ok) {
+      throw new Error(`下载 Cronet 校验文件失败：HTTP ${cronetChecksumResponse.status}`);
+    }
     const expectedChecksum = String(await checksumResponse.text()).trim().split(/\s+/)[0];
     if (!/^[a-f0-9]{64}$/.test(expectedChecksum)) {
       throw new Error("预编译 Runtime 校验文件格式错误");
+    }
+    const expectedCronetChecksum = String(
+      await cronetChecksumResponse.text()
+    ).trim().split(/\s+/)[0];
+    if (!/^[a-f0-9]{64}$/.test(expectedCronetChecksum)) {
+      throw new Error("预编译 Cronet 校验文件格式错误");
     }
     const artifact = Buffer.from(await artifactResponse.arrayBuffer());
     const actualChecksum = createHash("sha256").update(artifact).digest("hex");
     if (actualChecksum !== expectedChecksum) {
       throw new Error("预编译 Runtime SHA-256 校验失败");
     }
+    const cronetArtifact = Buffer.from(await cronetResponse.arrayBuffer());
+    const actualCronetChecksum = createHash("sha256").update(cronetArtifact).digest("hex");
+    if (actualCronetChecksum !== expectedCronetChecksum) {
+      throw new Error("预编译 Cronet SHA-256 校验失败");
+    }
     const candidatePath = `${outputPath}.release-${process.pid}-${Date.now()}`;
+    const cronetOutputPath = join(dirname(outputPath), "libcronet.so");
+    const cronetCandidatePath = `${cronetOutputPath}.release-${process.pid}-${Date.now()}`;
     try {
       await writeFile(candidatePath, artifact, { mode: 0o755 });
       await chmod(candidatePath, 0o755);
+      await writeFile(cronetCandidatePath, cronetArtifact, { mode: 0o644 });
+      await chmod(cronetCandidatePath, 0o644);
+      await rename(cronetCandidatePath, cronetOutputPath);
       await rename(candidatePath, outputPath);
     } finally {
       await rm(candidatePath, { force: true });
+      await rm(cronetCandidatePath, { force: true });
     }
     return true;
   }
@@ -1119,6 +1146,9 @@ export class NodeRuntimeAdapter {
     await mkdir(this.dataDir, { recursive: true, mode: 0o750 });
     const resolvedBinaryPath = await this.resolveBinaryPath();
     const backupPath = join(this.dataDir, "sing-box.previous.binary");
+    const cronetPath = join(dirname(resolvedBinaryPath), "libcronet.so");
+    const backupCronetPath = join(this.dataDir, "libcronet.previous.so");
+    const cronetHadPrevious = await pathExists(cronetPath);
     const previous = await this.commandRunner(this.binaryPath, ["version"]);
     const previousVersion = previous.stdout.match(/sing-box version\s+([^\s]+)/i)?.[1] || "unknown";
     const meteredRuntime = /(?:^|,)\s*with_v2ray_api(?:,|$)/m.test(
@@ -1138,6 +1168,10 @@ export class NodeRuntimeAdapter {
     }
     await copyFile(resolvedBinaryPath, backupPath);
     await chmod(backupPath, 0o700);
+    if (cronetHadPrevious) {
+      await copyFile(cronetPath, backupCronetPath);
+      await chmod(backupCronetPath, 0o600);
+    }
 
     try {
       const requireMeteredRuntime = true;
@@ -1161,6 +1195,12 @@ export class NodeRuntimeAdapter {
       try {
         await copyFile(backupPath, resolvedBinaryPath);
         await chmod(resolvedBinaryPath, 0o755);
+        if (cronetHadPrevious) {
+          await copyFile(backupCronetPath, cronetPath);
+          await chmod(cronetPath, 0o644);
+        } else {
+          await rm(cronetPath, { force: true });
+        }
         await this.restoreConflictingSystemdService(conflictingServiceState);
         if (this.runtimeMode === "systemd" && await pathExists(this.configPath)) {
           await this.restartAndVerify(previousVersion);

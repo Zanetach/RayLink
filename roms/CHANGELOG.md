@@ -16,3 +16,4 @@
 
 - RayLink Node telemetry now reports disk capacity in addition to CPU, memory, network and Runtime state.
 - Official one-command installation accepts both Linux AMD64 and ARM64 release packages.
+- Approved Linux Runtime packages now include the pinned Cronet companion required for real Naive protocol probes, including checksums, rollback and SBOM metadata.

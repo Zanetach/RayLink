@@ -65,12 +65,20 @@ for runtime_arch in $release_arches; do
   runtime_name="raylink-sing-box-${runtime_version}-linux-${runtime_arch}"
   runtime_artifact="$source_root/web/node/runtime/$runtime_name"
   runtime_checksum="${runtime_artifact}.sha256"
+  cronet_name="raylink-libcronet-${runtime_version}-linux-${runtime_arch}.so"
+  cronet_artifact="$source_root/web/node/runtime/$cronet_name"
+  cronet_checksum="${cronet_artifact}.sha256"
   [ -f "$runtime_artifact" ] && [ -f "$runtime_checksum" ] \
-    || fail "缺少 linux-${runtime_arch} 预编译 Runtime 或校验文件"
+    && [ -f "$cronet_artifact" ] && [ -f "$cronet_checksum" ] \
+    || fail "缺少 linux-${runtime_arch} 预编译 Runtime、Cronet 依赖或校验文件"
   expected_runtime_sha256="$(awk 'NR == 1 { print $1 }' "$runtime_checksum")"
   printf '%s' "$expected_runtime_sha256" | grep -Eq '^[a-f0-9]{64}$' \
     || fail "linux-${runtime_arch} Runtime 校验文件格式错误"
   printf '%s  %s\n' "$expected_runtime_sha256" "$runtime_artifact" | sha256sum -c -
+  expected_cronet_sha256="$(awk 'NR == 1 { print $1 }' "$cronet_checksum")"
+  printf '%s' "$expected_cronet_sha256" | grep -Eq '^[a-f0-9]{64}$' \
+    || fail "linux-${runtime_arch} Cronet 校验文件格式错误"
+  printf '%s  %s\n' "$expected_cronet_sha256" "$cronet_artifact" | sha256sum -c -
 done
 
 if [ -n "$source_prefix" ]; then
@@ -91,6 +99,13 @@ for runtime_arch in $release_arches; do
   install -m 0644 \
     "$source_root/web/node/runtime/${runtime_name}.sha256" \
     "$package_root/web/node/runtime/${runtime_name}.sha256"
+  cronet_name="raylink-libcronet-${runtime_version}-linux-${runtime_arch}.so"
+  install -m 0644 \
+    "$source_root/web/node/runtime/$cronet_name" \
+    "$package_root/web/node/runtime/$cronet_name"
+  install -m 0644 \
+    "$source_root/web/node/runtime/${cronet_name}.sha256" \
+    "$package_root/web/node/runtime/${cronet_name}.sha256"
 done
 
 candidate_path="${output_path}.candidate"
@@ -105,7 +120,8 @@ node "$source_root/deploy/generate-release-metadata.mjs" \
   "$source_root/web/node/runtime/raylink-sing-box-${runtime_version}-linux-${release_arches}" \
   "$release_version" \
   "$runtime_version" \
-  "$release_arches"
+  "$release_arches" \
+  "$source_root/web/node/runtime/raylink-libcronet-${runtime_version}-linux-${release_arches}.so"
 
 printf 'RayLink 发布包：%s\n' "$output_path"
 printf 'RayLink 发布包校验：%s.sha256\n' "$output_path"

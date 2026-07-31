@@ -103,10 +103,11 @@ Linux Runner 上执行：
 sudo bash deploy/build-runtime-artifact.sh 1.13.14
 ```
 
-默认产物写入 `web/node/runtime/`。将两台构建机生成的二进制及 `.sha256`
-文件合并到发布包的该目录；控制台首机安装和后续 RayLink Node 接入都会按 VPS
-架构选择同一份产物，验证 SHA-256、sing-box 版本及完整审批 build tags 后直接
-安装。仓库源码不提交大型二进制，正式发布流水线负责生成并装配这些产物。
+默认产物写入 `web/node/runtime/`。每个架构包含计量版 sing-box、独立
+SHA-256，以及从同版本官方发布包提取并按固定 SHA-256 验证的 `libcronet.so`
+伴随组件；后者用于执行真实 Naive 协议探针。控制台首机安装和后续 RayLink Node
+接入都会按 VPS 架构选择同一组产物，验证完整性、sing-box 版本及审批 build tags
+后直接安装。仓库源码不提交大型二进制，正式发布流水线负责生成并装配这些产物。
 
 也可以指定自定义目录；相对路径会先转换为绝对路径，避免构建器拒绝：
 

@@ -2988,6 +2988,8 @@ test("control plane serves the RayLink web application on the same origin", asyn
     nodeInstaller,
     /node\/runtime\/\$runtime_name/
   );
+  assert.match(nodeInstaller, /node\/runtime\/\$cronet_name/);
+  assert.match(nodeInstaller, /\/usr\/local\/bin\/libcronet\.so/);
   assert.match(nodeInstaller, /已安装预编译 RayLink Runtime/);
   assert.match(nodeInstaller, /回退到本机编译/);
   assert.match(nodeInstaller, /sha256sum -c/);

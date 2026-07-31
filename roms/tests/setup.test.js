@@ -712,7 +712,12 @@ test("the control-plane installer emits a fragment setup URL and never persists 
     installer,
     /web\/node\/runtime\/raylink-sing-box-\$\{runtime_version\}-linux-\$\{runtime_arch\}/
   );
-  assert.match(installer, /未找到预编译 Runtime，回退到本机编译/);
+  assert.match(
+    installer,
+    /web\/node\/runtime\/raylink-libcronet-\$\{runtime_version\}-linux-\$\{runtime_arch\}\.so/
+  );
+  assert.match(installer, /\/usr\/local\/bin\/libcronet\.so/);
+  assert.match(installer, /未找到完整预编译 Runtime 或 Cronet 依赖，回退到本机编译/);
   assert.match(installer, /with_naive_outbound/);
   assert.match(installer, /with_v2ray_api/);
   assert.doesNotMatch(installer, /\$source_root\/data/);
@@ -722,6 +727,7 @@ test("the control-plane installer emits a fragment setup URL and never persists 
   );
   assert.match(artifactBuilder, /web\/node\/runtime/);
   assert.match(artifactBuilder, /RAYLINK_TARGET_ARCH="\$runtime_arch"/);
+  assert.match(artifactBuilder, /raylink-libcronet-\$\{runtime_version\}-linux-\$\{runtime_arch\}\.so/);
   assert.match(
     artifactBuilder,
     /output_root="\$\(CDPATH= cd -- "\$output_root" && pwd\)"/
@@ -749,6 +755,8 @@ test("the control-plane installer emits a fragment setup URL and never persists 
     runtimeBuilder,
     /github\.com\/sagernet\/sing-box\/constant\.Version=\$\{SING_BOX_VERSION\}/
   );
+  assert.match(runtimeBuilder, /sing-box-\$\{SING_BOX_VERSION\}-linux-\$\{target_arch\}\.tar\.gz/);
+  assert.match(runtimeBuilder, /libcronet\.so/);
   assert.match(rotator, /systemctl restart raylink/);
   assert.match(rotator, /\/setup#token=/);
   assert.doesNotMatch(rotator, /RAYLINK_SETUP_TOKEN=/);
@@ -779,8 +787,10 @@ test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t
   t.after(() => rm(directory, { recursive: true, force: true }));
   const archivePath = join(directory, "raylink-0.2.17-linux-amd64.tar.gz");
   const runtimePath = join(directory, "raylink-sing-box-1.13.14-linux-amd64");
+  const cronetPath = join(directory, "raylink-libcronet-1.13.14-linux-amd64.so");
   await writeFile(archivePath, "known-raylink-archive");
   await writeFile(runtimePath, "known-sing-box-runtime");
+  await writeFile(cronetPath, "known-cronet-runtime");
 
   await execFile(process.execPath, [
     new URL("../deploy/generate-release-metadata.mjs", import.meta.url).pathname,
@@ -788,7 +798,8 @@ test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t
     runtimePath,
     "0.2.17",
     "1.13.14",
-    "amd64"
+    "amd64",
+    cronetPath
   ]);
 
   const manifest = JSON.parse(
@@ -801,6 +812,8 @@ test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t
   assert.match(manifest.archive.sha256, /^[a-f0-9]{64}$/);
   assert.equal(manifest.runtime.version, "1.13.14");
   assert.match(manifest.runtime.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(manifest.runtime.companions[0].name, "Cronet");
+  assert.match(manifest.runtime.companions[0].sha256, /^[a-f0-9]{64}$/);
 
   const sbom = JSON.parse(
     await readFile(join(directory, "raylink-0.2.17-linux-amd64.spdx.json"), "utf8")
@@ -811,6 +824,9 @@ test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t
   )));
   assert.ok(sbom.packages.some((entry) => (
     entry.name === "sing-box" && entry.versionInfo === "1.13.14"
+  )));
+  assert.ok(sbom.packages.some((entry) => (
+    entry.name === "Cronet" && entry.versionInfo === "1.13.14"
   )));
   assert.ok(sbom.relationships.some((entry) => entry.relationshipType === "DEPENDS_ON"));
 });
@@ -886,6 +902,8 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   const fakeBin = join(directory, "bin");
   const serviceUnit = join(directory, "raylink.service");
   const orderLog = join(directory, "order.log");
+  const cronetSource = join(directory, "raylink-libcronet.so");
+  const cronetInstallPath = join(directory, "installed-libcronet.so");
   await mkdir(installRoot, { recursive: true });
   await mkdir(dataRoot, { recursive: true });
   await mkdir(join(nodeRoot, "bin"), { recursive: true });
@@ -902,6 +920,10 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   durableDatabase.close();
   const previousServiceUnit = "[Service]\nExecStart=/opt/raylink/server/old-index.js\n";
   await writeFile(serviceUnit, previousServiceUnit);
+  const cronetArtifact = Buffer.from("approved-cronet-runtime");
+  const cronetChecksum = createHash("sha256").update(cronetArtifact).digest("hex");
+  await writeFile(cronetSource, cronetArtifact);
+  await writeFile(`${cronetSource}.sha256`, `${cronetChecksum}  ${cronetSource}\n`);
   const executables = {
     id: "#!/usr/bin/env bash\n[ \"${1:-}\" = '-u' ] && printf '0\\n' || /usr/bin/id \"$@\"\n",
     uname: "#!/usr/bin/env bash\n[ \"${1:-}\" = '-s' ] && printf 'Linux\\n' || /usr/bin/uname \"$@\"\n",
@@ -964,6 +986,8 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
         RAYLINK_NODE_ROOT: nodeRoot,
         RAYLINK_SERVICE_UNIT: serviceUnit,
         RAYLINK_SOURCE_DIR: new URL("..", import.meta.url).pathname,
+        RAYLINK_CRONET_SOURCE: cronetSource,
+        RAYLINK_CRONET_PATH: cronetInstallPath,
         RAYLINK_PORT: "4173"
       }
     });
@@ -972,6 +996,7 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   }
   const operations = (await readFile(orderLog, "utf8")).trim().split("\n");
   return {
+    cronetInstallPath,
     dataRoot,
     error,
     installRoot,
@@ -1010,6 +1035,7 @@ test("the control-plane upgrader validates candidate database migrations before 
 
 test("a failed control-plane health check restores application, data and service unit", async (t) => {
   const {
+    cronetInstallPath,
     dataRoot,
     error,
     installRoot,
@@ -1036,6 +1062,7 @@ test("a failed control-plane health check restores application, data and service
     restoredDatabase.close();
   }
   assert.equal(await readFile(serviceUnit, "utf8"), previousServiceUnit);
+  await assert.rejects(readFile(cronetInstallPath), (readError) => readError.code === "ENOENT");
   assert.equal(
     operations.filter((entry) => entry === "systemctl start raylink").length,
     2

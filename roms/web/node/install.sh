@@ -92,12 +92,22 @@ runtime_name="raylink-sing-box-${SING_BOX_VERSION}-linux-${runtime_arch}"
 runtime_url="$RAYLINK_SERVER/node/runtime/$runtime_name"
 runtime_candidate="$temporary_root/$runtime_name"
 runtime_checksum="$temporary_root/${runtime_name}.sha256"
+cronet_name="raylink-libcronet-${SING_BOX_VERSION}-linux-${runtime_arch}.so"
+cronet_url="$RAYLINK_SERVER/node/runtime/$cronet_name"
+cronet_candidate="$temporary_root/$cronet_name"
+cronet_checksum="$temporary_root/${cronet_name}.sha256"
 if curl -fsSL "$runtime_url" -o "$runtime_candidate" \
-  && curl -fsSL "${runtime_url}.sha256" -o "$runtime_checksum"; then
+  && curl -fsSL "${runtime_url}.sha256" -o "$runtime_checksum" \
+  && curl -fsSL "$cronet_url" -o "$cronet_candidate" \
+  && curl -fsSL "${cronet_url}.sha256" -o "$cronet_checksum"; then
   expected_runtime_sha256="$(awk 'NR == 1 { print $1 }' "$runtime_checksum")"
   printf '%s' "$expected_runtime_sha256" | grep -Eq '^[a-f0-9]{64}$' \
     || fail "预编译 Runtime 校验文件格式错误"
   printf '%s  %s\n' "$expected_runtime_sha256" "$runtime_candidate" | sha256sum -c -
+  expected_cronet_sha256="$(awk 'NR == 1 { print $1 }' "$cronet_checksum")"
+  printf '%s' "$expected_cronet_sha256" | grep -Eq '^[a-f0-9]{64}$' \
+    || fail "预编译 Cronet 校验文件格式错误"
+  printf '%s  %s\n' "$expected_cronet_sha256" "$cronet_candidate" | sha256sum -c -
   chmod 0755 "$runtime_candidate"
   runtime_details="$("$runtime_candidate" version)" \
     || fail "预编译 Runtime 无法执行"
@@ -109,10 +119,11 @@ if curl -fsSL "$runtime_url" -o "$runtime_candidate" \
     printf ',%s,' "$runtime_tags" | grep -Fq ",${required_runtime_tag}," \
       || fail "预编译 Runtime 缺少 ${required_runtime_tag}"
   done
+  install -m 0644 "$cronet_candidate" /usr/local/bin/libcronet.so
   install -m 0755 "$runtime_candidate" /usr/local/bin/raylink-sing-box
   printf '已安装预编译 RayLink Runtime（linux-%s）\n' "$runtime_arch"
 else
-  printf '控制台未提供 linux-%s 预编译 Runtime，回退到本机编译\n' "$runtime_arch"
+  printf '控制台未提供完整 linux-%s 预编译 Runtime，回退到本机编译\n' "$runtime_arch"
   curl -fsSL "$RAYLINK_SERVER/node/build-metered-runtime.sh" \
     -o "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"
   chmod 0755 "$RAYLINK_NODE_ROOT/build-metered-runtime.sh"

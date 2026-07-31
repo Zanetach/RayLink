@@ -96,10 +96,18 @@ test("Linux one-click installation prefers the packaged Runtime artifact", async
     "raylink-sing-box-1.13.14-linux-amd64"
   );
   const artifact = Buffer.from("precompiled-runtime");
+  const cronetPath = join(
+    runtimeArtifactDir,
+    "raylink-libcronet-1.13.14-linux-amd64.so"
+  );
+  const cronetArtifact = Buffer.from("precompiled-cronet");
   const checksum = createHash("sha256").update(artifact).digest("hex");
+  const cronetChecksum = createHash("sha256").update(cronetArtifact).digest("hex");
   await mkdir(runtimeArtifactDir);
   await writeFile(artifactPath, artifact);
   await writeFile(`${artifactPath}.sha256`, `${checksum}  ${artifactPath}\n`);
+  await writeFile(cronetPath, cronetArtifact);
+  await writeFile(`${cronetPath}.sha256`, `${cronetChecksum}  ${cronetPath}\n`);
   let builderCalls = 0;
   const installer = new SingBoxInstaller({
     binaryPath,
@@ -128,6 +136,7 @@ test("Linux one-click installation prefers the packaged Runtime artifact", async
   assert.equal(installed.version, "1.13.14");
   assert.equal(builderCalls, 0);
   assert.deepEqual(await readFile(binaryPath), artifact);
+  assert.deepEqual(await readFile(join(directory, "libcronet.so")), cronetArtifact);
 });
 
 test("production installer rebuilds a compatible Linux Runtime with user metering", async () => {
