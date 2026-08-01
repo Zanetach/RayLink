@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { Agent, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -70,34 +71,62 @@ const app = await createRayLinkApp({
     get: async () => null
   }
 });
+let clientAgent = null;
 
 try {
   await app.listen({ host: "127.0.0.1", port: 0 });
   const address = app.server.address();
-  const baseUrl = `http://127.0.0.1:${address.port}`;
-  const login = await fetch(`${baseUrl}/api/auth/login`, {
+  clientAgent = new Agent({
+    keepAlive: true,
+    maxSockets: 50,
+    maxFreeSockets: 50,
+    scheduling: "lifo"
+  });
+  const requestBuffer = ({ path, method = "GET", headers = {}, body = "" }) => (
+    new Promise((resolve, reject) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port: address.port,
+        path,
+        method,
+        headers: {
+          ...headers,
+          ...(body ? { "content-length": Buffer.byteLength(body) } : {})
+        },
+        agent: clientAgent
+      }, (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => resolve({
+          status: response.statusCode,
+          headers: response.headers,
+          body: Buffer.concat(chunks)
+        }));
+      });
+      request.on("error", reject);
+      if (body) request.write(body);
+      request.end();
+    })
+  );
+  const login = await requestBuffer({
+    path: "/api/auth/login",
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      connection: "close"
-    },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ username: "admin", password: "Admin@2026" })
   });
   assert.equal(login.status, 200);
-  const cookie = login.headers.getSetCookie()[0].split(";")[0];
+  const cookie = login.headers["set-cookie"][0].split(";")[0];
 
   const requestBatch = async (count) => {
     const responses = await Promise.all(Array.from({ length: count }, () => (
-      fetch(`${baseUrl}/api/bootstrap`, {
-        headers: {
-          cookie,
-          connection: "close"
-        }
+      requestBuffer({
+        path: "/api/bootstrap",
+        headers: { cookie }
       })
     )));
     for (const response of responses) {
       assert.equal(response.status, 200);
-      await response.arrayBuffer();
+      assert.ok(response.body.length > 0);
     }
   };
 
@@ -121,6 +150,23 @@ try {
   const rssGrowthBytes = finalMemory.rss - baselineMemory.rss;
   const tailRssGrowthBytes = finalMemory.rss - midpointMemory.rss;
   const externalGrowthBytes = finalMemory.external - baselineMemory.external;
+  const report = {
+    requests: 4_000,
+    warmupRequests: 1_000,
+    measuredRequests: 3_000,
+    usersPerResponse: 6,
+    baselineMemory,
+    midpointMemory,
+    finalMemory,
+    growth: {
+      heapUsedBytes: heapGrowthBytes,
+      rssBytes: rssGrowthBytes,
+      tailRssBytes: tailRssGrowthBytes,
+      externalBytes: externalGrowthBytes,
+      activeHandles: finalHandles - baselineHandles
+    }
+  };
+  console.log(JSON.stringify(report));
 
   // RSS includes V8 JIT pages, SQLite native pages and allocator high-water
   // marks. Bound both the absolute process size and the post-warmup slope so a
@@ -149,23 +195,8 @@ try {
     finalHandles <= baselineHandles + 8,
     `active handles grew from ${baselineHandles} to ${finalHandles}`
   );
-  console.log(JSON.stringify({
-    requests: 4_000,
-    warmupRequests: 1_000,
-    measuredRequests: 3_000,
-    usersPerResponse: 6,
-    baselineMemory,
-    midpointMemory,
-    finalMemory,
-    growth: {
-      heapUsedBytes: heapGrowthBytes,
-      rssBytes: rssGrowthBytes,
-      tailRssBytes: tailRssGrowthBytes,
-      externalBytes: externalGrowthBytes,
-      activeHandles: finalHandles - baselineHandles
-    }
-  }));
 } finally {
+  clientAgent?.destroy();
   await app.close();
   await rm(dataDir, { recursive: true, force: true });
 }
