@@ -117,17 +117,66 @@ body {
   padding: 12px;
 }
 .portal-subscription-value > .subscription-qr { grid-template-columns: none; }
-.portal-subscription-value > .subscription-client-actions,
+.portal-subscription-value > .subscription-client-picker,
+.subscription-client-picker {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+.subscription-client-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.subscription-client-heading strong,
+.subscription-client-heading small { display: block; }
+.subscription-client-heading strong { color: var(--text-soft); font-size: 10px; font-weight: 650; }
+.subscription-client-heading small { color: var(--faint); font-size: 9px; text-align: right; }
+.portal-subscription-value > .subscription-client-picker { grid-template-columns: none; }
+.portal-subscription-value .subscription-client-heading { grid-template-columns: none; }
+.portal-subscription-value .subscription-client-heading small { margin: 0; }
+.portal-subscription-value .subscription-client-actions,
 .subscription-client-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
-.subscription-client-actions .button {
-  min-height: 40px;
-  justify-content: center;
-  text-align: center;
+.subscription-client-action {
+  display: grid;
+  min-height: 76px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  padding: 13px;
+  color: var(--text-soft);
   text-decoration: none;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 120ms var(--ease-out);
+}
+.subscription-client-action span,
+.subscription-client-action strong,
+.subscription-client-action small { display: block; min-width: 0; }
+.subscription-client-actions .subscription-client-action strong { font-size: 10px; font-weight: 650; }
+.subscription-client-actions .subscription-client-action small { margin-top: 6px; color: var(--faint); font-size: 8px; line-height: 1.45; }
+.subscription-client-action .subscription-client-badge {
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  padding: 4px 7px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.subscription-client-action.recommended {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.subscription-client-action.recommended .subscription-client-badge {
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 .subscription-qr canvas,
 .subscription-qr img { display: block; width: 184px; height: 184px; image-rendering: pixelated; }
@@ -137,7 +186,13 @@ body {
   line-height: 1.6;
   text-align: center;
 }
-.subscription-secret-note { color: var(--faint); font-size: 9px; line-height: 1.55; }
+.subscription-secret-note {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+  color: var(--faint);
+  font-size: 9px;
+  line-height: 1.55;
+}
 .portal-guide { margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
 .portal-guide summary { color: var(--text-soft); cursor: pointer; font-size: 11px; font-weight: 600; }
 .portal-guide ol { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 10px; line-height: 1.7; }
@@ -1705,6 +1760,8 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
   .nav-item:hover, .icon-button:hover, .profile-button:hover, .node-row:hover { background-color: var(--surface-2); color: var(--text); }
   .button.primary:hover { background-color: var(--accent-strong); }
   .button.secondary:hover, .command-button:hover { border-color: var(--border); background-color: var(--surface-3); }
+  .subscription-client-action:hover { border-color: var(--accent-border); background: var(--surface-3); transform: translateY(-1px); }
+  .subscription-client-action.recommended:hover { background: var(--accent-soft); }
   .text-button:hover, .identity-link:hover strong { color: var(--accent); }
   .subscription-quick-button:hover { transform: translateY(-1px); border-color: var(--accent-border); background: var(--accent-soft); }
   .filter:hover { color: var(--text-soft); }

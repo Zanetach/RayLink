@@ -11,6 +11,7 @@ const copySubscription = document.querySelector("#portal-copy-subscription");
 const subscriptionQr = document.querySelector("#portal-subscription-qr");
 const importMihomo = document.querySelector("#portal-import-mihomo");
 const importEgern = document.querySelector("#portal-import-egern");
+const importEgernNodes = document.querySelector("#portal-import-egern-nodes");
 const downloadSingBox = document.querySelector("#portal-download-singbox");
 let subscriptionLoadRequest = 0;
 
@@ -65,6 +66,7 @@ function revealSubscription(url, existing = false) {
   const formatUrl = (format) => `${url}?format=${encodeURIComponent(format)}`;
   importMihomo.href = `clash://install-config?url=${encodeURIComponent(formatUrl("mihomo"))}&name=RayLink`;
   importEgern.href = `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(formatUrl("egern-profile"))}`;
+  importEgernNodes.href = `egern:/subscriptions/new?url=${encodeURIComponent(formatUrl("egern"))}`;
   downloadSingBox.href = formatUrl("singbox");
   const qrReady = window.RayLinkSubscriptionQr?.render(subscriptionQr, url) === true;
   subscriptionStatus.textContent = existing

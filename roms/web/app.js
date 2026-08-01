@@ -1292,11 +1292,29 @@ function userSubscriptionAccessMarkup(user) {
             <input id="user-subscription-url" type="url" value="${escapeHtml(generatedUrl)}" readonly spellcheck="false">
             <button type="button" class="button secondary" data-copy-target="user-subscription-url">${icon("copy")}复制</button>
           </div>
-          <div class="subscription-client-actions">
-            <a class="button secondary" href="#" data-subscription-format="mihomo" data-subscription-import="clash">导入 Clash / Mihomo</a>
-            <a class="button secondary" href="#" data-subscription-format="egern-profile" data-subscription-import="egern-profile">导入 Egern 完整配置</a>
-            <a class="button secondary" href="#" data-subscription-format="egern" data-subscription-import="egern">仅添加 Egern 节点</a>
-            <a class="button secondary" href="#" data-subscription-format="singbox">下载 sing-box JSON</a>
+          <div class="subscription-client-picker">
+            <div class="subscription-client-heading">
+              <strong>选择客户端</strong>
+              <small>按设备选择导入方式，订阅内容保持一致。</small>
+            </div>
+            <div class="subscription-client-actions">
+              <a class="subscription-client-action recommended" href="#" data-subscription-format="mihomo" data-subscription-import="clash">
+                <span><strong>Clash / Mihomo</strong><small>Windows · macOS · Android</small></span>
+                <span class="subscription-client-badge">推荐</span>
+              </a>
+              <a class="subscription-client-action" href="#" data-subscription-format="egern-profile" data-subscription-import="egern-profile">
+                <span><strong>Egern 完整配置</strong><small>智能策略、分流与 DNS</small></span>
+                <span class="subscription-client-badge">导入</span>
+              </a>
+              <a class="subscription-client-action" href="#" data-subscription-format="egern" data-subscription-import="egern">
+                <span><strong>Egern 节点</strong><small>保留客户端现有规则</small></span>
+                <span class="subscription-client-badge">添加</span>
+              </a>
+              <a class="subscription-client-action" href="#" data-subscription-format="singbox">
+                <span><strong>sing-box JSON</strong><small>下载高级客户端配置</small></span>
+                <span class="subscription-client-badge">下载</span>
+              </a>
+            </div>
           </div>
           <small class="subscription-secret-note">二维码与链接包含用户凭据，请通过安全渠道交付。地址在服务端加密保存，刷新页面后仍可查看。</small>
         </div>
