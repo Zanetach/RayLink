@@ -1,5 +1,14 @@
 # RayLink Changelog
 
+## 0.2.20 - 2026-08-02
+
+### Changed
+
+- Subscription delivery now uses a compact two-column client picker in both
+  the administrator drawer and user portal.
+- Clash/Mihomo is presented as the recommended import while Egern full-profile
+  and node-only imports remain clearly separated.
+
 ## 0.2.19 - 2026-08-01
 
 ### Fixed
