@@ -1,5 +1,14 @@
 # RayLink Changelog
 
+## 0.2.19 - 2026-08-01
+
+### Fixed
+
+- Online SQLite backups now remove temporary WAL and shared-memory sidecars
+  after successful creation.
+- The next backup automatically cleans temporary SQLite files left by an
+  interrupted previous backup, preventing unbounded backup-directory growth.
+
 ## 0.2.18 - 2026-08-01
 
 ### Fixed

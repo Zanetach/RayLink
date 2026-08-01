@@ -46,7 +46,13 @@ export class BackupManager {
       throw backupError("BACKUP_IN_PROGRESS", "已有数据库备份正在执行", 409);
     }
     this.creating = true;
-    await mkdir(this.backupDir, { recursive: true, mode: 0o700 });
+    try {
+      await mkdir(this.backupDir, { recursive: true, mode: 0o700 });
+      await this.cleanupTemporaryFiles();
+    } catch (error) {
+      this.creating = false;
+      throw error;
+    }
     const createdAt = new Date().toISOString();
     const stamp = createdAt.replace(/[-:]/g, "").slice(0, 15);
     const filename = `raylink-${stamp}-${randomUUID().slice(0, 8)}.sqlite`;
@@ -86,6 +92,8 @@ export class BackupManager {
     } finally {
       this.creating = false;
       await rm(temporaryPath, { force: true }).catch(() => {});
+      await rm(`${temporaryPath}-wal`, { force: true }).catch(() => {});
+      await rm(`${temporaryPath}-shm`, { force: true }).catch(() => {});
       await rm(temporaryManifestPath, { force: true }).catch(() => {});
     }
   }
@@ -141,6 +149,15 @@ export class BackupManager {
       const path = join(this.backupDir, safeBackupFilename(expired.filename));
       await rm(path, { force: true });
       await rm(`${path}.json`, { force: true });
+    }
+  }
+
+  async cleanupTemporaryFiles() {
+    const entries = await readdir(this.backupDir);
+    for (const entry of entries.filter((name) => (
+      /^raylink-[^.]+\.sqlite\.tmp(?:-(?:wal|shm))?$/.test(name)
+    ))) {
+      await rm(join(this.backupDir, entry), { force: true });
     }
   }
 }

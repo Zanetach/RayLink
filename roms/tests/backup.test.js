@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -26,6 +26,14 @@ test("online SQLite backup is checksummed, integrity checked and retention bound
   });
 
   const first = await manager.create();
+  await writeFile(
+    join(directory, "backups", "raylink-20000101T000000-orphaned.sqlite.tmp-wal"),
+    "orphaned"
+  );
+  await writeFile(
+    join(directory, "backups", "raylink-20000101T000000-orphaned.sqlite.tmp-shm"),
+    "orphaned"
+  );
   store.createUser({
     name: "Backup User",
     email: "backup-user@example.com",
@@ -47,6 +55,12 @@ test("online SQLite backup is checksummed, integrity checked and retention bound
     await readFile(join(directory, "backups", `${latest.filename}.json`), "utf8")
   );
   assert.equal(manifest.checksum, latest.checksum);
+  assert.deepEqual(
+    (await readdir(join(directory, "backups")))
+      .filter((filename) => filename.includes(".tmp"))
+      .sort(),
+    []
+  );
 
   const restored = new DatabaseSync(join(directory, "backups", latest.filename), {
     readOnly: true
