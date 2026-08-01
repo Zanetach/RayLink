@@ -30,10 +30,10 @@ jobs:
             1.13.14 \
             "$runtime_directory" \
             amd64
-          chmod 0755 "$runtime_directory/raylink-sing-box-1.13.14-linux-amd64"
           (
             cd "$runtime_directory"
             sha256sum -c raylink-sing-box-1.13.14-linux-amd64.sha256
+            sha256sum -c raylink-libcronet-1.13.14-linux-amd64.so.sha256
           )
       - name: Install dependencies
         run: npm install --ignore-scripts

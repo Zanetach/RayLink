@@ -785,7 +785,7 @@ test("the release package keeps every installer dependency executable", async ()
 test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "raylink-release-metadata-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const archivePath = join(directory, "raylink-0.2.17-linux-amd64.tar.gz");
+  const archivePath = join(directory, "raylink-0.2.18-linux-amd64.tar.gz");
   const runtimePath = join(directory, "raylink-sing-box-1.13.14-linux-amd64");
   const cronetPath = join(directory, "raylink-libcronet-1.13.14-linux-amd64.so");
   await writeFile(archivePath, "known-raylink-archive");
@@ -796,19 +796,19 @@ test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t
     new URL("../deploy/generate-release-metadata.mjs", import.meta.url).pathname,
     archivePath,
     runtimePath,
-    "0.2.17",
+    "0.2.18",
     "1.13.14",
     "amd64",
     cronetPath
   ]);
 
   const manifest = JSON.parse(
-    await readFile(join(directory, "raylink-0.2.17-linux-amd64.manifest.json"), "utf8")
+    await readFile(join(directory, "raylink-0.2.18-linux-amd64.manifest.json"), "utf8")
   );
   assert.equal(manifest.schemaVersion, 1);
-  assert.equal(manifest.version, "0.2.17");
+  assert.equal(manifest.version, "0.2.18");
   assert.equal(manifest.architecture, "amd64");
-  assert.equal(manifest.archive.filename, "raylink-0.2.17-linux-amd64.tar.gz");
+  assert.equal(manifest.archive.filename, "raylink-0.2.18-linux-amd64.tar.gz");
   assert.match(manifest.archive.sha256, /^[a-f0-9]{64}$/);
   assert.equal(manifest.runtime.version, "1.13.14");
   assert.match(manifest.runtime.sha256, /^[a-f0-9]{64}$/);
@@ -816,11 +816,11 @@ test("release metadata publishes a checksummed manifest and SPDX SBOM", async (t
   assert.match(manifest.runtime.companions[0].sha256, /^[a-f0-9]{64}$/);
 
   const sbom = JSON.parse(
-    await readFile(join(directory, "raylink-0.2.17-linux-amd64.spdx.json"), "utf8")
+    await readFile(join(directory, "raylink-0.2.18-linux-amd64.spdx.json"), "utf8")
   );
   assert.equal(sbom.spdxVersion, "SPDX-2.3");
   assert.ok(sbom.packages.some((entry) => (
-    entry.name === "RayLink" && entry.versionInfo === "0.2.17"
+    entry.name === "RayLink" && entry.versionInfo === "0.2.18"
   )));
   assert.ok(sbom.packages.some((entry) => (
     entry.name === "sing-box" && entry.versionInfo === "1.13.14"

@@ -1,5 +1,14 @@
 # RayLink Changelog
 
+## 0.2.18 - 2026-08-01
+
+### Fixed
+
+- Release verification now respects root-owned protocol Runtime artifacts and
+  verifies the pinned Cronet companion checksum before protocol acceptance.
+- Memory soak checks use a bounded keep-alive client pool, separating server
+  memory behavior from Node.js client socket allocation high-water marks.
+
 ## 0.2.17 - 2026-07-30
 
 ### Added
