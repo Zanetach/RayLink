@@ -14,9 +14,6 @@ jobs:
     name: Verify release candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: roms
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -56,9 +53,6 @@ jobs:
             runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
-    defaults:
-      run:
-        working-directory: roms
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -94,10 +88,10 @@ jobs:
         with:
           name: raylink-linux-${{ matrix.arch }}
           path: |
-            roms/output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
-            roms/output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz.sha256
-            roms/output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.manifest.json
-            roms/output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.spdx.json
+            output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
+            output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz.sha256
+            output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.manifest.json
+            output/releases/raylink-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.spdx.json
           if-no-files-found: error
           retention-days: 14
 
@@ -118,7 +112,7 @@ jobs:
           path: release-assets
           merge-multiple: true
       - name: Add the one-click installer
-        run: install -m 0755 roms/deploy/install.sh release-assets/install.sh
+        run: install -m 0755 deploy/install.sh release-assets/install.sh
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: "release-assets/*"

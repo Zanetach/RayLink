@@ -865,14 +865,15 @@ test("candidate database compatibility checks never mutate the upgrade backup", 
   );
 });
 
-test("repository workflows run RayLink checks from its real subdirectory and release both native architectures", async () => {
+test("repository workflows run RayLink checks from the repository root and release both native architectures", async () => {
   const [productionWorkflow, releaseWorkflow, packager] = await Promise.all([
-    readFile(new URL("../../.github/workflows/raylink-production-check.yml", import.meta.url), "utf8"),
-    readFile(new URL("../../.github/workflows/raylink-release.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/raylink-production-check.yml", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/raylink-release.yml", import.meta.url), "utf8"),
     readFile(new URL("../deploy/package-release.sh", import.meta.url), "utf8")
   ]);
 
-  assert.match(productionWorkflow, /working-directory:\s+roms/);
+  assert.doesNotMatch(productionWorkflow, /working-directory:\s+roms/);
+  assert.doesNotMatch(releaseWorkflow, /roms\//);
   assert.match(productionWorkflow, /build-runtime-artifact\.sh/);
   assert.match(productionWorkflow, /needs:\s+runtime/);
   assert.match(productionWorkflow, /SING_BOX_BIN=.*npm run check:protocols/);

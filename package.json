@@ -9,8 +9,8 @@
   "scripts": {
     "dev": "node --watch server/index.js",
     "start": "node server/index.js",
-    "test": "node --test --test-concurrency=1",
-    "check": "node --check server/index.js && node --check web/app.js && node --test --test-concurrency=1",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "check": "node --check server/index.js && node --check web/app.js && node --test --test-concurrency=1 tests/*.test.js",
     "check:protocols": "node tests/protocol-check.mjs",
     "check:soak": "node --expose-gc tests/soak-memory.mjs",
     "check:production": "npm run check && npm run check:protocols && npm run check:soak"

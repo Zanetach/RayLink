@@ -3,7 +3,7 @@
 RayLink 的产品介绍、架构、界面截图、一键安装和完整使用说明位于
 [仓库首页 README](../README.md)。
 
-本目录是可运行的 Node.js 应用根目录：
+仓库根目录就是可运行的 Node.js 应用根目录：
 
 ```text
 server/   控制面 API、SQLite、配置编译、RayLink Node 任务与流量计量

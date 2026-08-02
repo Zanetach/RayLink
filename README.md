@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="roms/web/assets/brand/raylink-mark.svg" width="104" alt="RayLink logo">
+  <img src="web/assets/brand/raylink-mark.svg" width="104" alt="RayLink logo">
   <h1>RayLink</h1>
   <p><strong>把多用户、多 Host sing-box 服务变成一套可安装、可配置、可发布、可计量的控制面。</strong></p>
   <p>
@@ -10,7 +10,7 @@
   </p>
 </div>
 
-![RayLink 控制面总览](roms/docs/assets/readme/dashboard.png)
+![RayLink 控制面总览](docs/assets/readme/dashboard.png)
 
 RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制台创建用户、设置流量与到期时间、接入 VPS、配置 Host 入口协议并发布；用户登录独立用户中心，通过同一个专属订阅地址导入 Clash/Mihomo、Egern 或 sing-box。国内目标直连，其他流量进入自动测速与故障切换策略。
 
@@ -37,13 +37,13 @@ RayLink 面向自建服务和团队内部网络管理：管理员在 Web 控制�
 
 创建用户时直接设置配额、到期日和 Host 范围；停用、到期或超额后，RayLink 会重新编译并发布撤权 Deployment。
 
-![RayLink 用户管理](roms/docs/assets/readme/users.png)
+![RayLink 用户管理](docs/assets/readme/users.png)
 
 ### 协议绑定 Host
 
 每台 Host 独立维护入口协议和 Runtime 状态。新 VPS 通过一次性接入令牌安装 RayLink Node，在线后即可参与客户端配置编译和 Deployment。
 
-![RayLink Host 与系统管理](roms/docs/assets/readme/system.png)
+![RayLink Host 与系统管理](docs/assets/readme/system.png)
 
 ## 架构
 
@@ -89,20 +89,20 @@ flowchart LR
 服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.13/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.20/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.13/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.20/install.sh | sudo bash'
 ```
 
 脚本会检测公网 IP，下载固定的 AMD64 发布包及 SHA-256，校验后解压，再执行系统安装。
 若需要指定公网 IP：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.13/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.20/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 一键安装会自动完成：
@@ -121,7 +121,7 @@ CDN 代理。RayLink 会检查控制台和订阅域名的解析目标，由 Cadd
 客户端连接配置。系统同时保留 IP 恢复入口。没有域名时继续使用 IP HTTPS；首次使用 IP
 证书时，请核对安装器打印的 SHA-256 证书指纹。
 
-完整部署、Caddy、手动安装和令牌轮换说明见 [部署手册](roms/deploy/README.md)。
+完整部署、Caddy、手动安装和令牌轮换说明见 [部署手册](deploy/README.md)。
 
 ## 添加第二台 VPS
 
@@ -173,7 +173,19 @@ RayLink 的协议目录来自安装 Runtime 的 `version + platform + build tags
 | 高级/系统入口 | ShadowTLS、Direct、TUN、Redirect、TProxy |
 | 客户端策略 | TUN、DNS 劫持、CN 直连、URLTest 自动测速、Selector 手选和故障切换 |
 
-完整的 inbound、outbound、endpoint、构建标签与平台限制见 [sing-box 协议支持矩阵](roms/docs/sing-box-protocol-support.md)。
+完整的 inbound、outbound、endpoint、构建标签与平台限制见 [sing-box 协议支持矩阵](docs/sing-box-protocol-support.md)。
+
+## 项目结构
+
+RayLink 的应用文件直接位于仓库根目录：
+
+```text
+server/   控制面 API、SQLite、配置编译、节点任务与流量计量
+web/      管理控制台、首次初始化、用户中心与 RayLink Node
+deploy/   一键安装、升级、systemd、Caddy 与发布包脚本
+tests/    API、协议、Deployment、安全、计量与稳定性测试
+docs/     架构决策、协议支持矩阵和生产落地资料
+```
 
 ## 本地开发
 
@@ -181,7 +193,7 @@ RayLink 的协议目录来自安装 Runtime 的 `version + platform + build tags
 
 ```bash
 git clone https://github.com/Zanetach/RayLink.git
-cd RayLink/roms
+cd RayLink
 npm start
 ```
 
@@ -243,14 +255,14 @@ npm run check:production
 
 ## 项目资料
 
-- [应用源码说明](roms/README.md)
-- [生产部署手册](roms/deploy/README.md)
-- [sing-box 协议支持矩阵](roms/docs/sing-box-protocol-support.md)
-- [生产落地计划](roms/docs/release/raylink-production-implementation-plan.md)
-- [v0.2.0 生产候选验收记录](roms/docs/release/v0.2.0-production-acceptance.md)
-- [v0.2.1 发布说明](roms/docs/release/v0.2.1.md)
-- [v0.2.13 发布说明](roms/docs/release/v0.2.13.md)
-- [v0.2.12 发布说明](roms/docs/release/v0.2.12.md)
-- [领域模型](roms/CONTEXT.md)
-- [架构决策记录](roms/docs/adr/)
-- [v0.2.0 发布说明](roms/docs/release/v0.2.0.md)
+- [应用源码说明](docs/application.md)
+- [生产部署手册](deploy/README.md)
+- [sing-box 协议支持矩阵](docs/sing-box-protocol-support.md)
+- [生产落地计划](docs/release/raylink-production-implementation-plan.md)
+- [v0.2.0 生产候选验收记录](docs/release/v0.2.0-production-acceptance.md)
+- [v0.2.1 发布说明](docs/release/v0.2.1.md)
+- [v0.2.13 发布说明](docs/release/v0.2.13.md)
+- [v0.2.12 发布说明](docs/release/v0.2.12.md)
+- [领域模型](CONTEXT.md)
+- [架构决策记录](docs/adr/)
+- [v0.2.0 发布说明](docs/release/v0.2.0.md)

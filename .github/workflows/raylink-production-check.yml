@@ -2,14 +2,8 @@ name: RayLink production checks
 
 on:
   pull_request:
-    paths:
-      - "roms/**"
-      - ".github/workflows/raylink-*.yml"
   push:
     branches: [main]
-    paths:
-      - "roms/**"
-      - ".github/workflows/raylink-*.yml"
 
 permissions:
   contents: read
@@ -17,10 +11,6 @@ permissions:
 concurrency:
   group: raylink-production-${{ github.ref }}
   cancel-in-progress: true
-
-defaults:
-  run:
-    working-directory: roms
 
 jobs:
   runtime:
