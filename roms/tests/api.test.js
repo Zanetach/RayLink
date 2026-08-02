@@ -2805,7 +2805,7 @@ test("RayLink Node reports real cumulative user counters idempotently and enforc
   const usage = {
     sampleId: "usage-sample-0001",
     runtimeInstanceId: "runtime-instance-0001",
-    observedAt: "2026-07-26T12:00:00.000Z",
+    observedAt: new Date(Date.now() - 60_000).toISOString(),
     users: [{
       name: user.email,
       uplinkBytes: 400 * 1024 ** 2,
@@ -2817,7 +2817,8 @@ test("RayLink Node reports real cumulative user counters idempotently and enforc
     headers: nodeHeaders,
     body: JSON.stringify(usage)
   });
-  assert.equal(first.status, 200);
+  const firstBody = await first.clone().json();
+  assert.equal(first.status, 200, JSON.stringify(firstBody));
   const result = await first.json();
   assert.equal(result.appliedBytes, 1_100 * 1024 ** 2);
   assert.deepEqual(result.quotaExceededUserIds, [user.id]);

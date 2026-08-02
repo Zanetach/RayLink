@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
+import { DatabaseSync } from "node:sqlite";
 
 import { RayLinkStore } from "../server/database.js";
 import { RuntimeManager } from "../server/singbox/runtime-manager.js";
@@ -327,21 +328,22 @@ test("concurrent control-plane processes cannot claim the same RayLink Node task
   const workerSource = `
     const { parentPort, workerData } = require("node:worker_threads");
     (async () => {
-      const { RayLinkStore } = await import(workerData.moduleUrl);
-      const store = new RayLinkStore({
-        dbPath: workerData.dbPath,
-        adminUsername: "admin",
-        adminPassword: "Admin@2026",
-        seedDemoData: false
-      });
-      parentPort.postMessage({ type: "ready" });
-      Atomics.wait(new Int32Array(workerData.barrier), 0, 0);
+      let store;
       try {
+        const { RayLinkStore } = await import(workerData.moduleUrl);
+        store = new RayLinkStore({
+          dbPath: workerData.dbPath,
+          adminUsername: "admin",
+          adminPassword: "Admin@2026",
+          seedDemoData: false
+        });
+        parentPort.postMessage({ type: "ready" });
+        Atomics.wait(new Int32Array(workerData.barrier), 0, 0);
         parentPort.postMessage({ type: "result", task: store.nextNodeTask(workerData.hostId) });
       } catch (error) {
         parentPort.postMessage({ type: "error", error: error.message });
       } finally {
-        store.close();
+        store?.close();
       }
     })();
   `;
@@ -375,4 +377,73 @@ test("concurrent control-plane processes cannot claim the same RayLink Node task
 
   assert.equal(results.filter((task) => task?.id === taskId).length, 1);
   assert.equal(results.filter((task) => task === null).length, 1);
+});
+
+test("store waits for a concurrent SQLite bootstrap lock before enabling WAL", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "raylink-store-bootstrap-lock-"));
+  const dbPath = join(dataDir, "raylink.db");
+  const blocker = new DatabaseSync(dbPath);
+  blocker.exec("PRAGMA journal_mode=DELETE; CREATE TABLE bootstrap_lock (id INTEGER); BEGIN EXCLUSIVE;");
+  let transactionOpen = true;
+  let worker;
+
+  t.after(async () => {
+    if (transactionOpen) blocker.exec("ROLLBACK");
+    blocker.close();
+    await worker?.terminate();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const moduleUrl = pathToFileURL(join(process.cwd(), "server/database.js")).href;
+  const workerSource = `
+    const { parentPort, workerData } = require("node:worker_threads");
+    (async () => {
+      parentPort.postMessage({ type: "started" });
+      let store;
+      try {
+        const { RayLinkStore } = await import(workerData.moduleUrl);
+        store = new RayLinkStore({
+          dbPath: workerData.dbPath,
+          adminUsername: "admin",
+          adminPassword: "Admin@2026",
+          seedDemoData: false
+        });
+        parentPort.postMessage({ type: "ready" });
+      } catch (error) {
+        parentPort.postMessage({ type: "error", error: error.message });
+      } finally {
+        store?.close();
+      }
+    })();
+  `;
+  worker = new Worker(workerSource, {
+    eval: true,
+    workerData: { dbPath, moduleUrl }
+  });
+  const messages = [];
+  let resolveMessage;
+  const nextMessage = () => new Promise((resolve) => {
+    const queued = messages.shift();
+    if (queued) {
+      resolve(queued);
+      return;
+    }
+    resolveMessage = resolve;
+  });
+  worker.on("message", (message) => {
+    if (resolveMessage) {
+      const resolve = resolveMessage;
+      resolveMessage = undefined;
+      resolve(message);
+      return;
+    }
+    messages.push(message);
+  });
+
+  assert.equal((await nextMessage()).type, "started");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  blocker.exec("COMMIT");
+  transactionOpen = false;
+  const result = await nextMessage();
+  assert.deepEqual(result, { type: "ready" });
 });

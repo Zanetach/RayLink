@@ -310,7 +310,10 @@ export class RayLinkStore {
   }) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
-    this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+    // Configure the busy handler before any pragma that may need to upgrade
+    // the database lock. Multiple control-plane workers can open the same
+    // database while another process is finishing a transaction.
+    this.db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
     this.lastTelemetryPruneAt = 0;
     this.nodeTaskRetryBaseMs = Math.max(0, Number(nodeTaskRetryBaseMs) || 0);
     this.subscriptionEncryptionKey = subscriptionEncryptionKey || adminPassword;
