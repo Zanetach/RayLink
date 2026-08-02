@@ -53,7 +53,7 @@ npm run check:production
 
 该命令不替代干净 VPS、真实客户端和长时间故障验收。
 
-生产安装与发布包构建见 [deploy/README.md](deploy/README.md)。
+生产安装与发布包构建见 [deploy/README.md](../deploy/README.md)。
 
 ## 通用订阅
 
@@ -107,4 +107,4 @@ GitHub Build Provenance 对发布资产提供可验证的来源证明。升级�
 数据库副本上验证迁移与完整性，再切换正在运行的控制面。
 
 完整生产门槛和分阶段计划见
-[生产化统一规划](docs/production-readiness-plan.md)。
+[生产化统一规划](production-readiness-plan.md)。
