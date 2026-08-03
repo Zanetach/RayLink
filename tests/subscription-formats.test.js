@@ -76,6 +76,10 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   assert.match(artifact.body, /expected-status: 204/);
   assert.match(
     artifact.body,
+    /name: "RayLink 智能"[\s\S]*?timeout: 8000[\s\S]*?name: "TCP 稳定"[\s\S]*?timeout: 5000[\s\S]*?name: "UDP 高速"[\s\S]*?timeout: 12000[\s\S]*?name: "故障回退"[\s\S]*?timeout: 5000/
+  );
+  assert.match(
+    artifact.body,
     /name: "AI 网站代理"[\s\S]*?proxies:[\s\S]*?- "故障回退"/
   );
   assert.match(artifact.body, /store-selected: false/);
@@ -297,4 +301,8 @@ test("TUIC exporters do not require an ALPN the managed server did not advertise
 
   assert.doesNotMatch(mihomo, /alpn:/);
   assert.doesNotMatch(egern, /alpn:/);
+  assert.match(mihomo, /sni: "node\.example\.com"/);
+  assert.doesNotMatch(mihomo, /servername:/);
+  assert.match(mihomo, /heartbeat-interval: 10000/);
+  assert.match(mihomo, /request-timeout: 8000/);
 });

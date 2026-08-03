@@ -386,7 +386,7 @@ test("client subscription separates TCP and UDP and excludes unhealthy UDP from 
   ]);
 });
 
-test("smart selection stays TCP-only until Hysteria 2 or TUIC proves stable", () => {
+test("UDP groups expose every enabled QUIC protocol and smart selection promotes stable ones", () => {
   const profiles = defaultProtocolConfigs().map((profile) => ({
     ...profile,
     enabled: ["vless", "hysteria", "hysteria2", "tuic"].includes(profile.type),
@@ -407,6 +407,20 @@ test("smart selection stays TCP-only until Hysteria 2 or TUIC proves stable", ()
       address: "node.example.com",
       protocols: profiles,
       protocolActivations: [
+        {
+          type: "hysteria",
+          publicCheck: {
+            availability: "available",
+            reachable: true,
+            jitterMs: 18,
+            consecutiveFailures: 0,
+            samples: { count: 5, successful: 5, failed: 0 },
+            healthWindow: {
+              successRate: 100,
+              rounds: [{}, {}, {}]
+            }
+          }
+        },
         {
           type: "hysteria2",
           publicCheck: {
@@ -433,11 +447,15 @@ test("smart selection stays TCP-only until Hysteria 2 or TUIC proves stable", ()
 
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.tag === "raylink-smart").outbounds,
-    ["raylink-local-vless"]
+    ["raylink-local-vless", "raylink-local-hysteria"]
   );
   assert.deepEqual(
     config.outbounds.find((outbound) => outbound.tag === "raylink-udp").outbounds,
-    ["raylink-local-tuic", "raylink-local-hysteria2"]
+    [
+      "raylink-local-hysteria",
+      "raylink-local-tuic",
+      "raylink-local-hysteria2"
+    ]
   );
   assert.equal(
     config.outbounds.find((outbound) => outbound.tag === "raylink-auto").default,

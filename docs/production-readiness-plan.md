@@ -2,7 +2,7 @@
 
 ## 目标
 
-RayLink v0.2.20 继续定位为生产候选版本。正式商用版本必须让控制面、每个 RayLink Node、sing-box Runtime、用户权益和三种订阅导出保持同一事实来源，并且在失败时可检测、可回滚、可审计。
+RayLink v0.2.21 继续定位为生产候选版本。正式商用版本必须让控制面、每个 RayLink Node、sing-box Runtime、用户权益和三种订阅导出保持同一事实来源，并且在失败时可检测、可回滚、可审计。
 
 ## 统一系统模型
 
@@ -26,7 +26,7 @@ RayLink v0.2.20 继续定位为生产候选版本。正式商用版本必须让�
 | AI 网站代理 | AI 域名单独选路，默认继承 RayLink 代理 |
 | RayLink 智能 | TCP 节点加上已证明稳定的 UDP 节点 |
 | TCP 稳定 | VLESS、Trojan、AnyTLS、VMess、Shadowsocks 等 TCP 节点 |
-| UDP 高速 | Hysteria 2、TUIC 等 UDP 节点 |
+| UDP 高速 | Hysteria、Hysteria 2、TUIC 等 UDP 节点 |
 | 故障回退 | UDP 不可用时回退 TCP |
 | 手动选择 | 暴露全部可用节点供用户选择 |
 | DIRECT | 中国域名、IP 和局域网直连 |

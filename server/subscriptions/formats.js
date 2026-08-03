@@ -27,6 +27,10 @@ const egernCompatibleTypes = new Set([
   "hysteria2",
   "tuic"
 ]);
+const MIHOMO_SMART_HEALTH_TIMEOUT_MS = 8000;
+const MIHOMO_TCP_HEALTH_TIMEOUT_MS = 5000;
+const MIHOMO_UDP_HEALTH_TIMEOUT_MS = 12000;
+const MIHOMO_TUIC_REQUEST_TIMEOUT_MS = 8000;
 
 function scalar(value) {
   if (value === null) return "null";
@@ -79,7 +83,12 @@ function groupMembers(config, tag, fallback = []) {
 function applyMihomoTls(proxy, outbound) {
   if (!outbound.tls?.enabled) return proxy;
   proxy.tls = true;
-  if (outbound.tls.server_name) proxy.servername = outbound.tls.server_name;
+  if (outbound.tls.server_name) {
+    const serverNameField = ["vmess", "vless"].includes(outbound.type)
+      ? "servername"
+      : "sni";
+    proxy[serverNameField] = outbound.tls.server_name;
+  }
   proxy["skip-cert-verify"] = false;
   if (outbound.tls.reality?.enabled) {
     proxy["reality-opts"] = {
@@ -158,6 +167,8 @@ function mihomoProxy(outbound) {
       password: outbound.password,
       "congestion-controller": outbound.congestion_control || "bbr",
       "udp-relay-mode": "native",
+      "heartbeat-interval": 10000,
+      "request-timeout": MIHOMO_TUIC_REQUEST_TIMEOUT_MS,
       ...(alpn ? { alpn } : {}),
       udp: true
     }, outbound);
@@ -225,7 +236,7 @@ function buildMihomoConfig(singBoxConfig) {
       interval: 180,
       tolerance: 80,
       lazy: false,
-      timeout: 5000,
+      timeout: MIHOMO_SMART_HEALTH_TIMEOUT_MS,
       "max-failed-times": 3,
       "expected-status": 204
     },
@@ -237,7 +248,7 @@ function buildMihomoConfig(singBoxConfig) {
       interval: 180,
       tolerance: 50,
       lazy: false,
-      timeout: 5000,
+      timeout: MIHOMO_TCP_HEALTH_TIMEOUT_MS,
       "max-failed-times": 3,
       "expected-status": 204
     },
@@ -249,7 +260,7 @@ function buildMihomoConfig(singBoxConfig) {
       interval: 180,
       tolerance: 80,
       lazy: false,
-      timeout: 5000,
+      timeout: MIHOMO_UDP_HEALTH_TIMEOUT_MS,
       "max-failed-times": 3,
       "expected-status": 204
     }] : []),
@@ -260,7 +271,7 @@ function buildMihomoConfig(singBoxConfig) {
       url: probeUrl,
       interval: 180,
       lazy: false,
-      timeout: 5000,
+      timeout: MIHOMO_TCP_HEALTH_TIMEOUT_MS,
       "max-failed-times": 3,
       "expected-status": 204
     },

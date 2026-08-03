@@ -366,7 +366,7 @@ export function buildProtocolClientConfig({
 }
 
 const udpClientProtocolTypes = new Set(["hysteria", "hysteria2", "tuic"]);
-const adaptiveUdpProtocolTypes = new Set(["hysteria2", "tuic"]);
+const adaptiveUdpProtocolTypes = new Set(udpClientProtocolTypes);
 const UDP_STABLE_JITTER_LIMIT_MS = 80;
 
 function protocolIsStableForSmartSelection(activation) {

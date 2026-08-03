@@ -1,5 +1,16 @@
 # RayLink Changelog
 
+## 0.2.21 - 2026-08-03
+
+### Fixed
+
+- Mihomo smart, fallback and manual policies now expose every eligible enabled
+  protocol; the UDP policy also includes Hysteria alongside Hysteria 2 and TUIC.
+- Mihomo TLS exports use the protocol-correct SNI field, and TUIC exports include
+  bounded heartbeat and connection timeouts.
+- Health checks use separate smart, TCP and UDP budgets so unreliable UDP paths
+  do not slow TCP failover.
+
 ## 0.2.20 - 2026-08-02
 
 ### Changed
