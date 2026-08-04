@@ -70,11 +70,40 @@ test("operational alerts cover rollout, offline nodes, protocol health, memory a
       "HOST_OFFLINE",
       "USAGE_METERING_STALE",
       "PROTOCOL_UNAVAILABLE",
-      "CERTIFICATE_EXPIRING",
-      "BACKUP_STALE"
+      "CERTIFICATE_EXPIRING"
     ])
   );
   assert.ok(alerts.every((alert) => alert.id && alert.title && alert.createdAt));
+});
+
+test("old verified backups do not alert while failed integrity still does", () => {
+  const now = new Date("2026-07-30T12:00:00.000Z");
+  const validAlerts = evaluateOperationalAlerts({
+    now,
+    backups: [{
+      filename: "raylink-old.sqlite",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      integrity: "ok"
+    }]
+  });
+  assert.ok(!validAlerts.some((alert) => alert.resourceType === "backup"));
+
+  const invalidAlerts = evaluateOperationalAlerts({
+    now,
+    backups: [{
+      filename: "raylink-invalid.sqlite",
+      createdAt: "2026-07-30T11:00:00.000Z",
+      integrity: "failed"
+    }]
+  });
+  assert.deepEqual(
+    invalidAlerts.map(({ code, title, message }) => ({ code, title, message })),
+    [{
+      code: "BACKUP_INVALID",
+      title: "数据库备份未通过校验",
+      message: "最近一次备份没有通过 SQLite 完整性检查。"
+    }]
+  );
 });
 
 test("healthy infrastructure produces no operational alerts", () => {

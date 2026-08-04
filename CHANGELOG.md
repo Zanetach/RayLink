@@ -1,5 +1,14 @@
 # RayLink Changelog
 
+## 0.2.23 - 2026-08-04
+
+### Changed
+
+- Removed the age-based online database backup warning so an older backup that
+  still passes its integrity check no longer creates a false operational alert.
+- Preserved separate alerts for a missing backup and a backup that fails its
+  SQLite integrity check.
+
 ## 0.2.22 - 2026-08-04
 
 ### Changed

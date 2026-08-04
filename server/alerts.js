@@ -179,17 +179,12 @@ export function evaluateOperationalAlerts({
       resourceId: "database",
       createdAt: now.toISOString()
     }));
-  } else if (
-    latestBackup.integrity !== "ok"
-    || ageMs(latestBackup.createdAt, now) > 36 * 60 * 60 * 1000
-  ) {
+  } else if (latestBackup.integrity !== "ok") {
     alerts.push(createAlert({
-      code: "BACKUP_STALE",
+      code: "BACKUP_INVALID",
       severity: "warning",
-      title: "数据库备份已过期或未通过校验",
-      message: latestBackup.integrity !== "ok"
-        ? "最近一次备份没有通过 SQLite 完整性检查。"
-        : "最近一次数据库备份距今已超过 36 小时。",
+      title: "数据库备份未通过校验",
+      message: "最近一次备份没有通过 SQLite 完整性检查。",
       resourceType: "backup",
       resourceId: "database",
       createdAt: latestBackup.createdAt || now.toISOString()
