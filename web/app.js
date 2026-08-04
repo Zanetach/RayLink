@@ -142,6 +142,15 @@ function labelToScope(label) {
   return label.split(" + ").map((name) => Object.entries(scopeLabels).find(([, value]) => value === name)?.[0] || name);
 }
 
+function userCanUseHost(user, hostRegion, now = new Date()) {
+  if (!["active", "warning"].includes(user.state)) return false;
+  if (user.portalStatus !== "active") return false;
+  if (user.used >= user.quota) return false;
+  const expiresAt = new Date(`${user.expires}T23:59:59.999Z`);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt < now) return false;
+  return (user.nodeScope || []).some((scope) => scope === "all" || scope === hostRegion);
+}
+
 function usageMeteringLabel(metering = {}) {
   return ({
     healthy: "采集中",
@@ -265,8 +274,7 @@ function renderRuntime() {
   renderHosts();
   renderConfigPreview();
   renderDashboard();
-  renderOperations();
-  renderDiagnostics();
+  renderSystemRuntime();
   renderSystem();
 }
 
@@ -352,7 +360,7 @@ function renderDashboard() {
       : rollout === "failed"
         ? { className: "danger", label: "节点发布失败" }
         : activeDeployment
-          ? { className: "warning", label: "节点同步中" }
+          ? { className: "warning", label: "节点应用中" }
           : { className: "neutral", label: "无记录" };
     deploymentStatus.className = `status-badge ${rolloutPresentation.className}`;
     deploymentStatus.innerHTML = `<i></i>${rolloutPresentation.label}`;
@@ -417,10 +425,10 @@ function hostStatusView(host, runtime, localReady) {
         : { label: runtime.state === "not-configured" ? "待发布" : "异常", className: "warning" };
   }
   if (host.deploymentSync?.status === "revocation-pending") {
-    return { label: "撤权待同步", className: "danger" };
+    return { label: "撤权待应用", className: "danger" };
   }
   if (host.deploymentSync?.status === "pending") {
-    return { label: "配置待同步", className: "warning" };
+    return { label: "配置待应用", className: "warning" };
   }
   if (host.status === "offline") return { label: "离线", className: "danger" };
   if (host.status === "pending") return { label: "等待接入", className: "neutral" };
@@ -716,7 +724,7 @@ function renderHosts() {
     const status = isLocal
       ? (healthy ? "运行中" : runtime.state === "staged" ? "已暂存" : "待配置")
       : host.deploymentSync?.status === "revocation-pending"
-        ? "撤权待同步"
+        ? "撤权待应用"
         : host.runtimeUpgrade?.pending
           ? "Runtime 升级中"
         : host.runtimeUpgrade?.status === "failed"
@@ -724,7 +732,7 @@ function renderHosts() {
             ? "升级失败·已回滚"
             : "升级失败·需检查"
         : host.deploymentSync?.status === "pending"
-          ? "配置待同步"
+          ? "配置待应用"
       : host.agentVersion && host.agentVersion !== requiredNodeAgentVersion
         ? "Node 待升级"
         : ({ pending: "等待接入", online: "在线", degraded: "发布失败" }[host.status] || "离线");
@@ -793,7 +801,7 @@ function renderConfigPreview() {
   if (systemPreview) systemPreview.textContent = preview.textContent;
 }
 
-function renderOperations() {
+function renderSystemRuntime() {
   const runtime = controlPlane.runtime || { state: "unknown", mode: "dry-run" };
   const installation = controlPlane.installation || { installed: false, version: null };
   const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
@@ -803,19 +811,36 @@ function renderOperations() {
     const element = document.querySelector(selector);
     if (element) element.textContent = value;
   };
-  setText("#operations-runtime-state", ready ? "运行正常" : "等待发布");
-  setText("#operations-config-state", activeDeployment?.version || "尚未发布");
+  setText("#system-runtime-state", ready ? "运行正常" : "等待发布");
+  setText("#system-config-state", activeDeployment?.version || "尚未发布");
   setText(
-    "#operations-validation-state",
+    "#system-validation-state",
     latestDeployment?.status === "failed"
       ? "最近一次失败"
       : activeDeployment?.rolloutStatus === "complete"
         ? "全部目标已应用"
         : activeDeployment
-          ? "节点同步中"
+          ? "节点应用中"
           : "尚无记录"
   );
-  const facts = document.querySelector("#operations-runtime-facts");
+  document.querySelectorAll(".release-version").forEach((element) => {
+    element.textContent = activeDeployment?.version || "尚未发布";
+  });
+  const releaseBadge = document.querySelector(".system-release-panel .release-header .status-badge");
+  if (releaseBadge) {
+    const presentation = latestDeployment?.status === "failed"
+      ? { className: "danger", label: "最近发布失败" }
+      : activeDeployment?.rolloutStatus === "failed"
+        ? { className: "danger", label: "部分目标失败" }
+        : activeDeployment?.rolloutStatus === "complete"
+          ? { className: "good", label: "已生效" }
+          : activeDeployment
+            ? { className: "warning", label: "应用中" }
+            : { className: "neutral", label: "尚未发布" };
+    releaseBadge.className = `status-badge ${presentation.className}`;
+    releaseBadge.innerHTML = `<i></i>${presentation.label}`;
+  }
+  const facts = document.querySelector("#system-runtime-facts");
   if (facts) {
     facts.innerHTML = `
       <span><small>状态</small><strong>${escapeHtml(runtime.state || "unknown")}</strong></span>
@@ -823,7 +848,7 @@ function renderOperations() {
       <span><small>sing-box</small><strong>${escapeHtml(runtime.runtimeVersion || installation.version || "未检测")}</strong></span>
       <span><small>配置路径</small><strong>${escapeHtml(runtime.configPath || "尚未生成")}</strong></span>`;
   }
-  const log = document.querySelector("#operations-log");
+  const log = document.querySelector("#system-deployment-log");
   if (log) {
     const entries = controlPlane.deployments.slice(0, 6).map((deployment) => {
       const time = deployment.publishedAt || deployment.createdAt;
@@ -837,44 +862,6 @@ function renderOperations() {
       ? entries.join("")
       : "<span>RayLink control plane ready.</span><span>等待首次发布事件…</span>";
   }
-}
-
-function renderDiagnostics() {
-  const target = document.querySelector("#diagnostic-grid");
-  if (!target) return;
-  const installation = controlPlane.installation || { installed: false, version: null };
-  const host = controlPlane.hosts[0];
-  const enabledProtocols = controlPlane.hosts
-    .flatMap((candidate) => candidate.protocols || [])
-    .filter((profile) => profile.enabled);
-  const eligibleUsers = controlPlane.runtimePreview?.eligibleUsers || 0;
-  const checks = [
-    {
-      name: "sing-box 安装",
-      detail: installation.installed ? `已检测到 ${installation.version || "可用版本"}` : "当前主机尚未安装",
-      pass: installation.installed
-    },
-    {
-      name: "Runtime 主机",
-      detail: host ? `${host.address} · ${host.region}` : "未配置主机地址",
-      pass: Boolean(host?.address)
-    },
-    {
-      name: "入站服务",
-      detail: `${enabledProtocols.length} 个协议已启用`,
-      pass: enabledProtocols.length > 0
-    },
-    {
-      name: "有效用户",
-      detail: `${eligibleUsers} 位用户可写入配置`,
-      pass: eligibleUsers > 0
-    }
-  ];
-  target.innerHTML = checks.map((check) => `
-    <article class="${check.pass ? "pass" : "warning"}">
-      <span>${check.pass ? icon("check") : "!"}</span>
-      <div><strong>${escapeHtml(check.name)}</strong><small>${escapeHtml(check.detail)}</small></div>
-    </article>`).join("");
 }
 
 function renderSystem() {
@@ -1124,18 +1111,20 @@ function renderUsers() {
 }
 
 function navigate(viewName, updateHash = true) {
+  const legacyOperationsRoute = viewName === "operations";
   const aliases = {
     "users/plans": "users",
     subscriptions: "users",
     hosts: "system",
-    deploy: "operations"
+    deploy: "system",
+    operations: "system"
   };
   const normalizedView = aliases[viewName] || viewName;
   const target = document.querySelector(`[data-view="${normalizedView}"]`) || document.querySelector('[data-view="not-found"]');
   const resolvedView = target.dataset.view;
   document.documentElement.classList.toggle(
     "hide-root-scrollbar",
-    ["operations", "system"].includes(resolvedView)
+    resolvedView === "system"
   );
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view === target));
 
@@ -1158,7 +1147,6 @@ function navigate(viewName, updateHash = true) {
     dashboard: "总览",
     users: "用户",
     policies: "策略",
-    operations: "运维",
     system: "系统",
     "not-found": "未找到"
   };
@@ -1167,6 +1155,9 @@ function navigate(viewName, updateHash = true) {
     history.pushState({ view: resolvedView }, "", `#/${resolvedView}`);
   } else if (normalizedView !== viewName) {
     history.replaceState({ view: normalizedView }, "", `#/${normalizedView}`);
+  }
+  if (legacyOperationsRoute) {
+    selectWorkspaceTab("system", "maintenance");
   }
   elements.rail.classList.remove("open");
   elements.rail.toggleAttribute("inert", window.innerWidth <= 920);
@@ -1515,11 +1506,11 @@ function hostDrawerMarkup(hostId) {
   const runtimeCopy = isRemote
     ? `${host.status === "online" ? "在线" : host.status === "pending" ? "等待接入" : "需要检查"} · ${host.runtimeVersion || host.agentVersion || "尚未上报版本"}`
     : `${controlPlane.runtime?.mode || "dry-run"} · ${controlPlane.runtime?.configPath || "尚未生成配置"}`;
-  const deploymentSyncCopy = host.deploymentSync?.status === "revocation-pending"
+  const deploymentApplicationCopy = host.deploymentSync?.status === "revocation-pending"
     ? `撤权配置正在等待节点确认，队列中 ${host.deploymentSync.pendingTaskCount} 项；节点恢复后会优先、持续重试。`
     : host.deploymentSync?.status === "pending"
       ? `有 ${host.deploymentSync.pendingTaskCount} 项配置等待节点应用。`
-      : "节点配置已与控制面同步。";
+      : "节点已应用控制面配置。";
   const protocolRows = (host.protocols || []).map((profile) => {
     const catalog = (host.protocolCatalog || controlPlane.protocolCatalog)
       .find((item) => item.type === profile.type);
@@ -1558,6 +1549,52 @@ function hostDrawerMarkup(hostId) {
     if (!rows.length) return "";
     return `<div class="protocol-group"><div class="protocol-group-heading"><strong>${group.label}</strong><small>${group.hint}</small></div>${rows.map((row) => row.html).join("")}</div>`;
   }).join("");
+  const enabledProtocolCount = (host.protocols || []).filter((profile) => profile.enabled).length;
+  const eligibleUserCount = users.filter((user) => userCanUseHost(user, host.region)).length;
+  const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
+  const runtimeHealthy = isRemote
+    ? host.telemetry?.serviceStatus === "running"
+    : ["running", "staged"].includes(controlPlane.runtime?.state);
+  const hostDiagnostics = [
+    {
+      name: isRemote ? "Node 连接" : "sing-box 安装",
+      detail: isRemote
+        ? host.status === "online" ? "节点心跳正常" : "节点尚未在线"
+        : controlPlane.installation?.installed
+          ? `已安装 ${controlPlane.installation.version || "可用版本"}`
+          : "当前主机尚未安装",
+      pass: isRemote ? host.status === "online" : controlPlane.installation?.installed
+    },
+    {
+      name: "Runtime 服务",
+      detail: isRemote
+        ? host.telemetry?.serviceStatus || "等待节点上报"
+        : controlPlane.runtime?.state || "unknown",
+      pass: runtimeHealthy
+    },
+    {
+      name: "入口协议",
+      detail: `${enabledProtocolCount} 个协议已启用`,
+      pass: enabledProtocolCount > 0
+    },
+    {
+      name: "配置应用",
+      detail: isRemote ? deploymentApplicationCopy : activeDeployment?.version || "尚未发布",
+      pass: isRemote
+        ? Boolean(host.enrolledAt) && !host.deploymentSync?.pendingTaskCount
+        : Boolean(activeDeployment)
+    },
+    {
+      name: "有效用户",
+      detail: `${eligibleUserCount} 位用户可使用此主机`,
+      pass: eligibleUserCount > 0
+    }
+  ];
+  const diagnosticMarkup = hostDiagnostics.map((check) => `
+    <article class="${check.pass ? "pass" : "warning"}">
+      <span>${check.pass ? icon("check") : "!"}</span>
+      <div><strong>${escapeHtml(check.name)}</strong><small>${escapeHtml(check.detail)}</small></div>
+    </article>`).join("");
   return `
     <form class="drawer-form" id="host-drawer-form" data-host-id="${escapeHtml(host.id)}">
       <div class="drawer-profile"><span class="avatar">${escapeHtml(host.name.slice(0, 1))}</span><div><strong>${escapeHtml(host.name)}</strong><small>${escapeHtml(host.address)} · ${escapeHtml(host.region)}</small></div></div>
@@ -1565,6 +1602,9 @@ function hostDrawerMarkup(hostId) {
       <label class="field"><span>名称</span><input name="hostname" value="${escapeHtml(host.name)}" placeholder="例如：东京生产节点" required></label>
       <label class="field"><span>节点连接地址（每台 Host 独立）</span><input name="address" value="${escapeHtml(host.address)}" placeholder="node.example.com" required><small class="field-hint">每台 Host 可以使用不同的域名或公网 IP，订阅会使用这里的地址连接该节点。</small></label>
       <label class="field"><span>区域标识</span><input name="region" value="${escapeHtml(host.region)}" pattern="[A-Za-z0-9-]{2,32}" placeholder="tokyo" required></label>
+      <p class="drawer-section-label">主机诊断</p>
+      <div class="diagnostic-grid host-diagnostic-grid">${diagnosticMarkup}</div>
+      <button type="button" class="button secondary" data-refresh-host-diagnostics="${escapeHtml(host.id)}">${icon("refresh")}刷新主机诊断</button>
       <p class="drawer-section-label">入口协议</p>
       <p class="field-hint">协议属于当前主机。一键启用会完成配置、校验、发布、端口检查，并在成功后自动进入用户订阅。</p>
       <div class="host-protocol-list">${groupMarkup}</div>
@@ -1576,7 +1616,7 @@ function hostDrawerMarkup(hostId) {
         : ""}
       <div class="switch-row"><div><strong>用户流量计量</strong><small>${usageMeteringDescription(host.usageMetering)}</small></div><span class="status-badge ${host.usageMetering?.status === "healthy" ? "good" : host.usageMetering?.status === "error" ? "danger" : "warning"}"><i></i>${usageMeteringLabel(host.usageMetering)}</span></div>
       ${isRemote ? `<div class="switch-row"><div><strong>TLS 资产安全通道</strong><small>${host.assetEncryptionReady ? "节点 X25519 公钥已登记；证书私钥将以节点专属密封包下发。" : "请升级并重启 RayLink Node，使其生成并上报资产加密公钥。"}</small></div><span class="status-badge ${host.assetEncryptionReady ? "good" : "warning"}"><i></i>${host.assetEncryptionReady ? "已就绪" : "待升级"}</span></div>` : ""}
-      ${isRemote ? `<div class="switch-row"><div><strong>配置同步</strong><small>${escapeHtml(deploymentSyncCopy)}</small></div><span class="status-badge ${host.deploymentSync?.critical ? "danger" : host.deploymentSync?.pendingTaskCount ? "warning" : "good"}"><i></i>${escapeHtml(host.deploymentSync?.status === "revocation-pending" ? "撤权待同步" : host.deploymentSync?.status === "pending" ? "待同步" : "已同步")}</span></div>` : ""}
+      ${isRemote ? `<div class="switch-row"><div><strong>配置应用</strong><small>${escapeHtml(deploymentApplicationCopy)}</small></div><span class="status-badge ${host.deploymentSync?.critical ? "danger" : host.deploymentSync?.pendingTaskCount ? "warning" : "good"}"><i></i>${escapeHtml(host.deploymentSync?.status === "revocation-pending" ? "撤权待应用" : host.deploymentSync?.status === "pending" ? "待应用" : "已应用")}</span></div>` : ""}
       ${isRemote && !host.enrolledAt
         ? `<button type="button" class="button secondary" data-reissue-host="${escapeHtml(host.id)}">${icon("refresh")}重新生成接入命令</button><p class="field-hint">新的接入令牌会立即替换之前的令牌。</p>`
         : ""}
@@ -2264,7 +2304,7 @@ async function saveDrawer() {
   showToast(
     protocolSaveResult?.oneClick
       ? protocolSaveResult.activation?.state === "deploying" ? "正在远程部署" : "协议已启用"
-      : userSaveResult?.runtimeSync?.status === "pending" ? "已保存，等待同步" : "已保存",
+      : userSaveResult?.runtimeSync?.status === "pending" ? "已保存，等待应用" : "已保存",
     message
   );
   elements.drawerSave.disabled = false;
@@ -2597,12 +2637,6 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const operationTab = event.target.closest("[data-operation-tab]");
-  if (operationTab) {
-    selectWorkspaceTab("operation", operationTab.dataset.operationTab);
-    return;
-  }
-
   const systemTab = event.target.closest("[data-system-tab]");
   if (systemTab) {
     selectWorkspaceTab("system", systemTab.dataset.systemTab);
@@ -2624,13 +2658,15 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (event.target.closest("[data-run-diagnostics]")) {
+  const hostDiagnosticsButton = event.target.closest("[data-refresh-host-diagnostics]");
+  if (hostDiagnosticsButton) {
+    const hostId = hostDiagnosticsButton.dataset.refreshHostDiagnostics;
     try {
       await loadBootstrap();
-      renderDiagnostics();
-      showToast("诊断完成", "安装、主机、协议和用户状态已重新检查。");
+      openHost(hostId);
+      showToast("主机诊断已刷新", "已重新读取主机、Runtime、协议、用户和发布状态。");
     } catch (error) {
-      showToast("诊断失败", error.message);
+      showToast("诊断刷新失败", error.message);
     }
     return;
   }

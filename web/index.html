@@ -67,9 +67,6 @@
         <button class="nav-item" data-view-target="policies">
           <svg><use href="#i-shield"/></svg><span>策略</span>
         </button>
-        <button class="nav-item" data-view-target="operations">
-          <svg><use href="#i-terminal"/></svg><span>运维</span>
-        </button>
         <button class="nav-item" data-view-target="system">
           <svg><use href="#i-server"/></svg><span>系统</span><span class="nav-count">1</span>
         </button>
@@ -77,7 +74,7 @@
 
       <div class="rail-status">
         <div class="status-orbit"><span></span></div>
-        <div><strong>控制面在线</strong><small>上次同步 12 秒前</small></div>
+        <div><strong>控制面在线</strong><small>上次更新 12 秒前</small></div>
       </div>
 
       <div class="rail-footer">
@@ -130,7 +127,7 @@
               <h1 id="dashboard-runtime-heading">Runtime 待配置</h1>
               <p id="dashboard-runtime-copy">正在读取 sing-box 运行状态。</p>
             </div>
-            <button class="button secondary" data-view-target="operations">
+            <button class="button secondary" data-advanced-json>
               <svg><use href="#i-code"/></svg>查看当前配置
             </button>
           </div>
@@ -138,7 +135,7 @@
           <section class="notice-card" id="operational-alert-notice" hidden>
             <span><svg><use href="#i-shield"/></svg></span>
             <div><strong id="operational-alert-title">发现运行告警</strong><p id="operational-alert-copy">请检查节点与发布状态。</p></div>
-            <button class="button secondary" data-view-target="operations">查看运维</button>
+            <button class="button secondary" data-view-target="system">查看系统</button>
           </section>
 
           <section class="notice-card" id="runtime-update-notice" hidden>
@@ -294,92 +291,9 @@
           </section>
         </section>
 
-        <section class="view" id="view-operations" data-view="operations">
-          <div class="page-heading">
-            <div><p class="eyebrow">运行与变更</p><h1>运维</h1><p>查看 Runtime 状态、校验发布、诊断结果和历史版本。</p></div>
-            <div class="heading-actions"><button class="button secondary" id="rollback-config" disabled><svg><use href="#i-rollback"/></svg>回滚上一版本</button><button class="button primary" id="publish-config"><svg><use href="#i-terminal"/></svg>校验并发布</button></div>
-          </div>
-          <div class="operations-summary">
-            <article><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><small>Runtime</small><strong id="operations-runtime-state">检测中</strong></div></article>
-            <article><span class="resource-icon"><svg><use href="#i-code"/></svg></span><div><small>配置状态</small><strong id="operations-config-state">等待发布</strong></div></article>
-            <article><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><small>最近校验</small><strong id="operations-validation-state">尚无记录</strong></div></article>
-          </div>
-          <div class="workspace-tabs operations-tabs" role="tablist" aria-label="运维工具">
-            <button class="active" data-operation-tab="publish" role="tab" aria-selected="true">发布</button>
-            <button data-operation-tab="runtime" role="tab" aria-selected="false">Runtime</button>
-            <button data-operation-tab="logs" role="tab" aria-selected="false">日志</button>
-            <button data-operation-tab="diagnostics" role="tab" aria-selected="false">诊断</button>
-          </div>
-          <div data-operation-panel="publish">
-          <section class="release-header">
-            <div><span class="release-version">v2026.07.25-05</span><span class="status-badge neutral"><i></i>草稿</span></div>
-            <p>根据当前用户权益和 Runtime 主机生成受管配置</p>
-          </section>
-          <ol class="deploy-trail full" id="publish-trail">
-            <li class="current"><span>1</span><strong>草稿</strong><small>3 项变更</small></li>
-            <li><span>2</span><strong>校验</strong><small>语法与端口</small></li>
-            <li><span>3</span><strong>快照</strong><small>保留审计记录</small></li>
-            <li><span>4</span><strong>原子发布</strong><small>单机 Runtime</small></li>
-            <li><span>5</span><strong>运行确认</strong><small>版本与状态</small></li>
-          </ol>
-          <div class="deploy-layout">
-            <section class="config-editor">
-              <div class="editor-tabs"><button class="active">config.json</button><span>由工作区生成</span></div>
-              <div class="editor-body">
-                <ol class="line-numbers" aria-hidden="true"><li>1</li><li>2</li><li>3</li><li>4</li><li>5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li><li>11</li><li>12</li><li>13</li><li>14</li><li>15</li><li>16</li><li>17</li><li>18</li></ol>
-                <pre><code id="managed-config-preview">{
-  <span class="code-key">"log"</span>: {
-    <span class="code-key">"level"</span>: <span class="code-string">"info"</span>,
-    <span class="code-key">"timestamp"</span>: <span class="code-bool">true</span>
-  },
-  <span class="code-key">"inbounds"</span>: [{
-    <span class="code-key">"type"</span>: <span class="code-string">"shadowsocks"</span>,
-    <span class="code-key">"tag"</span>: <span class="code-string">"managed-ss-2022"</span>,
-    <span class="code-key">"listen_port"</span>: <span class="code-num" id="managed-listen-port">8388</span>,
-    <span class="code-key">"method"</span>: <span class="code-string">"2022-blake3-aes-128-gcm"</span>,
-    <span class="code-key">"users"</span>: <span class="code-variable">"$eligible_users"</span>
-  }],
-  <span class="code-key">"route"</span>: {
-    <span class="code-key">"final"</span>: <span class="code-string">"direct"</span>
-  }
-}</code></pre>
-              </div>
-              <div class="editor-footer"><span><i class="good-dot"></i>JSON 语法有效</span><span>Ln 18, Col 2</span></div>
-            </section>
-            <aside class="validation-panel">
-              <div class="panel-heading"><div><p class="eyebrow">发布前检查</p><h2>3 项变更</h2></div><button class="icon-button small" aria-label="重新检查"><svg><use href="#i-refresh"/></svg></button></div>
-              <div class="check-list" id="validation-list">
-                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>配置语法</strong><small>通过 sing-box check</small></div></div>
-                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>受管凭据</strong><small>每位有效用户独立生成</small></div></div>
-                <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>文件权限</strong><small>配置以 0600 原子写入</small></div></div>
-                <div class="pending"><span>4</span><div><strong>Runtime 状态</strong><small>发布后读取实际版本</small></div></div>
-              </div>
-              <div class="change-summary">
-                <span><i class="add">+</i><strong>1</strong> 个入站</span>
-                <span><i class="modify">~</i><strong>0</strong> 条路由</span>
-                <span><i class="remove">−</i><strong>0</strong> 个删除</span>
-              </div>
-              <div class="target-nodes"><p>目标 Runtime</p><label><input type="checkbox" checked disabled><span id="managed-target-name">RayLink Runtime</span><small>本机受管</small></label></div>
-            </aside>
-          </div>
-          </div>
-          <section class="resource-panel" data-operation-panel="runtime" hidden>
-            <div class="resource-panel-heading"><div><p class="eyebrow">运行时</p><h2>sing-box 进程</h2><p>状态来自当前主机适配器，而不是页面模拟值。</p></div><button class="button secondary" data-refresh-runtime><svg><use href="#i-refresh"/></svg>刷新状态</button></div>
-            <div class="runtime-facts" id="operations-runtime-facts"><span>正在读取运行状态…</span></div>
-          </section>
-          <section class="resource-panel" data-operation-panel="logs" hidden>
-            <div class="resource-panel-heading"><div><p class="eyebrow">运行日志</p><h2>最近事件</h2><p>当前版本暂不采集 sing-box 日志，先展示控制面的可审计事件。</p></div><span class="status-badge neutral"><i></i>只读</span></div>
-            <div class="terminal-log" id="operations-log"><span>RayLink control plane ready.</span><span>等待首次运行事件…</span></div>
-          </section>
-          <section class="resource-panel" data-operation-panel="diagnostics" hidden>
-            <div class="resource-panel-heading"><div><p class="eyebrow">诊断</p><h2>发布前检查</h2><p>检查安装、主机、协议、有效用户和配置快照。</p></div><button class="button secondary" data-run-diagnostics><svg><use href="#i-refresh"/></svg>重新诊断</button></div>
-            <div class="diagnostic-grid" id="diagnostic-grid"></div>
-          </section>
-        </section>
-
         <section class="view" id="view-system" data-view="system">
           <div class="page-heading">
-            <div><p class="eyebrow">平台与 Runtime</p><h1>系统</h1><p>管理主机、主机入口协议、安装状态、证书、版本和备份。</p></div>
+            <div><p class="eyebrow">平台与 Runtime</p><h1>系统</h1><p>管理主机、入口协议、Runtime 状态、证书、配置发布、版本和备份。</p></div>
             <button class="button primary" data-new-host><svg><use href="#i-plus"/></svg>添加主机</button>
           </div>
           <div class="workspace-tabs" role="tablist" aria-label="系统设置">
@@ -390,6 +304,18 @@
             <button data-system-tab="advanced" role="tab" aria-selected="false">高级</button>
           </div>
           <div data-system-panel="hosts">
+            <section class="resource-panel system-runtime-overview">
+              <div class="resource-panel-heading">
+                <div><p class="eyebrow">控制面本机</p><h2>Runtime 状态</h2><p>集中展示本机 sing-box 进程、当前配置和 Deployment 应用状态。</p></div>
+                <button class="button secondary" data-refresh-runtime><svg><use href="#i-refresh"/></svg>刷新状态</button>
+              </div>
+              <div class="operations-summary">
+                <article><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><small>Runtime</small><strong id="system-runtime-state">检测中</strong></div></article>
+                <article><span class="resource-icon"><svg><use href="#i-code"/></svg></span><div><small>配置状态</small><strong id="system-config-state">等待发布</strong></div></article>
+                <article><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><small>目标应用</small><strong id="system-validation-state">尚无记录</strong></div></article>
+              </div>
+              <div class="runtime-facts" id="system-runtime-facts"><span>正在读取运行状态…</span></div>
+            </section>
             <section class="host-map">
               <div class="map-header"><span>控制面与节点拓扑</span><span id="host-map-status"><i></i>等待连接</span></div>
               <div class="map-stage" id="host-topology" aria-label="以 RayLink Panel 为中心的 Host 网络拓扑">
@@ -410,10 +336,58 @@
             <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><div><p class="eyebrow">TLS 资产</p><h2>证书路径由主机协议管理</h2><p>一键启用会优先使用主机域名自动签发证书；手动证书仍可在主机的“入口协议”中配置。</p><button class="text-button" data-system-tab="hosts">查看主机 <svg><use href="#i-arrow"/></svg></button></div></article>
             <article class="panel system-card"><span class="resource-icon">R</span><div><p class="eyebrow">Reality</p><h2>密钥按协议生成</h2><p>VLESS 等协议可在编辑抽屉中一键生成 Reality 密钥对。</p></div></article>
           </section>
-          <section class="system-card-grid" data-system-panel="maintenance" hidden>
-            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><p class="eyebrow">版本</p><h2 id="system-version">检测中</h2><p id="system-build">正在读取当前二进制构建。</p><p id="system-update-state">尚未检查稳定版更新。</p><div class="heading-actions"><button class="button secondary" data-check-runtime-update><svg><use href="#i-refresh"/></svg>检查更新</button><button class="button primary" id="upgrade-local-runtime" hidden><svg><use href="#i-arrow"/></svg>安全升级</button></div></div></article>
-            <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-rollback"/></svg></span><div><p class="eyebrow">数据库备份</p><h2 id="system-backup-title">尚无在线备份</h2><p id="system-backup-state">每天自动执行 SQLite 在线备份，并校验 SHA-256 与数据库完整性。</p><div class="heading-actions"><button class="button primary" data-create-backup><svg><use href="#i-rollback"/></svg>立即备份</button><button class="button secondary" data-view-target="operations">查看发布记录</button></div></div></article>
-          </section>
+          <div data-system-panel="maintenance" hidden>
+            <section class="system-card-grid">
+              <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-terminal"/></svg></span><div><p class="eyebrow">版本</p><h2 id="system-version">检测中</h2><p id="system-build">正在读取当前二进制构建。</p><p id="system-update-state">尚未检查稳定版更新。</p><div class="heading-actions"><button class="button secondary" data-check-runtime-update><svg><use href="#i-refresh"/></svg>检查更新</button><button class="button primary" id="upgrade-local-runtime" hidden><svg><use href="#i-arrow"/></svg>安全升级</button></div></div></article>
+              <article class="panel system-card"><span class="resource-icon"><svg><use href="#i-rollback"/></svg></span><div><p class="eyebrow">数据库备份</p><h2 id="system-backup-title">尚无在线备份</h2><p id="system-backup-state">每天自动执行 SQLite 在线备份，并校验 SHA-256 与数据库完整性。</p><div class="heading-actions"><button class="button primary" data-create-backup><svg><use href="#i-rollback"/></svg>立即备份</button></div></div></article>
+            </section>
+
+            <section class="resource-panel system-release-panel">
+              <div class="resource-panel-heading">
+                <div><p class="eyebrow">配置版本</p><h2>发布与回滚</h2><p>根据当前用户、主机和入口协议生成配置，校验后保存不可变快照并原子发布。</p></div>
+                <div class="heading-actions"><button class="button secondary" id="rollback-config" disabled><svg><use href="#i-rollback"/></svg>回滚上一版本</button><button class="button primary" id="publish-config"><svg><use href="#i-terminal"/></svg>校验并发布</button></div>
+              </div>
+              <section class="release-header">
+                <div><span class="release-version">尚未发布</span><span class="status-badge neutral"><i></i>当前配置</span></div>
+                <p>Deployment 会应用到本机 Runtime，并向已接入的远程 Host 下发独立配置。</p>
+              </section>
+              <ol class="deploy-trail full" id="publish-trail">
+                <li class="current"><span>1</span><strong>生成</strong><small>用户与协议</small></li>
+                <li><span>2</span><strong>校验</strong><small>语法与端口</small></li>
+                <li><span>3</span><strong>快照</strong><small>保留审计记录</small></li>
+                <li><span>4</span><strong>原子发布</strong><small>本机与节点</small></li>
+                <li><span>5</span><strong>运行确认</strong><small>状态与版本</small></li>
+              </ol>
+              <div class="deploy-layout">
+                <section class="config-editor">
+                  <div class="editor-tabs"><button class="active">config.json</button><span>只读受管摘要</span></div>
+                  <div class="editor-body">
+                    <ol class="line-numbers" aria-hidden="true"></ol>
+                    <pre><code id="managed-config-preview">{}</code></pre>
+                  </div>
+                  <div class="editor-footer"><span><i class="good-dot"></i>发布时执行 sing-box check</span><span>受管配置</span></div>
+                </section>
+                <aside class="validation-panel">
+                  <div class="panel-heading"><div><p class="eyebrow">发布信息</p><h2>当前候选配置</h2></div></div>
+                  <div class="check-list" id="validation-list">
+                    <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>配置生成</strong><small>由用户权益和 Host 协议生成</small></div></div>
+                    <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>受管凭据</strong><small>每位有效用户独立生成</small></div></div>
+                    <div class="pass"><span><svg><use href="#i-check"/></svg></span><div><strong>原子写入</strong><small>失败保留上一运行版本</small></div></div>
+                  </div>
+                  <div class="change-summary">
+                    <span><i class="add">+</i><strong>0</strong> 个入站</span>
+                    <span><i class="modify">~</i><strong>0</strong> 条路由</span>
+                    <span><i class="remove">−</i><strong>0</strong> 个删除</span>
+                  </div>
+                  <div class="target-nodes"><p>目标 Runtime</p><label><input type="checkbox" checked disabled><span id="managed-target-name">RayLink Runtime</span><small>自动应用</small></label></div>
+                </aside>
+              </div>
+              <div class="resource-panel-heading release-history-heading">
+                <div><p class="eyebrow">历史版本</p><h2>最近发布记录</h2><p>记录版本、时间、目标应用状态；回滚会基于历史快照创建新的发布。</p></div>
+              </div>
+              <div class="terminal-log system-deployment-log" id="system-deployment-log"><span>等待首次发布事件…</span></div>
+            </section>
+          </div>
           <section data-system-panel="access" hidden>
             <section class="panel access-management-panel">
               <div class="panel-heading"><div><p class="eyebrow">管理员权限</p><h2>角色与账号</h2><p>Owner 管理所有能力；Operator 管理运行与用户；Support 只管理用户；Auditor 只读。</p></div></div>
@@ -431,7 +405,7 @@
             </section>
           </section>
           <section class="resource-panel" data-system-panel="advanced" hidden>
-            <div class="resource-panel-heading"><div><p class="eyebrow">高级配置</p><h2>受管配置摘要</h2><p>这里展示 RayLink 管理的核心字段。受管字段需回到对应工作区修改。</p></div><button class="button secondary" data-view-target="operations"><svg><use href="#i-code"/></svg>打开配置工作台</button></div>
+            <div class="resource-panel-heading"><div><p class="eyebrow">高级配置</p><h2>受管配置摘要</h2><p>这里展示 RayLink 管理的核心字段。受管字段需回到对应工作区修改。</p></div><button class="button secondary" data-system-tab="maintenance"><svg><use href="#i-code"/></svg>查看发布与回滚</button></div>
             <pre class="advanced-preview"><code id="system-config-preview">{}</code></pre>
           </section>
         </section>
@@ -447,7 +421,6 @@
     <button class="active" data-view-target="dashboard"><svg><use href="#i-grid"/></svg><span>总览</span></button>
     <button data-view-target="users"><svg><use href="#i-users"/></svg><span>用户</span></button>
     <button data-view-target="system"><svg><use href="#i-server"/></svg><span>主机</span></button>
-    <button data-view-target="operations"><svg><use href="#i-terminal"/></svg><span>运维</span></button>
   </nav>
 
   <aside class="drawer" id="detail-drawer" aria-hidden="true" aria-labelledby="drawer-title" inert>

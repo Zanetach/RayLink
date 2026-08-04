@@ -1654,7 +1654,14 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .operations-summary small, .operations-summary strong { display: block; }
 .operations-summary small { color: var(--faint); font-size: 9px; }
 .operations-summary strong { margin-top: 4px; color: var(--text-soft); font-size: 13px; }
-.operations-tabs { margin-top: 0; }
+.system-runtime-overview { margin-bottom: 20px; }
+.system-release-panel { margin-top: 20px; }
+.release-history-heading {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-subtle);
+}
+.system-deployment-log { min-height: 150px; }
 .runtime-facts {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1694,6 +1701,10 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 2px 0 0; accent-colo
 .diagnostic-grid strong, .diagnostic-grid small { display: block; }
 .diagnostic-grid strong { color: var(--text-soft); font-size: 11px; }
 .diagnostic-grid small { margin-top: 3px; color: var(--faint); font-size: 9px; }
+.host-diagnostic-grid {
+  margin-top: 0;
+  margin-bottom: 20px;
+}
 
 .system-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .system-card { display: grid; min-height: 230px; grid-template-columns: 42px 1fr; align-content: start; gap: 16px; padding: 24px; }

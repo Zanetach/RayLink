@@ -8,7 +8,7 @@ The primary signature is the deployment trail: every configuration change is sho
 
 Each user owns an independent entitlement. The user workspace creates and edits identity, traffic allowance, expiry, node scope, and client capabilities in one flow.
 
-The information architecture uses five stable destinations: Overview, Users, Policies, Operations, and System. Inbound protocol instances belong to a Host and are configured from that Host's detail drawer; there is no standalone Services destination. High-frequency managed fields stay in simple forms; raw configuration is exposed as an advanced, read-only preview so the interface never implies that an unconnected control has changed the runtime.
+The information architecture uses four stable destinations: Overview, Users, Policies, and System. Runtime status stays with Hosts, while publishing, rollback, and Deployment history live under System maintenance. Inbound protocol instances belong to a Host and are configured from that Host's detail drawer; there is no standalone Services or Operations destination. High-frequency managed fields stay in simple forms; raw configuration is exposed as an advanced, read-only preview so the interface never implies that an unconnected control has changed the runtime.
 
 ## 2. Color palette and roles
 
@@ -73,13 +73,13 @@ Depth comes from luminance steps, not dark drop shadows. The canvas is level 0, 
 
 ## 8. Responsive behavior
 
-At 920px the rail becomes a compact top bar with an accessible navigation drawer. At 680px dense tables become labeled record rows, two-column forms collapse to one column, and the primary navigation becomes a four-item bottom bar. All touch targets remain at least 40px and safe-area insets are respected.
+At 920px the rail becomes a compact top bar with an accessible navigation drawer. At 680px dense tables become labeled record rows, two-column forms collapse to one column, and the primary navigation becomes a three-item bottom bar for Overview, Users, and System. All touch targets remain at least 40px and safe-area insets are respected.
 
 ## 9. Agent prompt guide
 
 Quick colors: canvas `oklch(0.125 0.008 165)`, surface 1 `oklch(0.17 0.009 165)`, surface 2 `oklch(0.20 0.01 165)`, accent `oklch(0.78 0.145 154)`, warning `oklch(0.80 0.13 82)`, danger `oklch(0.67 0.18 27)`, text `oklch(0.93 0.008 155)`.
 
-- Create an operations page on the canvas color with a 30px weight-600 title, 1.08 line-height, -0.022em tracking, text color, and an 8px-radius accent action at 40px height.
+- Keep Runtime status with Hosts and place deployment history, publishing, and rollback in the System maintenance workspace.
 - Create a dense user table on surface 1 with 48px rows, 12px uppercase labels at weight 600 and 0.04em tracking, tabular numeric columns, 1px border dividers, and 8px-radius inputs.
 - Create a right edit drawer on surface 2 at 440px desktop width and full mobile width, with 24px padding, 12px outer radius only on the exposed edge, and a sticky 64px action footer.
 - Create a deployment trail with five 40px steps connected by 1px border lines; completed steps use accent, the active step uses warning, and pending steps use muted text.

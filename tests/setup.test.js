@@ -162,6 +162,36 @@ test("address roles stay user-configurable and each Host exposes its own node ad
   assert.match(app, /每台 Host 可以使用不同的域名或公网 IP/);
 });
 
+test("admin information architecture keeps operations inside System and Host details", async () => {
+  const [html, app] = await Promise.all([
+    readFile(new URL("../web/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../web/app.js", import.meta.url), "utf8")
+  ]);
+
+  assert.doesNotMatch(html, /data-view-target="operations"/);
+  assert.doesNotMatch(html, /data-view="operations"/);
+  assert.match(
+    html,
+    /data-system-panel="maintenance"[\s\S]*?id="rollback-config"[\s\S]*?id="publish-config"/
+  );
+  assert.match(
+    html,
+    /data-system-panel="hosts"[\s\S]*?id="system-runtime-facts"/
+  );
+  assert.match(app, /主机诊断/);
+  assert.match(app, /有效用户/);
+  assert.match(app, /data-refresh-host-diagnostics/);
+  assert.match(app, /\["active", "warning"\]\.includes\(user\.state\)/);
+  assert.match(app, /user\.portalStatus !== "active"/);
+  assert.match(app, /user\.used >= user\.quota/);
+  assert.match(app, /operations: "system"/);
+  assert.match(app, /legacyOperationsRoute[\s\S]*?selectWorkspaceTab\("system", "maintenance"\)/);
+  assert.match(app, /system-release-panel \.release-header \.status-badge/);
+  assert.match(app, /activeDeployment\?\.rolloutStatus === "complete"/);
+  assert.doesNotMatch(html, /发布同步状态|目标同步|自动同步/);
+  assert.doesNotMatch(app, /节点同步中|撤权待同步|配置待同步|已保存，等待同步/);
+});
+
 test("setup-required instances without a token expose UNINITIALIZED until a token is generated", async (t) => {
   const testApp = await startSetupApp({
     setupTokenHash: "",
