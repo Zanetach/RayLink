@@ -6,7 +6,7 @@
     <a href="https://github.com/Zanetach/RayLink/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/Zanetach/RayLink?display_name=tag&style=flat-square"></a>
     <img alt="Node.js 22.5+" src="https://img.shields.io/badge/Node.js-%E2%89%A522.5-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white">
     <img alt="sing-box 1.13.x" src="https://img.shields.io/badge/sing--box-1.13.x-7BE495?style=flat-square">
-    <img alt="Linux AMD64" src="https://img.shields.io/badge/Release-Linux%20AMD64-2F3337?style=flat-square&logo=linux&logoColor=white">
+    <img alt="Linux AMD64 and ARM64" src="https://img.shields.io/badge/Release-Linux%20AMD64%20%7C%20ARM64-2F3337?style=flat-square&logo=linux&logoColor=white">
   </p>
 </div>
 
@@ -80,7 +80,7 @@ flowchart LR
 
 ## 一键安装
 
-当前发布安装包面向 **Debian/Ubuntu + systemd + AMD64（x86_64）**。在生产验收清单全部通过前，应视为候选版本。准备一台全新 VPS，并开放：
+当前发布安装包面向 **Debian/Ubuntu + systemd + AMD64（x86_64）或 ARM64（aarch64）**。在生产验收清单全部通过前，应视为候选版本。准备一台全新 VPS，并开放：
 
 - Caddy 自动 HTTPS 需要的 `80`
 - 控制台 HTTPS 端口 `443`
@@ -89,20 +89,20 @@ flowchart LR
 服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.21/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.22/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.21/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.22/install.sh | sudo bash'
 ```
 
-脚本会检测公网 IP，下载固定的 AMD64 发布包及 SHA-256，校验后解压，再执行系统安装。
+脚本会检测公网 IP 和 CPU 架构，下载对应的 AMD64 或 ARM64 发布包及 SHA-256，校验后解压，再执行系统安装。
 若需要指定公网 IP：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.21/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.22/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 一键安装会自动完成：

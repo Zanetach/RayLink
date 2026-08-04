@@ -92,9 +92,10 @@ test("setup page assets load when previewed directly from disk", async () => {
 
 test("release defaults and browser cache keys match the package version", async () => {
   const version = packageVersion;
-  const [installer, packager, deploymentGuide, adminPage, portalPage] = await Promise.all([
+  const [installer, packager, rootGuide, deploymentGuide, adminPage, portalPage] = await Promise.all([
     readFile(new URL("../deploy/install.sh", import.meta.url), "utf8"),
     readFile(new URL("../deploy/package-release.sh", import.meta.url), "utf8"),
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../deploy/README.md", import.meta.url), "utf8"),
     readFile(new URL("../web/index.html", import.meta.url), "utf8"),
     readFile(new URL("../web/portal.html", import.meta.url), "utf8")
@@ -102,6 +103,8 @@ test("release defaults and browser cache keys match the package version", async 
 
   assert.match(installer, new RegExp(`RAYLINK_VERSION:-${version.replaceAll(".", "\\.")}`));
   assert.match(packager, new RegExp(`release_version="\\$\\{1:-${version.replaceAll(".", "\\.")}\\}"`));
+  assert.match(rootGuide, new RegExp(`releases/download/v${version.replaceAll(".", "\\.")}/install\\.sh`));
+  assert.match(rootGuide, /AMD64（x86_64）或 ARM64（aarch64）/);
   assert.match(deploymentGuide, new RegExp(`releases/download/v${version.replaceAll(".", "\\.")}/install\\.sh`));
 
   for (const html of [adminPage, portalPage]) {

@@ -1,5 +1,17 @@
 # RayLink Changelog
 
+## 0.2.22 - 2026-08-04
+
+### Changed
+
+- Removed the standalone Operations workspace and moved Runtime status into
+  System Hosts, with publishing, rollback, and Deployment history under
+  System maintenance.
+- Added Host-scoped diagnostics with refreshable Runtime, protocol,
+  Deployment application, and Runtime-eligible User checks.
+- Preserved legacy Operations links by redirecting them to the new publishing
+  and rollback workspace.
+
 ## 0.2.21 - 2026-08-03
 
 ### Fixed
