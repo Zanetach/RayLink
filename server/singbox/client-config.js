@@ -6,12 +6,14 @@ export function buildUserClientConfig({
   credential,
   hosts,
   ruleSetBaseUrl = null,
-  probeUrl
+  probeUrl,
+  routePolicy
 }) {
   return buildMultiHostProtocolClientConfig({
     credential,
     hosts: hosts || [],
     ruleSetBaseUrl,
-    probeUrl
+    probeUrl,
+    routePolicy
   });
 }

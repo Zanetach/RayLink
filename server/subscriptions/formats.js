@@ -2,6 +2,7 @@ import {
   AI_DOMAIN_SUFFIXES,
   CHINA_FALLBACK_DOMAIN_SUFFIXES,
   createRoutePolicyCandidates,
+  normalizeRoutingPolicy,
   routeProbeUrlFromConfig,
   ROUTE_POLICY_GROUPS
 } from "../routing/policy.js";
@@ -78,6 +79,63 @@ function groupMembers(config, tag, fallback = []) {
   return Array.isArray(group?.outbounds) && group.outbounds.length
     ? group.outbounds
     : fallback;
+}
+
+function policyTarget(action) {
+  if (action === "direct") return "DIRECT";
+  if (action === "block") return "REJECT";
+  if (action === "ai") return ROUTE_POLICY_GROUPS.ai.name;
+  return ROUTE_POLICY_GROUPS.proxy.name;
+}
+
+function mihomoRule(rule) {
+  const kind = {
+    domain: "DOMAIN",
+    domain_suffix: "DOMAIN-SUFFIX",
+    ip: isIpv6Value(rule.value) ? "IP-CIDR6" : "IP-CIDR",
+    ip_cidr: isIpv6Value(rule.value) ? "IP-CIDR6" : "IP-CIDR"
+  }[rule.match];
+  const value = rule.match === "ip"
+    ? `${rule.value}/${isIpv6Value(rule.value) ? 128 : 32}`
+    : rule.value;
+  return `${kind},${value},${policyTarget(rule.action)}`;
+}
+
+function isIpv6Value(value) {
+  return String(value).includes(":");
+}
+
+function dnsPolicyValue(dns) {
+  if (dns === "domestic") return ["https://223.5.5.5/dns-query"];
+  if (dns === "system") return ["system"];
+  return [`https://1.1.1.1/dns-query#${ROUTE_POLICY_GROUPS.proxy.name}`];
+}
+
+function mihomoDnsPolicyRules(policy) {
+  return Object.fromEntries(policy.rules.flatMap((rule) => {
+    if (!rule.enabled || !["domain", "domain_suffix"].includes(rule.match)) return [];
+    const key = rule.match === "domain"
+      ? `domain:${rule.value}`
+      : `domain:*.${rule.value}`;
+    return [[key, dnsPolicyValue(rule.dns)]];
+  }));
+}
+
+function egernCustomRule(rule) {
+  const match = rule.match === "domain_suffix"
+    ? "domain_suffix"
+    : rule.match === "domain"
+      ? "domain"
+      : "ip_cidr";
+  const value = rule.match === "ip"
+    ? `${rule.value}/${isIpv6Value(rule.value) ? 128 : 32}`
+    : rule.value;
+  return {
+    [match]: {
+      match: value,
+      policy: policyTarget(rule.action)
+    }
+  };
 }
 
 function applyMihomoTls(proxy, outbound) {
@@ -196,7 +254,8 @@ function mihomoProxy(outbound) {
   }, outbound), outbound);
 }
 
-function buildMihomoConfig(singBoxConfig) {
+function buildMihomoConfig(singBoxConfig, inputPolicy) {
+  const routePolicy = normalizeRoutingPolicy(inputPolicy);
   const proxies = nodeOutbounds(singBoxConfig)
     .filter((outbound) => mihomoCompatibleTypes.has(outbound.type))
     .map(mihomoProxy);
@@ -300,11 +359,14 @@ function buildMihomoConfig(singBoxConfig) {
       "fake-ip-range": "198.18.0.1/16",
       "respect-rules": true,
       "default-nameserver": ["223.5.5.5"],
-      nameserver: [
-        `https://1.1.1.1/dns-query#${ROUTE_POLICY_GROUPS.proxy.name}`
-      ],
+      nameserver: routePolicy.mode === "direct"
+        ? ["https://223.5.5.5/dns-query"]
+        : [`https://1.1.1.1/dns-query#${ROUTE_POLICY_GROUPS.proxy.name}`],
       "nameserver-policy": {
-        "geosite:cn": ["https://223.5.5.5/dns-query"]
+        ...mihomoDnsPolicyRules(routePolicy),
+        ...(routePolicy.mode === "smart"
+          ? { "geosite:cn": ["https://223.5.5.5/dns-query"] }
+          : {})
       },
       "proxy-server-nameserver": [
         "https://223.5.5.5/dns-query"
@@ -313,14 +375,21 @@ function buildMihomoConfig(singBoxConfig) {
     proxies,
     "proxy-groups": proxyGroups,
     rules: [
-      ...AI_DOMAIN_SUFFIXES.map(
-        (domain) => `DOMAIN-SUFFIX,${domain},${ROUTE_POLICY_GROUPS.ai.name}`
-      ),
-      `DOMAIN-SUFFIX,google.com,${ROUTE_POLICY_GROUPS.smart.name}`,
-      `DOMAIN-SUFFIX,youtube.com,${ROUTE_POLICY_GROUPS.smart.name}`,
-      "GEOSITE,CN,DIRECT",
-      "GEOIP,CN,DIRECT,no-resolve",
-      `MATCH,${ROUTE_POLICY_GROUPS.proxy.name}`
+      ...routePolicy.rules.filter((rule) => rule.enabled).map(mihomoRule),
+      ...(routePolicy.mode === "direct"
+        ? ["MATCH,DIRECT"]
+        : routePolicy.mode === "global-proxy"
+          ? [`MATCH,${ROUTE_POLICY_GROUPS.proxy.name}`]
+          : [
+              ...AI_DOMAIN_SUFFIXES.map(
+                (domain) => `DOMAIN-SUFFIX,${domain},${ROUTE_POLICY_GROUPS.ai.name}`
+              ),
+              `DOMAIN-SUFFIX,google.com,${ROUTE_POLICY_GROUPS.smart.name}`,
+              `DOMAIN-SUFFIX,youtube.com,${ROUTE_POLICY_GROUPS.smart.name}`,
+              "GEOSITE,CN,DIRECT",
+              "GEOIP,CN,DIRECT",
+              `MATCH,${ROUTE_POLICY_GROUPS.proxy.name}`
+            ])
     ]
   };
 }
@@ -459,7 +528,8 @@ function egernProxyNames(proxies) {
   return proxies.map((entry) => Object.values(entry)[0].name);
 }
 
-function buildEgernProfile(singBoxConfig) {
+function buildEgernProfile(singBoxConfig, inputPolicy) {
+  const routePolicy = normalizeRoutingPolicy(inputPolicy);
   const proxies = egernProxies(singBoxConfig);
   if (!proxies.length) throw subscriptionError("NO_COMPATIBLE_NODES", "当前没有 Egern 可用节点");
   const names = egernProxyNames(proxies);
@@ -487,13 +557,31 @@ function buildEgernProfile(singBoxConfig) {
         ]
       },
       forward: [
-        ...CHINA_FALLBACK_DOMAIN_SUFFIXES.map((domain) => ({
-          domain_suffix: {
-            match: domain === ".cn" ? "cn" : domain,
-            value: "domestic"
+        ...routePolicy.rules.flatMap((rule) => {
+          if (!rule.enabled || !["domain", "domain_suffix"].includes(rule.match)) return [];
+          return [{
+            [rule.match]: {
+              match: rule.value,
+              value: rule.dns === "domestic" || rule.dns === "system"
+                ? "domestic"
+                : "overseas"
+            }
+          }];
+        }),
+        ...(routePolicy.mode === "smart"
+          ? CHINA_FALLBACK_DOMAIN_SUFFIXES.map((domain) => ({
+              domain_suffix: {
+                match: domain === ".cn" ? "cn" : domain,
+                value: "domestic"
+              }
+            }))
+          : []),
+        {
+          domain_wildcard: {
+            match: "*",
+            value: routePolicy.mode === "direct" ? "domestic" : "overseas"
           }
-        })),
-        { domain_wildcard: { match: "*", value: "overseas" } }
+        }
       ],
       proxy_nameservers: ["https://223.5.5.5/dns-query"],
       skip_tls_verify: false
@@ -576,17 +664,24 @@ function buildEgernProfile(singBoxConfig) {
       }
     ],
     rules: [
-      ...AI_DOMAIN_SUFFIXES.map((domain) => ({
-        domain_suffix: { match: domain, policy: ROUTE_POLICY_GROUPS.ai.name }
-      })),
-      { domain_suffix: { match: "cn", policy: "DIRECT" } },
-      { geoip: { match: "CN", policy: "DIRECT", no_resolve: true } },
-      { default: { policy: "网络环境" } }
+      ...routePolicy.rules.filter((rule) => rule.enabled).map(egernCustomRule),
+      ...(routePolicy.mode === "direct"
+        ? [{ default: { policy: "DIRECT" } }]
+        : routePolicy.mode === "global-proxy"
+          ? [{ default: { policy: "网络环境" } }]
+          : [
+              ...AI_DOMAIN_SUFFIXES.map((domain) => ({
+                domain_suffix: { match: domain, policy: ROUTE_POLICY_GROUPS.ai.name }
+              })),
+              { domain_suffix: { match: "cn", policy: "DIRECT" } },
+              { geoip: { match: "CN", policy: "DIRECT" } },
+              { default: { policy: "网络环境" } }
+            ])
     ]
   };
 }
 
-export function buildSubscriptionArtifact({ format, singBoxConfig }) {
+export function buildSubscriptionArtifact({ format, singBoxConfig, routePolicy }) {
   if (format === "singbox") {
     return {
       contentType: "application/json; charset=utf-8",
@@ -598,7 +693,7 @@ export function buildSubscriptionArtifact({ format, singBoxConfig }) {
     return {
       contentType: "application/yaml; charset=utf-8",
       filename: "raylink-mihomo.yaml",
-      body: stringifyYaml(buildMihomoConfig(singBoxConfig))
+      body: stringifyYaml(buildMihomoConfig(singBoxConfig, routePolicy))
     };
   }
   if (format === "egern") {
@@ -614,7 +709,7 @@ export function buildSubscriptionArtifact({ format, singBoxConfig }) {
     return {
       contentType: "application/yaml; charset=utf-8",
       filename: "raylink-egern-profile.yaml",
-      body: stringifyYaml(buildEgernProfile(singBoxConfig))
+      body: stringifyYaml(buildEgernProfile(singBoxConfig, routePolicy))
     };
   }
   throw subscriptionError("SUBSCRIPTION_FORMAT_UNSUPPORTED", "订阅格式不受支持", 400);

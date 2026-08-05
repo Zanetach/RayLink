@@ -213,6 +213,51 @@ test("client configuration includes every enabled user-facing protocol", () => {
   assert.equal(config.experimental.cache_file.enabled, true);
 });
 
+test("sing-box client configuration compiles custom routing and DNS before managed rules", () => {
+  const config = buildProtocolClientConfig({
+    profiles: defaultProtocolConfigs(),
+    credential: {
+      email: eligibleUsers[0].email,
+      runtimeUuid: eligibleUsers[0].runtimeUuid,
+      runtimePassword: eligibleUsers[0].runtimePassword,
+      serverPassword: "c2VydmVyLWtleS0xNg=="
+    },
+    server: "node.example.com",
+    routePolicy: {
+      mode: "smart",
+      rules: [
+        {
+          match: "domain_suffix",
+          value: "work.example",
+          action: "direct",
+          dns: "domestic",
+          priority: 10
+        },
+        {
+          match: "ip_cidr",
+          value: "192.0.2.0/24",
+          action: "block",
+          priority: 20
+        }
+      ]
+    }
+  });
+
+  const customDirectIndex = config.route.rules.findIndex(
+    (rule) => rule.domain_suffix?.includes("work.example")
+  );
+  const aiIndex = config.route.rules.findIndex((rule) => rule.outbound === "raylink-ai");
+  assert.ok(customDirectIndex > 1);
+  assert.ok(customDirectIndex < aiIndex);
+  assert.equal(config.route.rules[customDirectIndex].outbound, "direct");
+  assert.ok(config.route.rules.some(
+    (rule) => rule.ip_cidr?.includes("192.0.2.0/24") && rule.action === "reject"
+  ));
+  assert.ok(config.dns.rules.some(
+    (rule) => rule.domain_suffix?.includes("work.example") && rule.server === "dns-local"
+  ));
+});
+
 test("all sing-box route policy probes inherit the configured RayLink probe URL", () => {
   const probeUrl = "https://probe.example.com/generate_204";
   const config = buildProtocolClientConfig({

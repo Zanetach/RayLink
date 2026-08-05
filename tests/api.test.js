@@ -270,6 +270,56 @@ test("admin can configure the ACME notification email before one-click TLS activ
   assert.equal(activated.profile.tls.acmeEmail, "ops@example.com");
 });
 
+test("admin can persist the unified routing policy and bootstrap returns it", async (t) => {
+  const testApp = await startTestApp();
+  t.after(() => testApp.close());
+  const cookie = await login(testApp.baseUrl);
+
+  const saved = await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/settings/routing",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        mode: "smart",
+        rules: [{
+          match: "domain_suffix",
+          value: "work.example",
+          action: "direct",
+          dns: "domestic",
+          priority: 10,
+          enabled: true
+        }]
+      })
+    }
+  );
+  assert.equal(saved.status, 200);
+  const policy = await saved.json();
+  assert.equal(policy.rules[0].value, "work.example");
+
+  const bootstrap = await (await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/bootstrap"
+  )).json();
+  assert.deepEqual(bootstrap.routingPolicy, policy);
+
+  const diagnostic = await api(
+    testApp.baseUrl,
+    cookie,
+    "/api/routing/diagnose",
+    {
+      method: "POST",
+      body: JSON.stringify({ domain: "app.work.example" })
+    }
+  );
+  assert.equal(diagnostic.status, 200);
+  const result = await diagnostic.json();
+  assert.equal(result.source, "custom");
+  assert.equal(result.outbound, "direct");
+});
+
 test("remote one-click activation automatically retries the next port reported free by its Node", async (t) => {
   const installer = {
     async status() {
@@ -1419,7 +1469,7 @@ test("active user logs in and downloads a credential-scoped sing-box client conf
       "upload=0",
       `download=${Math.round(75.4 * (1024 ** 3))}`,
       `total=${320 * (1024 ** 3)}`,
-      `expire=${Math.floor(new Date("2026-09-01T23:59:59.999Z").getTime() / 1000)}`
+      `expire=${Math.floor(new Date("2030-09-01T23:59:59.999Z").getTime() / 1000)}`
     ].join("; ")
   );
   const config = await configResponse.json();
@@ -1580,7 +1630,7 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
       "upload=0",
       `download=${Math.round(75.4 * (1024 ** 3))}`,
       `total=${320 * (1024 ** 3)}`,
-      `expire=${Math.floor(new Date("2026-09-01T23:59:59.999Z").getTime() / 1000)}`
+      `expire=${Math.floor(new Date("2030-09-01T23:59:59.999Z").getTime() / 1000)}`
     ].join("; ")
   );
   assert.match(await mihomo.text(), /^mixed-port: 7890/m);

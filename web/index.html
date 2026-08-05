@@ -259,35 +259,61 @@
 
         <section class="view" id="view-policies" data-view="policies">
           <div class="page-heading">
-            <div><p class="eyebrow">流量决策</p><h1>策略</h1><p>集中查看当前运行配置中的路由、DNS 和规则集，默认策略保持简单。</p></div>
+            <div><p class="eyebrow">统一流量决策</p><h1>智能路由</h1><p>一份策略同时生成 Mihomo、Egern 和 sing-box 配置，国内直连、境外代理并保留手工例外。</p></div>
             <button class="button secondary" data-advanced-json><svg><use href="#i-code"/></svg>配置 JSON</button>
           </div>
           <div class="workspace-tabs" role="tablist" aria-label="策略类型">
-            <button class="active" data-policy-tab="route" role="tab" aria-selected="true">路由</button>
-            <button data-policy-tab="dns" role="tab" aria-selected="false">DNS</button>
-            <button data-policy-tab="rulesets" role="tab" aria-selected="false">规则集</button>
+            <button class="active" data-policy-tab="route" role="tab" aria-selected="true">路由模式</button>
+            <button data-policy-tab="rules" role="tab" aria-selected="false">自定义规则</button>
+            <button data-policy-tab="diagnose" role="tab" aria-selected="false">域名诊断</button>
           </div>
           <section class="policy-layout" data-policy-panel="route">
             <div class="panel policy-list">
-              <div class="panel-heading"><div><p class="eyebrow">规则顺序</p><h2>路由规则</h2></div><span class="status-badge good"><i></i>默认安全</span></div>
-              <div class="rule-row final"><span class="rule-order">∞</span><div><strong>最终出口</strong><small>未配置自定义规则</small></div><span class="tag">direct</span></div>
+              <div class="panel-heading"><div><p class="eyebrow">简单模式</p><h2>选择路由行为</h2></div><span class="status-badge good"><i></i>三端一致</span></div>
+              <form id="routing-mode-form" class="routing-mode-grid">
+                <label class="routing-mode-card"><input type="radio" name="mode" value="smart"><span><strong>智能分流</strong><small>内网和国内直连；AI 与境外流量走代理；未知域名解析真实 IP 后判断。</small></span></label>
+                <label class="routing-mode-card"><input type="radio" name="mode" value="global-proxy"><span><strong>全局代理</strong><small>除内网和显式直连规则外，全部流量使用 RayLink 代理。</small></span></label>
+                <label class="routing-mode-card"><input type="radio" name="mode" value="direct"><span><strong>全部直连</strong><small>除拦截规则外不使用代理，适合临时排障。</small></span></label>
+                <button class="button primary" type="submit">保存路由模式</button>
+              </form>
             </div>
             <aside class="panel policy-inspector">
-              <p class="eyebrow">简单模式</p><h2>默认直连策略</h2>
-              <p>当前服务端只负责接收用户连接并直连目标地址。无需额外规则即可运行。</p>
-              <div class="setting-row"><div><strong>最终出口</strong><small>写入 route.final</small></div><span class="status-badge good"><i></i>direct</span></div>
-              <div class="setting-row"><div><strong>自定义规则</strong><small>当前配置未启用</small></div><span class="status-badge neutral"><i></i>0 条</span></div>
+              <p class="eyebrow">当前生效</p><h2 id="routing-mode-title">智能分流</h2>
+              <p id="routing-mode-description">正在读取统一路由策略。</p>
+              <div class="setting-row"><div><strong>DNS 分流</strong><small>直连域名使用国内 DNS，代理域名使用远程加密 DNS</small></div><span class="status-badge good"><i></i>自动</span></div>
+              <div class="setting-row"><div><strong>未知域名</strong><small>先解析真实 A / AAAA，再由 GeoIP 判断</small></div><span class="status-badge good"><i></i>安全判定</span></div>
+              <div class="setting-row"><div><strong>自定义规则</strong><small>按优先级先于内置规则执行</small></div><span class="status-badge neutral"><i></i><span id="routing-rule-count">0</span> 条</span></div>
             </aside>
           </section>
-          <section class="policy-layout" data-policy-panel="dns" hidden>
+          <section class="policy-layout" data-policy-panel="rules" hidden>
             <div class="panel policy-list">
-              <div class="panel-heading"><div><p class="eyebrow">解析链路</p><h2>DNS 服务器</h2></div><span class="status-badge neutral"><i></i>系统默认</span></div>
-              <div class="rule-row"><span class="resource-icon">OS</span><div><strong>local</strong><small>使用 Runtime 系统解析器</small></div><span class="tag">默认</span></div>
+              <div class="panel-heading"><div><p class="eyebrow">优先级由小到大</p><h2>自定义规则</h2></div><span class="status-badge neutral"><i></i><span id="routing-rules-badge">0</span> 条</span></div>
+              <div id="routing-rule-list" class="routing-rule-list"></div>
             </div>
-            <aside class="panel policy-inspector"><p class="eyebrow">当前行为</p><h2>遵循系统 DNS</h2><p>RayLink 未覆盖主机 DNS。本版本尚未开放分流解析、FakeIP 或 DoH 的界面写入。</p></aside>
+            <aside class="panel policy-inspector">
+              <p class="eyebrow">新增例外</p><h2>添加路由规则</h2>
+              <p>仅填写匹配值，不要输入 URL 路径。域名后缀会同时匹配主域名和所有子域名。</p>
+              <form id="routing-rule-form" class="field-grid routing-rule-form">
+                <label class="field"><span>匹配类型</span><select name="match"><option value="domain_suffix">域名后缀</option><option value="domain">完整域名</option><option value="ip_cidr">IP 网段</option><option value="ip">单个 IP</option></select></label>
+                <label class="field"><span>动作</span><select name="action"><option value="direct">直连</option><option value="proxy">代理</option><option value="ai">AI 专用代理</option><option value="block">拦截</option></select></label>
+                <label class="field full"><span>匹配值</span><input name="value" required placeholder="例如 corp.example 或 192.0.2.0/24"></label>
+                <label class="field"><span>DNS</span><select name="dns"><option value="auto">跟随动作</option><option value="domestic">国内 DNS</option><option value="remote">远程加密 DNS</option><option value="system">系统 DNS</option></select></label>
+                <label class="field"><span>优先级</span><input name="priority" type="number" min="0" max="100000" value="100"></label>
+                <label class="field full"><span>备注</span><input name="note" maxlength="160" placeholder="可选，说明这条规则的用途"></label>
+                <button class="button primary full" type="submit">添加并保存</button>
+              </form>
+            </aside>
           </section>
-          <section class="resource-panel" data-policy-panel="rulesets" hidden>
-            <div class="empty-resource"><span class="resource-icon"><svg><use href="#i-shield"/></svg></span><h2>没有外部规则集</h2><p>当前默认策略不依赖远程规则，发布时不会额外下载文件。</p><button class="button secondary" data-advanced-json>查看高级 JSON</button></div>
+          <section class="policy-layout" data-policy-panel="diagnose" hidden>
+            <div class="panel policy-list">
+              <div class="panel-heading"><div><p class="eyebrow">服务端诊断</p><h2>域名路由解释</h2></div><span class="status-badge neutral"><i></i>不修改策略</span></div>
+              <form id="routing-diagnose-form" class="routing-diagnose-form">
+                <label class="field"><span>要检查的域名</span><input name="domain" required placeholder="例如 app.example.com"></label>
+                <button class="button primary" type="submit">开始诊断</button>
+              </form>
+              <div id="routing-diagnose-result" class="routing-diagnose-result"><span>输入域名后，将展示 DNS 结果、命中规则、出口和判断原因。</span></div>
+            </div>
+            <aside class="panel policy-inspector"><p class="eyebrow">诊断边界</p><h2>服务器判断，不冒充用户网络</h2><p>这里验证策略和服务端 DNS/规则集。客户端真实 Wi‑Fi 或蜂窝网络的耗时、抖动与丢包，仍由 Mihomo、Egern 或 sing-box 在本机测量。</p><div class="setting-row"><div><strong>规则顺序</strong><small>自定义 → AI → 国内域名 → 国内 IP → 代理</small></div><span class="status-badge good"><i></i>可解释</span></div></aside>
           </section>
         </section>
 

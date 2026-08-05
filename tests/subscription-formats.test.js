@@ -90,6 +90,7 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   assert.match(artifact.body, /DOMAIN-SUFFIX,openai\.com,AI 网站代理/);
   assert.match(artifact.body, /DOMAIN-SUFFIX,chatgpt\.com,AI 网站代理/);
   assert.match(artifact.body, /GEOIP,CN,DIRECT/);
+  assert.doesNotMatch(artifact.body, /GEOIP,CN,DIRECT,no-resolve/);
   assert.match(artifact.body, /MATCH,RayLink 代理/);
   assert.match(artifact.body, /nameserver-policy:/);
   assert.match(
@@ -100,6 +101,79 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
     artifact.body,
     /nameserver:[\s\S]*?- "https:\/\/1\.1\.1\.1\/dns-query#RayLink 代理"/
   );
+});
+
+test("all full subscription formats compile the same custom routing policy", () => {
+  const routePolicy = {
+    mode: "smart",
+    rules: [
+      {
+        id: "direct-work",
+        match: "domain_suffix",
+        value: "work.example",
+        action: "direct",
+        dns: "domestic",
+        priority: 10,
+        enabled: true
+      },
+      {
+        id: "block-tracker",
+        match: "domain",
+        value: "tracker.example",
+        action: "block",
+        dns: "auto",
+        priority: 20,
+        enabled: true
+      }
+    ]
+  };
+  const mihomo = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig,
+    routePolicy
+  }).body;
+  const egern = buildSubscriptionArtifact({
+    format: "egern-profile",
+    singBoxConfig,
+    routePolicy
+  }).body;
+
+  assert.match(mihomo, /DOMAIN-SUFFIX,work\.example,DIRECT/);
+  assert.match(mihomo, /DOMAIN,tracker\.example,REJECT/);
+  assert.match(mihomo, /"domain:\*\.work\.example":[\s\S]*223\.5\.5\.5/);
+  assert.match(egern, /match: "work\.example"[\s\S]*policy: "DIRECT"/);
+  assert.match(egern, /match: "tracker\.example"[\s\S]*policy: "REJECT"/);
+  assert.doesNotMatch(egern, /no_resolve: true/);
+});
+
+test("global and direct modes keep DNS behavior aligned across client formats", () => {
+  const globalMihomo = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig,
+    routePolicy: { mode: "global-proxy" }
+  }).body;
+  const globalEgern = buildSubscriptionArtifact({
+    format: "egern-profile",
+    singBoxConfig,
+    routePolicy: { mode: "global-proxy" }
+  }).body;
+  const directMihomo = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig,
+    routePolicy: { mode: "direct" }
+  }).body;
+  const directEgern = buildSubscriptionArtifact({
+    format: "egern-profile",
+    singBoxConfig,
+    routePolicy: { mode: "direct" }
+  }).body;
+
+  assert.doesNotMatch(globalMihomo, /"geosite:cn":/);
+  assert.match(globalMihomo, /MATCH,RayLink 代理/);
+  assert.match(globalEgern, /match: "\*"[\s\S]*?value: "overseas"/);
+  assert.match(directMihomo, /nameserver:[\s\S]*?223\.5\.5\.5/);
+  assert.doesNotMatch(directMihomo, /1\.1\.1\.1\/dns-query#RayLink 代理/);
+  assert.match(directEgern, /match: "\*"[\s\S]*?value: "domestic"/);
 });
 
 test("Egern node subscription uses its native proxy schema and excludes unsupported protocols", () => {

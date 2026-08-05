@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
+
+const execFile = promisify(execFileCallback);
 
 const managedRuleSets = [
   {
@@ -93,6 +97,32 @@ export class ManagedRuleSetCache {
       return await readFile(join(this.cacheDir, filename));
     } catch {
       this.cachedFiles.delete(filename);
+      return null;
+    }
+  }
+
+  async matches(filename, value, binaryPath = "sing-box") {
+    if (!managedRuleSets.some((source) => source.filename === filename)) return false;
+    if (!this.cachedFiles.has(filename)) return null;
+    try {
+      const { stdout, stderr } = await execFile(
+        binaryPath,
+        [
+          "rule-set",
+          "match",
+          "-f",
+          "binary",
+          join(this.cacheDir, filename),
+          String(value)
+        ],
+        {
+          timeout: 5_000,
+          maxBuffer: 256 * 1024,
+          windowsHide: true
+        }
+      );
+      return `${stdout}${stderr}`.trim().startsWith("match ");
+    } catch {
       return null;
     }
   }

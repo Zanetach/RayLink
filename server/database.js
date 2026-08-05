@@ -16,6 +16,10 @@ import {
 } from "./security.js";
 import { normalizeCertificateEmail } from "./certificate-settings.js";
 import {
+  DEFAULT_ROUTING_POLICY,
+  normalizeRoutingPolicy
+} from "./routing/policy.js";
+import {
   assertProtocolSet,
   defaultProtocolConfigs,
   normalizeProtocolConfig,
@@ -64,12 +68,12 @@ const MAX_USAGE_SAMPLE_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const ADMIN_ROLES = new Set(["owner", "operator", "support", "auditor"]);
 
 const seedUsers = [
-  ["林知夏", "LZ", "lin.zhixia@meridian-log.cn", "active", "active", 74.3, "standard", "2026-10-18"],
-  ["岡本和也", "OK", "k.okamoto@hokkaido-ceramics.jp", "active", "warning", 104.8, "standard", "2026-08-04"],
-  ["Priya Mehta", "PM", "priya@vantage-bioworks.in", "active", "active", 75.4, "high-speed", "2026-09-01"],
-  ["Nia Okafor", "NO", "nia@lagos-fieldworks.ng", "active", "active", 46.8, "standard", "2026-11-23"],
-  ["Lars Eriksson", "LE", "lars@nordhavn-data.se", "invited", "disabled", 18.2, "temporary", "2026-07-31"],
-  ["陈望舒", "CW", "wangshu@lingnan-studio.cn", "active", "warning", 103.7, "standard", "2026-08-12"]
+  ["林知夏", "LZ", "lin.zhixia@meridian-log.cn", "active", "active", 74.3, "standard", "2030-10-18"],
+  ["岡本和也", "OK", "k.okamoto@hokkaido-ceramics.jp", "active", "warning", 104.8, "standard", "2030-08-04"],
+  ["Priya Mehta", "PM", "priya@vantage-bioworks.in", "active", "active", 75.4, "high-speed", "2030-09-01"],
+  ["Nia Okafor", "NO", "nia@lagos-fieldworks.ng", "active", "active", 46.8, "standard", "2030-11-23"],
+  ["Lars Eriksson", "LE", "lars@nordhavn-data.se", "invited", "disabled", 18.2, "temporary", "2030-07-31"],
+  ["陈望舒", "CW", "wangshu@lingnan-studio.cn", "active", "warning", 103.7, "standard", "2030-08-12"]
 ];
 
 function nowIso() {
@@ -728,6 +732,10 @@ export class RayLinkStore {
       INSERT OR IGNORE INTO settings (key, value, updated_at)
       VALUES ('runtime_protocols', ?, ?)
     `).run(JSON.stringify(defaultProtocolConfigs(initialListenPort)), createdAt);
+    this.db.prepare(`
+      INSERT OR IGNORE INTO settings (key, value, updated_at)
+      VALUES ('routing_policy', ?, ?)
+    `).run(JSON.stringify(DEFAULT_ROUTING_POLICY), createdAt);
     const legacyProtocols = this.db.prepare(
       "SELECT value FROM settings WHERE key = 'runtime_protocols'"
     ).get();
@@ -1017,6 +1025,23 @@ export class RayLinkStore {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(email, timestamp);
     return this.certificateSettings();
+  }
+
+  routingPolicy() {
+    const row = this.db.prepare(
+      "SELECT value FROM settings WHERE key = 'routing_policy'"
+    ).get();
+    return normalizeRoutingPolicy(parseJson(row?.value, DEFAULT_ROUTING_POLICY));
+  }
+
+  updateRoutingPolicy(input = {}) {
+    const policy = normalizeRoutingPolicy(input);
+    this.db.prepare(`
+      INSERT INTO settings (key, value, updated_at)
+      VALUES ('routing_policy', ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(JSON.stringify(policy), nowIso());
+    return policy;
   }
 
   verifySetupToken(token) {

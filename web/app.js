@@ -41,6 +41,7 @@ const controlPlane = {
   telemetry: { windowHours: 24, networkSeries: [] },
   access: null,
   certificate: { mode: null, email: "" },
+  routingPolicy: { mode: "smart", unknownDomain: "resolve-geoip", rules: [] },
   portalProfile: null
 };
 
@@ -219,6 +220,11 @@ function applyBootstrap(data) {
   controlPlane.telemetry = data.telemetry || { windowHours: 24, networkSeries: [] };
   controlPlane.access = data.access || null;
   controlPlane.certificate = data.certificate || { mode: null, email: "" };
+  controlPlane.routingPolicy = data.routingPolicy || {
+    mode: "smart",
+    unknownDomain: "resolve-geoip",
+    rules: []
+  };
   const rollbackButton = document.querySelector("#rollback-config");
   const rollbackTarget = data.deployments.find((deployment) => deployment.status === "superseded");
   if (rollbackButton) {
@@ -243,6 +249,7 @@ function applyBootstrap(data) {
   });
   renderUsers();
   renderRuntime();
+  renderRoutingPolicy();
 }
 
 async function loadBootstrap() {
@@ -276,6 +283,156 @@ function renderRuntime() {
   renderDashboard();
   renderSystemRuntime();
   renderSystem();
+}
+
+const routingModeCopy = {
+  smart: {
+    title: "智能分流",
+    description: "内网和国内流量直接访问，AI 与境外流量走代理；未知域名解析真实 IP 后再判断。"
+  },
+  "global-proxy": {
+    title: "全局代理",
+    description: "除内网和显式直连规则外，全部流量交给 RayLink 智能代理组。"
+  },
+  direct: {
+    title: "全部直连",
+    description: "不使用代理，仅保留拦截规则，适合临时排障或停用代理。"
+  }
+};
+
+const routingActionLabels = {
+  direct: "直连",
+  proxy: "代理",
+  ai: "AI 代理",
+  block: "拦截"
+};
+
+const routingMatchLabels = {
+  domain: "完整域名",
+  domain_suffix: "域名后缀",
+  ip: "单个 IP",
+  ip_cidr: "IP 网段"
+};
+
+function renderRoutingPolicy() {
+  const policy = controlPlane.routingPolicy;
+  const mode = routingModeCopy[policy.mode] || routingModeCopy.smart;
+  document.querySelectorAll('#routing-mode-form input[name="mode"]').forEach((input) => {
+    input.checked = input.value === policy.mode;
+  });
+  setText("#routing-mode-title", mode.title);
+  setText("#routing-mode-description", mode.description);
+  setText("#routing-rule-count", policy.rules.length);
+  setText("#routing-rules-badge", policy.rules.length);
+  const list = document.querySelector("#routing-rule-list");
+  if (!list) return;
+  if (!policy.rules.length) {
+    list.innerHTML = '<div class="routing-rules-empty">没有自定义规则。智能模式仍会使用内置 AI、国内域名和国内 IP 规则。</div>';
+    return;
+  }
+  list.innerHTML = policy.rules.map((rule, index) => `
+    <div class="rule-row">
+      <span class="rule-order">${index + 1}</span>
+      <div>
+        <strong>${escapeHtml(routingMatchLabels[rule.match] || rule.match)} · ${escapeHtml(rule.value)}</strong>
+        <small>优先级 ${rule.priority} · DNS ${escapeHtml(rule.dns)}${rule.note ? ` · ${escapeHtml(rule.note)}` : ""}</small>
+      </div>
+      <div class="routing-rule-actions">
+        <span class="tag">${escapeHtml(routingActionLabels[rule.action] || rule.action)}</span>
+        <button class="icon-button" type="button" data-routing-rule-delete="${escapeHtml(rule.id)}" aria-label="删除规则">${icon("x")}</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function persistRoutingPolicy(nextPolicy, successMessage) {
+  const saved = await api("/api/settings/routing", {
+    method: "PATCH",
+    body: JSON.stringify(nextPolicy)
+  });
+  controlPlane.routingPolicy = saved;
+  renderRoutingPolicy();
+  showToast("策略已生效", successMessage);
+  return saved;
+}
+
+async function saveRoutingMode(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const mode = new FormData(form).get("mode");
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await persistRoutingPolicy(
+      { ...controlPlane.routingPolicy, mode },
+      "新订阅和客户端配置会立即使用统一路由模式。"
+    );
+  } catch (error) {
+    showToast("保存失败", error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function addRoutingRule(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const fields = new FormData(form);
+  const button = form.querySelector('button[type="submit"]');
+  const rule = {
+    id: `rule-${Date.now().toString(36)}`,
+    match: fields.get("match"),
+    value: String(fields.get("value") || "").trim(),
+    action: fields.get("action"),
+    dns: fields.get("dns"),
+    priority: Number(fields.get("priority")),
+    enabled: true,
+    note: String(fields.get("note") || "").trim()
+  };
+  button.disabled = true;
+  try {
+    await persistRoutingPolicy(
+      {
+        ...controlPlane.routingPolicy,
+        rules: [...controlPlane.routingPolicy.rules, rule]
+      },
+      "自定义规则已写入所有完整订阅格式。"
+    );
+    form.reset();
+    form.elements.priority.value = "100";
+  } catch (error) {
+    showToast("规则未保存", error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function diagnoseRouting(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const result = document.querySelector("#routing-diagnose-result");
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  result.innerHTML = "<span>正在解析域名并匹配规则集…</span>";
+  try {
+    const diagnostic = await api("/api/routing/diagnose", {
+      method: "POST",
+      body: JSON.stringify({ domain: form.elements.domain.value.trim() })
+    });
+    const addressText = diagnostic.addresses.length
+      ? diagnostic.addresses.map((entry) => entry.address).join("、")
+      : "无需解析";
+    result.innerHTML = `
+      <div><small>最终出口</small><strong>${escapeHtml(diagnostic.outbound)}</strong></div>
+      <div><small>命中来源</small><strong>${escapeHtml(diagnostic.source)}</strong></div>
+      <div class="full"><small>解析地址</small><strong>${escapeHtml(addressText)}</strong></div>
+      <p>${escapeHtml(diagnostic.explanation)} · ${escapeHtml(new Date(diagnostic.checkedAt).toLocaleString("zh-CN"))}</p>
+    `;
+  } catch (error) {
+    result.innerHTML = `<span class="danger-text">${escapeHtml(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderDashboard() {
@@ -2637,6 +2794,26 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const deleteRoutingRule = event.target.closest("[data-routing-rule-delete]");
+  if (deleteRoutingRule) {
+    deleteRoutingRule.disabled = true;
+    try {
+      await persistRoutingPolicy(
+        {
+          ...controlPlane.routingPolicy,
+          rules: controlPlane.routingPolicy.rules.filter(
+            (rule) => rule.id !== deleteRoutingRule.dataset.routingRuleDelete
+          )
+        },
+        "规则已删除，订阅配置会立即使用新的规则顺序。"
+      );
+    } catch (error) {
+      deleteRoutingRule.disabled = false;
+      showToast("删除失败", error.message);
+    }
+    return;
+  }
+
   const systemTab = event.target.closest("[data-system-tab]");
   if (systemTab) {
     selectWorkspaceTab("system", systemTab.dataset.systemTab);
@@ -2794,6 +2971,9 @@ elements.drawerScrim.addEventListener("click", closeDrawer);
 elements.drawerSave.addEventListener("click", saveDrawer);
 document.querySelector("#certificate-settings-form").addEventListener("submit", saveCertificateSettings);
 document.querySelector("#admin-create-form")?.addEventListener("submit", createAdministrator);
+document.querySelector("#routing-mode-form")?.addEventListener("submit", saveRoutingMode);
+document.querySelector("#routing-rule-form")?.addEventListener("submit", addRoutingRule);
+document.querySelector("#routing-diagnose-form")?.addEventListener("submit", diagnoseRouting);
 
 document.querySelector("#publish-config").addEventListener("click", publishConfig);
 document.querySelector("#rollback-config").addEventListener("click", rollbackConfig);

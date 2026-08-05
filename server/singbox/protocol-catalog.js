@@ -4,6 +4,7 @@ import {
   AI_DOMAIN_SUFFIXES,
   CHINA_FALLBACK_DOMAIN_SUFFIXES,
   DEFAULT_ROUTE_PROBE_URL,
+  normalizeRoutingPolicy,
   ROUTE_POLICY_GROUPS
 } from "../routing/policy.js";
 
@@ -355,14 +356,19 @@ export function buildProtocolClientConfig({
   credential,
   server,
   ruleSetBaseUrl = null,
-  probeUrl = DEFAULT_ROUTE_PROBE_URL
+  probeUrl = DEFAULT_ROUTE_PROBE_URL,
+  routePolicy
 }) {
   const managed = profiles.filter((profile) => {
     const catalog = protocolByType.get(profile.type);
     return profile.enabled && catalog?.clientCapable && catalog.exposure === "public";
   });
   const protocolOutbounds = managed.map((profile) => buildClientOutbound(profile, credential, server));
-  return clientConfigForOutbounds(protocolOutbounds, { ruleSetBaseUrl, probeUrl });
+  return clientConfigForOutbounds(protocolOutbounds, {
+    ruleSetBaseUrl,
+    probeUrl,
+    routePolicy
+  });
 }
 
 const udpClientProtocolTypes = new Set(["hysteria", "hysteria2", "tuic"]);
@@ -385,7 +391,8 @@ export function buildMultiHostProtocolClientConfig({
   credential,
   hosts,
   ruleSetBaseUrl = null,
-  probeUrl = DEFAULT_ROUTE_PROBE_URL
+  probeUrl = DEFAULT_ROUTE_PROBE_URL,
+  routePolicy
 }) {
   const smartExcludedTags = new Set();
   const protocolOutbounds = hosts.flatMap((host) => {
@@ -415,7 +422,8 @@ export function buildMultiHostProtocolClientConfig({
   return clientConfigForOutbounds(protocolOutbounds, {
     ruleSetBaseUrl,
     smartExcludedTags,
-    probeUrl
+    probeUrl,
+    routePolicy
   });
 }
 
@@ -436,9 +444,11 @@ function clientConfigForOutbounds(
   {
     ruleSetBaseUrl = null,
     smartExcludedTags = new Set(),
-    probeUrl = DEFAULT_ROUTE_PROBE_URL
+    probeUrl = DEFAULT_ROUTE_PROBE_URL,
+    routePolicy: inputRoutePolicy
   } = {}
 ) {
+  const routePolicy = normalizeRoutingPolicy(inputRoutePolicy);
   if (!protocolOutbounds.length) throw protocolError("NO_CLIENT_PROTOCOL", "当前没有可下发的用户协议", 409);
   const tags = protocolOutbounds.map((outbound) => outbound.tag);
   const tcpTags = protocolOutbounds
@@ -497,6 +507,60 @@ function clientConfigForOutbounds(
           }]
         }
       ];
+  const customDnsRules = routePolicy.rules.flatMap((rule) => {
+    if (!rule.enabled || !["domain", "domain_suffix"].includes(rule.match)) return [];
+    const field = rule.match === "domain" ? "domain" : "domain_suffix";
+    return [{
+      [field]: [rule.value],
+      action: "route",
+      server: rule.dns === "domestic" || rule.dns === "system"
+        ? "dns-local"
+        : "dns-remote"
+    }];
+  });
+  const customRouteRules = routePolicy.rules.flatMap((rule) => {
+    if (!rule.enabled) return [];
+    const field = {
+      domain: "domain",
+      domain_suffix: "domain_suffix",
+      ip: "ip_cidr",
+      ip_cidr: "ip_cidr"
+    }[rule.match];
+    const value = rule.match === "ip"
+      ? `${rule.value}/${String(rule.value).includes(":") ? 128 : 32}`
+      : rule.value;
+    if (rule.action === "block") {
+      return [{ [field]: [value], action: "reject" }];
+    }
+    return [{
+      [field]: [value],
+      action: "route",
+      outbound: rule.action === "direct"
+        ? ROUTE_POLICY_GROUPS.direct.tag
+        : rule.action === "ai"
+          ? ROUTE_POLICY_GROUPS.ai.tag
+          : ROUTE_POLICY_GROUPS.proxy.tag
+    }];
+  });
+  const managedRouteRules = routePolicy.mode === "smart"
+    ? [
+        {
+          domain_suffix: [...AI_DOMAIN_SUFFIXES],
+          action: "route",
+          outbound: ROUTE_POLICY_GROUPS.ai.tag
+        },
+        {
+          rule_set: "geosite-geolocation-cn",
+          action: "route",
+          outbound: ROUTE_POLICY_GROUPS.direct.tag
+        },
+        {
+          rule_set: "geoip-cn",
+          action: "route",
+          outbound: ROUTE_POLICY_GROUPS.direct.tag
+        }
+      ]
+    : [];
   return {
     log: { level: "info", timestamp: true },
     dns: {
@@ -513,13 +577,14 @@ function clientConfigForOutbounds(
         }
       ],
       rules: [
-        {
+        ...customDnsRules,
+        ...(routePolicy.mode === "smart" ? [{
           rule_set: "geosite-geolocation-cn",
           action: "route",
           server: "dns-local"
-        }
+        }] : [])
       ],
-      final: "dns-remote",
+      final: routePolicy.mode === "direct" ? "dns-local" : "dns-remote",
       strategy: "prefer_ipv4"
     },
     inbounds: [
@@ -578,24 +643,13 @@ function clientConfigForOutbounds(
           action: "route",
           outbound: ROUTE_POLICY_GROUPS.direct.tag
         },
-        {
-          domain_suffix: [...AI_DOMAIN_SUFFIXES],
-          action: "route",
-          outbound: ROUTE_POLICY_GROUPS.ai.tag
-        },
-        {
-          rule_set: "geosite-geolocation-cn",
-          action: "route",
-          outbound: ROUTE_POLICY_GROUPS.direct.tag
-        },
-        {
-          rule_set: "geoip-cn",
-          action: "route",
-          outbound: ROUTE_POLICY_GROUPS.direct.tag
-        }
+        ...customRouteRules,
+        ...managedRouteRules
       ],
       rule_set: ruleSets,
-      final: ROUTE_POLICY_GROUPS.proxy.tag,
+      final: routePolicy.mode === "direct"
+        ? ROUTE_POLICY_GROUPS.direct.tag
+        : ROUTE_POLICY_GROUPS.proxy.tag,
       default_domain_resolver: "dns-local",
       auto_detect_interface: true
     },

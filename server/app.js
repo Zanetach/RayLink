@@ -11,6 +11,7 @@ import { evaluateOperationalAlerts } from "./alerts.js";
 import { AlertWebhookDispatcher } from "./alert-dispatcher.js";
 import { normalizeCertificateEmail } from "./certificate-settings.js";
 import { RayLinkStore } from "./database.js";
+import { diagnoseRoutingDomain } from "./routing/diagnostics.js";
 import { validateNodeEncryptionPublicKey } from "./node-secrets.js";
 import {
   ProtocolActivationManager,
@@ -78,6 +79,8 @@ function adminPermissionForRequest(method, pathname) {
     || pathname.startsWith("/api/hosts/")
     || pathname === "/api/deployments"
     || pathname.startsWith("/api/deployments/")
+    || pathname === "/api/settings/routing"
+    || pathname === "/api/routing/diagnose"
   ) {
     return "runtime.manage";
   }
@@ -935,6 +938,7 @@ export async function createRayLinkApp(options) {
       credential,
       hosts: eligibleHosts,
       probeUrl: options.protocolProbeUrl,
+      routePolicy: store.routingPolicy(),
       ruleSetBaseUrl: ruleSetCache.available()
         ? new URL("/rule-sets/", currentSubscriptionOrigin()).toString()
         : null
@@ -1251,7 +1255,8 @@ export async function createRayLinkApp(options) {
           response,
           buildSubscriptionArtifact({
             format,
-            singBoxConfig: await buildClientConfigForUser(subscriptionUser.id)
+            singBoxConfig: await buildClientConfigForUser(subscriptionUser.id),
+            routePolicy: store.routingPolicy()
           }),
           subscriptionUser
         );
@@ -1365,7 +1370,8 @@ export async function createRayLinkApp(options) {
             response,
             buildSubscriptionArtifact({
               format,
-              singBoxConfig: await buildClientConfigForUser(sessionUser.id)
+              singBoxConfig: await buildClientConfigForUser(sessionUser.id),
+              routePolicy: store.routingPolicy()
             }),
             profile.user
           );
@@ -1666,6 +1672,7 @@ export async function createRayLinkApp(options) {
               : [],
             access: store.setupStatus().access,
             certificate: store.certificateSettings(),
+            routingPolicy: store.routingPolicy(),
             telemetry: store.telemetryOverview(),
             runtime,
             runtimePreview: runtimeManager.preview(),
@@ -1686,6 +1693,42 @@ export async function createRayLinkApp(options) {
               activationPolicy: protocolActivationPolicy(protocol.type)
             }))
           });
+          return;
+        }
+
+        if (
+          request.method === "PATCH"
+          && url.pathname === "/api/settings/routing"
+        ) {
+          sendJson(
+            response,
+            200,
+            store.updateRoutingPolicy(await readJson(request))
+          );
+          return;
+        }
+
+        if (
+          request.method === "POST"
+          && url.pathname === "/api/routing/diagnose"
+        ) {
+          const body = await readJson(request);
+          sendJson(
+            response,
+            200,
+            await diagnoseRoutingDomain({
+              domain: body.domain,
+              policy: store.routingPolicy(),
+              matchRuleSet: ruleSetCache.available()
+                && typeof ruleSetCache.matches === "function"
+                ? (filename, value) => ruleSetCache.matches(
+                    filename,
+                    value,
+                    options.singBoxBinary || "sing-box"
+                  )
+                : null
+            })
+          );
           return;
         }
 
