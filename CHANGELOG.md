@@ -1,5 +1,26 @@
 # RayLink Changelog
 
+## 0.2.24 - 2026-08-06
+
+### Added
+
+- Added one persisted routing policy with smart split routing, global proxy,
+  and direct modes shared by Mihomo, Egern, and sing-box subscriptions.
+- Added validated custom domain, domain-suffix, IP, and CIDR rules with
+  direct, proxy, AI proxy, block, and DNS behaviors.
+- Added an explainable domain-routing diagnostic that reports DNS answers,
+  matched policy source, and the selected outbound without pretending to
+  measure the user's local network.
+
+### Fixed
+
+- Mihomo now resolves real addresses before its China GeoIP rule, preventing
+  Fake-IP answers from forcing China-hosted domains through the proxy.
+- DNS behavior now follows the selected routing mode consistently across all
+  full client configuration formats.
+- Demo data uses durable future expirations so release verification does not
+  change as calendar dates pass.
+
 ## 0.2.23 - 2026-08-04
 
 ### Changed
