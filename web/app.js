@@ -114,6 +114,11 @@ function escapeHtml(value) {
   })[character]);
 }
 
+function setText(selector, value) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = value == null ? "" : String(value);
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -463,10 +468,6 @@ function renderDashboard() {
         || (currentVersion === update.latestVersion && !meteringReady);
     })
     : [];
-  const setText = (selector, value) => {
-    const element = document.querySelector(selector);
-    if (element) element.textContent = value;
-  };
   setText("#dashboard-runtime-heading", hosts.length
     ? `${readyHosts.length}/${hosts.length} 个 Runtime 可用`
     : "尚未添加 Runtime");
@@ -677,10 +678,6 @@ function renderNetworkTrend() {
   uploadLine.setAttribute("d", uploadPath);
   downloadArea.setAttribute("d", `${downloadPath} L760 230 L0 230 Z`);
 
-  const setText = (selector, value) => {
-    const element = document.querySelector(selector);
-    if (element) element.textContent = value;
-  };
   const currentDownloadBps = Number(plottedSeries.at(-1)?.downloadBps || 0);
   const currentUploadBps = Number(plottedSeries.at(-1)?.uploadBps || 0);
   setText("#dashboard-download-total", formatBitRate(currentDownloadBps));
@@ -964,10 +961,6 @@ function renderSystemRuntime() {
   const activeDeployment = controlPlane.deployments.find((deployment) => deployment.status === "active");
   const latestDeployment = controlPlane.deployments[0];
   const ready = ["running", "staged"].includes(runtime.state);
-  const setText = (selector, value) => {
-    const element = document.querySelector(selector);
-    if (element) element.textContent = value;
-  };
   setText("#system-runtime-state", ready ? "运行正常" : "等待发布");
   setText("#system-config-state", activeDeployment?.version || "尚未发布");
   setText(
