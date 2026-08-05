@@ -1,5 +1,14 @@
 # RayLink Changelog
 
+## 0.2.25 - 2026-08-06
+
+### Fixed
+
+- Restored a shared frontend text-update helper so the post-login bootstrap can
+  render the routing workspace instead of surfacing `setText is not defined`.
+- Added a regression test that executes the real routing-policy renderer used
+  immediately after administrator login.
+
 ## 0.2.24 - 2026-08-06
 
 ### Added
