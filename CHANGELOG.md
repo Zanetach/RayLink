@@ -1,5 +1,21 @@
 # RayLink Changelog
 
+## 0.2.26 - 2026-08-07
+
+### Changed
+
+- Unified Mihomo and Egern adaptive fallback with server health admission:
+  healthy UDP is preferred on suitable networks and automatically falls back
+  to TCP, while unhealthy UDP remains available only in explicit UDP/manual
+  groups.
+- Protocol groups are now emitted only when they contain matching protocols,
+  preventing UDP-only subscriptions from exposing a misleading TCP group.
+- Local domains, loopback, private networks, link-local ranges, and CGNAT are
+  resolved locally and bypass the proxy consistently in Mihomo, Egern, and
+  sing-box full configurations.
+- Egern smart selection now applies the same TCP stability preference to
+  Shadowsocks as the other TCP protocols.
+
 ## 0.2.25 - 2026-08-06
 
 ### Fixed

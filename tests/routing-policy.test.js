@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createRoutePolicyCandidates,
   DEFAULT_ROUTING_POLICY,
   normalizeRoutingPolicy,
   routingDecisionForDomain
@@ -95,6 +96,15 @@ test("smart routing explains explicit, AI, China fallback and unknown decisions"
   assert.equal(routingDecisionForDomain(policy, "chatgpt.com").action, "ai");
   assert.equal(routingDecisionForDomain(policy, "service.cn").action, "direct");
   assert.deepEqual(
+    routingDecisionForDomain(policy, "printer.office.local"),
+    {
+      action: "direct",
+      source: "local",
+      ruleId: null,
+      dns: "system"
+    }
+  );
+  assert.deepEqual(
     routingDecisionForDomain(policy, "unknown.example"),
     {
       action: "resolve",
@@ -103,6 +113,35 @@ test("smart routing explains explicit, AI, China fallback and unknown decisions"
       dns: "domestic"
     }
   );
+});
+
+test("adaptive fallback only prefers UDP when server health admitted a UDP node", () => {
+  const unhealthyUdp = createRoutePolicyCandidates({
+    names: ["tcp-a", "udp-a"],
+    smart: ["tcp-a"],
+    tcp: ["tcp-a"],
+    udp: ["udp-a"]
+  });
+  assert.deepEqual(unhealthyUdp.fallback, ["TCP 稳定", "RayLink 智能"]);
+  assert.deepEqual(unhealthyUdp.manual, ["tcp-a", "udp-a"]);
+
+  const healthyUdp = createRoutePolicyCandidates({
+    names: ["tcp-a", "udp-a"],
+    smart: ["tcp-a", "udp-a"],
+    tcp: ["tcp-a"],
+    udp: ["udp-a"]
+  });
+  assert.deepEqual(healthyUdp.fallback, ["UDP 高速", "TCP 稳定"]);
+  assert.deepEqual(healthyUdp.adaptiveUdp, ["udp-a"]);
+
+  const udpOnly = createRoutePolicyCandidates({
+    names: ["udp-a"],
+    smart: ["udp-a"],
+    udp: ["udp-a"]
+  });
+  assert.deepEqual(udpOnly.tcp, []);
+  assert.deepEqual(udpOnly.fallback, ["UDP 高速", "RayLink 智能"]);
+  assert.ok(!udpOnly.policyChoices.includes("TCP 稳定"));
 });
 
 test("default policy is immutable smart routing with no custom rules", () => {

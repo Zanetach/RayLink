@@ -2,7 +2,9 @@ import {
   AI_DOMAIN_SUFFIXES,
   CHINA_FALLBACK_DOMAIN_SUFFIXES,
   createRoutePolicyCandidates,
+  LOCAL_DOMAIN_SUFFIXES,
   normalizeRoutingPolicy,
+  PRIVATE_NETWORK_CIDRS,
   routeProbeUrlFromConfig,
   ROUTE_POLICY_GROUPS
 } from "../routing/policy.js";
@@ -112,13 +114,30 @@ function dnsPolicyValue(dns) {
 }
 
 function mihomoDnsPolicyRules(policy) {
-  return Object.fromEntries(policy.rules.flatMap((rule) => {
-    if (!rule.enabled || !["domain", "domain_suffix"].includes(rule.match)) return [];
-    const key = rule.match === "domain"
-      ? `domain:${rule.value}`
-      : `domain:*.${rule.value}`;
-    return [[key, dnsPolicyValue(rule.dns)]];
-  }));
+  return {
+    "domain:localhost": ["system"],
+    ...Object.fromEntries(LOCAL_DOMAIN_SUFFIXES.map((suffix) => [
+      `domain:*.${suffix}`,
+      ["system"]
+    ])),
+    ...Object.fromEntries(policy.rules.flatMap((rule) => {
+      if (!rule.enabled || !["domain", "domain_suffix"].includes(rule.match)) return [];
+      const key = rule.match === "domain"
+        ? `domain:${rule.value}`
+        : `domain:*.${rule.value}`;
+      return [[key, dnsPolicyValue(rule.dns)]];
+    }))
+  };
+}
+
+function mihomoLocalBypassRules() {
+  return [
+    "DOMAIN,localhost,DIRECT",
+    ...LOCAL_DOMAIN_SUFFIXES.map((suffix) => `DOMAIN-SUFFIX,${suffix},DIRECT`),
+    ...PRIVATE_NETWORK_CIDRS.map((cidr) => (
+      `${isIpv6Value(cidr) ? "IP-CIDR6" : "IP-CIDR"},${cidr},DIRECT`
+    ))
+  ];
 }
 
 function egernCustomRule(rule) {
@@ -136,6 +155,18 @@ function egernCustomRule(rule) {
       policy: policyTarget(rule.action)
     }
   };
+}
+
+function egernLocalBypassRules() {
+  return [
+    { domain: { match: "localhost", policy: "DIRECT" } },
+    ...LOCAL_DOMAIN_SUFFIXES.map((suffix) => ({
+      domain_suffix: { match: suffix, policy: "DIRECT" }
+    })),
+    ...PRIVATE_NETWORK_CIDRS.map((cidr) => ({
+      ip_cidr: { match: cidr, policy: "DIRECT" }
+    }))
+  ];
 }
 
 function applyMihomoTls(proxy, outbound) {
@@ -271,7 +302,7 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
     automatic,
     tcp,
     udp,
-    stable: stableCandidates,
+    fallback: fallbackGroups,
     manual: manualCandidates,
     policyChoices
   } = candidates;
@@ -299,10 +330,10 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
       "max-failed-times": 3,
       "expected-status": 204
     },
-    {
+    ...(tcp.length ? [{
       name: ROUTE_POLICY_GROUPS.tcp.name,
       type: "url-test",
-      proxies: tcp.length ? tcp : automatic,
+      proxies: tcp,
       url: probeUrl,
       interval: 180,
       tolerance: 50,
@@ -310,7 +341,7 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
       timeout: MIHOMO_TCP_HEALTH_TIMEOUT_MS,
       "max-failed-times": 3,
       "expected-status": 204
-    },
+    }] : []),
     ...(udp.length ? [{
       name: ROUTE_POLICY_GROUPS.udp.name,
       type: "url-test",
@@ -326,11 +357,11 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
     {
       name: ROUTE_POLICY_GROUPS.fallback.name,
       type: "fallback",
-      proxies: stableCandidates,
+      proxies: fallbackGroups,
       url: probeUrl,
       interval: 180,
       lazy: false,
-      timeout: MIHOMO_TCP_HEALTH_TIMEOUT_MS,
+      timeout: MIHOMO_SMART_HEALTH_TIMEOUT_MS,
       "max-failed-times": 3,
       "expected-status": 204
     },
@@ -375,6 +406,7 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
     proxies,
     "proxy-groups": proxyGroups,
     rules: [
+      ...mihomoLocalBypassRules(),
       ...routePolicy.rules.filter((rule) => rule.enabled).map(mihomoRule),
       ...(routePolicy.mode === "direct"
         ? ["MATCH,DIRECT"]
@@ -542,14 +574,21 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
   const smartNames = candidates.automatic;
   const tcp = candidates.tcp;
   const udp = candidates.udp;
+  const fallbackGroups = candidates.fallback;
   const probeUrl = routeProbeUrlFromConfig(singBoxConfig);
   return {
     ipv6: false,
     close_connections_on_policy_change: true,
     hijack_dns: ["*"],
+    bypass_tunnel_proxy: [
+      "localhost",
+      ...LOCAL_DOMAIN_SUFFIXES.map((suffix) => `*.${suffix}`),
+      ...PRIVATE_NETWORK_CIDRS
+    ],
     dns: {
       bootstrap: ["system", "223.5.5.5"],
       upstreams: {
+        local: ["system"],
         domestic: ["https://223.5.5.5/dns-query"],
         overseas: [
           "https://1.1.1.1/dns-query",
@@ -557,6 +596,18 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
         ]
       },
       forward: [
+        {
+          domain: {
+            match: "localhost",
+            value: "local"
+          }
+        },
+        ...LOCAL_DOMAIN_SUFFIXES.map((suffix) => ({
+          domain_suffix: {
+            match: suffix,
+            value: "local"
+          }
+        })),
         ...routePolicy.rules.flatMap((rule) => {
           if (!rule.enabled || !["domain", "domain_suffix"].includes(rule.match)) return [];
           return [{
@@ -593,21 +644,21 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
           name: ROUTE_POLICY_GROUPS.smart.name,
           policies: smartNames,
           priorities: {
-            "(?i)VLESS|TROJAN|ANYTLS|VMESS": 0.85,
+            "(?i)SHADOWSOCKS|VLESS|TROJAN|ANYTLS|VMESS": 0.85,
             "(?i)HYSTERIA2|TUIC": 1
           },
           latency_test_url: probeUrl
         }
       },
-      {
+      ...(tcp.length ? [{
         auto_test: {
           name: ROUTE_POLICY_GROUPS.tcp.name,
-          policies: tcp.length ? tcp : smartNames,
+          policies: tcp,
           interval: 300,
           tolerance: 100,
           timeout: 5
         }
-      },
+      }] : []),
       ...(udp.length ? [{
         auto_test: {
           name: ROUTE_POLICY_GROUPS.udp.name,
@@ -620,9 +671,7 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
       {
         fallback: {
           name: ROUTE_POLICY_GROUPS.fallback.name,
-          policies: udp.length
-            ? ["UDP 高速", "TCP 稳定"]
-            : ["TCP 稳定", "RayLink 智能"],
+          policies: fallbackGroups,
           interval: 300,
           timeout: 5
         }
@@ -631,7 +680,14 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
         conditional: {
           name: "网络环境",
           rules: [
-            { cellular: { match: "*", policy: "TCP 稳定" } },
+            {
+              cellular: {
+                match: "*",
+                policy: tcp.length
+                  ? ROUTE_POLICY_GROUPS.tcp.name
+                  : ROUTE_POLICY_GROUPS.smart.name
+              }
+            },
             { ssid: { match: "*", policy: "故障回退" } }
           ],
           default_policy: "RayLink 智能"
@@ -644,7 +700,7 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
             "网络环境",
             ROUTE_POLICY_GROUPS.fallback.name,
             ROUTE_POLICY_GROUPS.smart.name,
-            ROUTE_POLICY_GROUPS.tcp.name,
+            ...(tcp.length ? [ROUTE_POLICY_GROUPS.tcp.name] : []),
             ...(udp.length ? [ROUTE_POLICY_GROUPS.udp.name] : [])
           ]
         }
@@ -655,7 +711,7 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
           policies: [
             "网络环境",
             ROUTE_POLICY_GROUPS.smart.name,
-            ROUTE_POLICY_GROUPS.tcp.name,
+            ...(tcp.length ? [ROUTE_POLICY_GROUPS.tcp.name] : []),
             ...(udp.length ? [ROUTE_POLICY_GROUPS.udp.name] : []),
             ROUTE_POLICY_GROUPS.fallback.name,
             ...names
@@ -664,6 +720,7 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
       }
     ],
     rules: [
+      ...egernLocalBypassRules(),
       ...routePolicy.rules.filter((rule) => rule.enabled).map(egernCustomRule),
       ...(routePolicy.mode === "direct"
         ? [{ default: { policy: "DIRECT" } }]

@@ -76,7 +76,11 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   assert.match(artifact.body, /expected-status: 204/);
   assert.match(
     artifact.body,
-    /name: "RayLink 智能"[\s\S]*?timeout: 8000[\s\S]*?name: "TCP 稳定"[\s\S]*?timeout: 5000[\s\S]*?name: "UDP 高速"[\s\S]*?timeout: 12000[\s\S]*?name: "故障回退"[\s\S]*?timeout: 5000/
+    /name: "RayLink 智能"[\s\S]*?timeout: 8000[\s\S]*?name: "TCP 稳定"[\s\S]*?timeout: 5000[\s\S]*?name: "UDP 高速"[\s\S]*?timeout: 12000[\s\S]*?name: "故障回退"[\s\S]*?timeout: 8000/
+  );
+  assert.match(
+    artifact.body,
+    /name: "故障回退"[\s\S]*?proxies:[\s\S]*?- "TCP 稳定"[\s\S]*?- "RayLink 智能"/
   );
   assert.match(
     artifact.body,
@@ -92,6 +96,9 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   assert.match(artifact.body, /GEOIP,CN,DIRECT/);
   assert.doesNotMatch(artifact.body, /GEOIP,CN,DIRECT,no-resolve/);
   assert.match(artifact.body, /MATCH,RayLink 代理/);
+  assert.match(artifact.body, /DOMAIN-SUFFIX,local,DIRECT/);
+  assert.match(artifact.body, /IP-CIDR,192\.168\.0\.0\/16,DIRECT/);
+  assert.match(artifact.body, /IP-CIDR6,fc00::\/7,DIRECT/);
   assert.match(artifact.body, /nameserver-policy:/);
   assert.match(
     artifact.body,
@@ -217,12 +224,12 @@ test("Egern profile adds smart TCP UDP manual policies, routing and encrypted DN
   assert.match(artifact.body, /^policy_groups:/m);
   assert.match(artifact.body, /- smart:/);
   assert.match(artifact.body, /name: "RayLink 智能"/);
-  assert.match(artifact.body, /"\\(\\?i\\)VLESS\\|TROJAN\\|ANYTLS\\|VMESS": 0\.85/);
+  assert.match(artifact.body, /"\\(\\?i\\)SHADOWSOCKS\\|VLESS\\|TROJAN\\|ANYTLS\\|VMESS": 0\.85/);
   assert.match(artifact.body, /name: "TCP 稳定"/);
   assert.match(artifact.body, /name: "UDP 高速"/);
   assert.match(
     artifact.body,
-    /- fallback:[\s\S]*?name: "故障回退"[\s\S]*?policies:[\s\S]*?- "UDP 高速"[\s\S]*?- "TCP 稳定"/
+    /- fallback:[\s\S]*?name: "故障回退"[\s\S]*?policies:[\s\S]*?- "TCP 稳定"[\s\S]*?- "RayLink 智能"/
   );
   assert.match(artifact.body, /- conditional:/);
   assert.match(artifact.body, /name: "网络环境"/);
@@ -249,6 +256,76 @@ test("Egern profile adds smart TCP UDP manual policies, routing and encrypted DN
   assert.match(artifact.body, /default:[\s\S]*?policy: "网络环境"/);
   assert.match(artifact.body, /^dns:/m);
   assert.ok(artifact.body.includes("https://1.1.1.1/dns-query"));
+  assert.match(artifact.body, /bypass_tunnel_proxy:[\s\S]*?- "\*\.local"/);
+  assert.match(artifact.body, /match: "192\.168\.0\.0\/16"[\s\S]*?policy: "DIRECT"/);
+});
+
+test("healthy UDP is the first adaptive fallback group in Mihomo and Egern", () => {
+  const healthyConfig = {
+    ...singBoxConfig,
+    outbounds: singBoxConfig.outbounds.map((outbound) => (
+      outbound.tag === "raylink-smart"
+        ? {
+            ...outbound,
+            outbounds: ["raylink-tokyo-vless", "raylink-tokyo-hysteria2"]
+          }
+        : outbound
+    ))
+  };
+  const mihomo = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig: healthyConfig
+  }).body;
+  const egern = buildSubscriptionArtifact({
+    format: "egern-profile",
+    singBoxConfig: healthyConfig
+  }).body;
+
+  assert.match(
+    mihomo,
+    /name: "故障回退"[\s\S]*?proxies:[\s\S]*?- "UDP 高速"[\s\S]*?- "TCP 稳定"/
+  );
+  assert.match(
+    egern,
+    /name: "故障回退"[\s\S]*?policies:[\s\S]*?- "UDP 高速"[\s\S]*?- "TCP 稳定"/
+  );
+});
+
+test("UDP-only subscriptions never emit a dangling TCP policy group", () => {
+  const udpOnlyConfig = {
+    outbounds: [
+      singBoxConfig.outbounds.find((outbound) => outbound.tag === "raylink-tokyo-hysteria2"),
+      {
+        type: "urltest",
+        tag: "raylink-smart",
+        outbounds: ["raylink-tokyo-hysteria2"]
+      },
+      {
+        type: "urltest",
+        tag: "raylink-udp",
+        outbounds: ["raylink-tokyo-hysteria2"]
+      }
+    ]
+  };
+  const mihomo = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig: udpOnlyConfig
+  }).body;
+  const egern = buildSubscriptionArtifact({
+    format: "egern-profile",
+    singBoxConfig: udpOnlyConfig
+  }).body;
+
+  assert.doesNotMatch(mihomo, /name: "TCP 稳定"/);
+  assert.doesNotMatch(egern, /name: "TCP 稳定"/);
+  assert.match(
+    mihomo,
+    /name: "故障回退"[\s\S]*?proxies:[\s\S]*?- "UDP 高速"[\s\S]*?- "RayLink 智能"/
+  );
+  assert.match(
+    egern,
+    /cellular:[\s\S]*?policy: "RayLink 智能"/
+  );
 });
 
 test("Mihomo and Egern inherit the probe URL from the unified sing-box route policy", () => {

@@ -4,6 +4,7 @@ import {
   AI_DOMAIN_SUFFIXES,
   CHINA_FALLBACK_DOMAIN_SUFFIXES,
   DEFAULT_ROUTE_PROBE_URL,
+  LOCAL_DOMAIN_SUFFIXES,
   normalizeRoutingPolicy,
   ROUTE_POLICY_GROUPS
 } from "../routing/policy.js";
@@ -577,6 +578,12 @@ function clientConfigForOutbounds(
         }
       ],
       rules: [
+        {
+          domain: ["localhost"],
+          domain_suffix: [...LOCAL_DOMAIN_SUFFIXES],
+          action: "route",
+          server: "dns-local"
+        },
         ...customDnsRules,
         ...(routePolicy.mode === "smart" ? [{
           rule_set: "geosite-geolocation-cn",
@@ -640,6 +647,12 @@ function clientConfigForOutbounds(
         },
         {
           ip_is_private: true,
+          action: "route",
+          outbound: ROUTE_POLICY_GROUPS.direct.tag
+        },
+        {
+          domain: ["localhost"],
+          domain_suffix: [...LOCAL_DOMAIN_SUFFIXES],
           action: "route",
           outbound: ROUTE_POLICY_GROUPS.direct.tag
         },

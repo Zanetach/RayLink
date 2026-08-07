@@ -50,6 +50,24 @@ export const CHINA_FALLBACK_DOMAIN_SUFFIXES = Object.freeze([
   "zhihu.com"
 ]);
 
+export const LOCAL_DOMAIN_SUFFIXES = Object.freeze([
+  "local",
+  "lan",
+  "home.arpa"
+]);
+
+export const PRIVATE_NETWORK_CIDRS = Object.freeze([
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "::1/128",
+  "fc00::/7",
+  "fe80::/10"
+]);
+
 const ROUTING_MODES = new Set(["smart", "global-proxy", "direct"]);
 const ROUTING_MATCH_TYPES = new Set(["domain", "domain_suffix", "ip", "ip_cidr"]);
 const ROUTING_ACTIONS = new Set(["direct", "proxy", "ai", "block"]);
@@ -190,6 +208,9 @@ function matchesSuffix(domain, suffix) {
 export function routingDecisionForDomain(inputPolicy, inputDomain) {
   const policy = normalizeRoutingPolicy(inputPolicy);
   const domain = normalizeDomain(inputDomain);
+  if (LOCAL_DOMAIN_SUFFIXES.some((suffix) => matchesSuffix(domain, suffix))) {
+    return { action: "direct", source: "local", ruleId: null, dns: "system" };
+  }
   if (policy.mode === "direct") {
     return { action: "direct", source: "mode", ruleId: null, dns: "domestic" };
   }
@@ -234,21 +255,26 @@ export function createRoutePolicyCandidates({
   const tcpCandidates = uniqueExisting(tcp, all);
   const udpCandidates = uniqueExisting(udp, all);
   const effectiveAutomatic = automatic.length ? automatic : all;
-  const stable = [...new Set([
-    ...(tcpCandidates.length ? tcpCandidates : effectiveAutomatic),
-    ...udpCandidates
-  ])];
+  const adaptiveUdp = udpCandidates.filter((name) => effectiveAutomatic.includes(name));
+  const fallback = adaptiveUdp.length && tcpCandidates.length
+    ? [ROUTE_POLICY_GROUPS.udp.name, ROUTE_POLICY_GROUPS.tcp.name]
+    : adaptiveUdp.length
+      ? [ROUTE_POLICY_GROUPS.udp.name, ROUTE_POLICY_GROUPS.smart.name]
+      : tcpCandidates.length
+        ? [ROUTE_POLICY_GROUPS.tcp.name, ROUTE_POLICY_GROUPS.smart.name]
+        : [ROUTE_POLICY_GROUPS.smart.name];
   return {
     all,
     automatic: effectiveAutomatic,
-    tcp: tcpCandidates.length ? tcpCandidates : effectiveAutomatic,
+    tcp: tcpCandidates,
     udp: udpCandidates,
-    stable,
-    manual: [...new Set([...stable, ...all])],
+    adaptiveUdp,
+    fallback,
+    manual: all,
     policyChoices: [
       ROUTE_POLICY_GROUPS.fallback.name,
       ROUTE_POLICY_GROUPS.smart.name,
-      ROUTE_POLICY_GROUPS.tcp.name,
+      ...(tcpCandidates.length ? [ROUTE_POLICY_GROUPS.tcp.name] : []),
       ...(udpCandidates.length ? [ROUTE_POLICY_GROUPS.udp.name] : []),
       ROUTE_POLICY_GROUPS.manual.name
     ]
