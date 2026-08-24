@@ -18,9 +18,11 @@ data_root="${RAYLINK_DATA_ROOT:-/var/lib/raylink}"
 backup_root="${RAYLINK_BACKUP_ROOT:-/var/backups/raylink}"
 node_root="${RAYLINK_NODE_ROOT:-/opt/raylink-nodejs}"
 service_unit="${RAYLINK_SERVICE_UNIT:-/etc/systemd/system/raylink.service}"
+environment_file_input="${RAYLINK_ENV_FILE:-/etc/raylink/raylink.env}"
 source_root="${RAYLINK_SOURCE_DIR:-}"
 health_port="${RAYLINK_PORT:-}"
 force_upgrade="${RAYLINK_FORCE_UPGRADE:-false}"
+public_ip="${RAYLINK_PUBLIC_IP:-}"
 runtime_version=1.13.14
 cronet_install_path="${RAYLINK_CRONET_PATH:-/usr/local/bin/libcronet.so}"
 cronet_candidate_path="${cronet_install_path}.candidate.$$"
@@ -32,7 +34,33 @@ esac
 
 [ -f "$install_root/package.json" ] || fail "未检测到现有 RayLink 控制面：$install_root"
 [ -x "$node_root/bin/node" ] || fail "未检测到 RayLink Node.js：$node_root/bin/node"
+[ -e "$environment_file_input" ] || fail "未检测到 RayLink 环境文件：$environment_file_input"
+environment_file="$(readlink -f "$environment_file_input")"
 systemctl is-active --quiet raylink || fail "raylink 服务当前未运行，请先修复服务再升级"
+
+existing_local_host_dial_address="$(
+  sed -n 's/^[[:space:]]*RAYLINK_LOCAL_HOST_DIAL_ADDRESS=\([^#[:space:]]*\).*$/\1/p' \
+    "$environment_file" \
+    | tail -1
+)"
+local_host_dial_address="$existing_local_host_dial_address"
+backfill_local_host_dial_address=false
+if [ -z "$local_host_dial_address" ]; then
+  if [ -z "$public_ip" ]; then
+    public_ip="$(
+      curl -fsSL --connect-timeout 5 https://api64.ipify.org 2>/dev/null || true
+    )"
+  fi
+  [ -n "$public_ip" ] \
+    || fail "无法确定客户端拨号公网 IP，请设置 RAYLINK_PUBLIC_IP 后重试"
+  local_host_dial_address="$public_ip"
+  backfill_local_host_dial_address=true
+fi
+"$node_root/bin/node" -e '
+  const { isIP } = require("node:net");
+  if (!isIP(process.argv[1])) process.exit(1);
+' "$local_host_dial_address" \
+  || fail "客户端拨号地址不是有效 IP：$local_host_dial_address"
 
 if [ -z "$source_root" ]; then
   script_directory="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -107,10 +135,14 @@ data_migration_started=false
 service_backup_ready=false
 cronet_changed=false
 cronet_had_previous=false
+environment_backup_ready=false
+environment_changed=false
+environment_candidate_path="${environment_file}.candidate.$$"
 rollback() {
   status=$?
   trap - EXIT
   rm -f "$cronet_candidate_path"
+  rm -f "$environment_candidate_path"
   if [ "$upgrade_succeeded" != true ]; then
     printf '升级未通过健康检查，正在恢复 RayLink v%s…\n' "$current_version" >&2
     systemctl stop raylink >/dev/null 2>&1 || true
@@ -128,6 +160,9 @@ rollback() {
     fi
     if [ "$service_backup_ready" = true ]; then
       cp -a "$backup_directory/raylink.service" "$service_unit"
+    fi
+    if [ "$environment_backup_ready" = true ] && [ "$environment_changed" = true ]; then
+      cp -a "$backup_directory/raylink.env" "$environment_file"
     fi
     if [ "$cronet_changed" = true ]; then
       if [ "$cronet_had_previous" = true ]; then
@@ -152,6 +187,21 @@ fi
 if [ -f "$service_unit" ]; then
   cp -a "$service_unit" "$backup_directory/raylink.service"
   service_backup_ready=true
+fi
+if [ "$backfill_local_host_dial_address" = true ]; then
+  cp -a "$environment_file" "$backup_directory/raylink.env"
+  environment_backup_ready=true
+  cp -a "$environment_file" "$environment_candidate_path"
+  "$node_root/bin/node" -e '
+    const fs = require("node:fs");
+    const [path, address] = process.argv.slice(1);
+    let value = fs.readFileSync(path, "utf8");
+    if (value && !value.endsWith("\n")) value += "\n";
+    value += `RAYLINK_LOCAL_HOST_DIAL_ADDRESS=${address}\n`;
+    fs.writeFileSync(path, value);
+  ' "$environment_candidate_path" "$local_host_dial_address"
+  mv -f "$environment_candidate_path" "$environment_file"
+  environment_changed=true
 fi
 if [ -f "$cronet_install_path" ]; then
   cp -a "$cronet_install_path" "$backup_directory/libcronet.so"

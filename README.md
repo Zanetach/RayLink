@@ -211,13 +211,13 @@ npm start
 RAYLINK_ADMIN_PASSWORD='replace-with-a-long-random-secret' \
 RAYLINK_DATA_DIR='/var/lib/raylink' \
 RAYLINK_PROXY_HOST='node.example.com' \
-RAYLINK_LOCAL_CLIENT_ADDRESS='203.0.113.10' \
+RAYLINK_LOCAL_HOST_DIAL_ADDRESS='203.0.113.10' \
 SING_BOX_BIN='/usr/local/bin/raylink-sing-box' \
 npm start
 ```
 
-`RAYLINK_LOCAL_CLIENT_ADDRESS` 可将本地 Runtime 在客户端订阅中的连接地址固定为公网 IP，
-避免 Fake-IP DNS 把节点服务器自身映射到保留地址；TLS SNI 仍使用协议配置中的服务器名称。
+`RAYLINK_LOCAL_HOST_DIAL_ADDRESS` 可将本地 Runtime 在客户端订阅中的连接地址固定为公网 IP，
+避免 Fake-IP DNS 把本地 Host 映射到保留地址；TLS SNI 仍使用协议配置中的服务器名称。
 
 运行自动化生产前检查。`check:production` 需要 PATH 中有 sing-box 1.13.14 与 OpenSSL；
 它覆盖代码回归、协议语法和短时内存烟测，但不替代干净 VPS、真实客户端、故障注入与

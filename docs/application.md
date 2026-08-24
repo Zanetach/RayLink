@@ -33,12 +33,12 @@ RAYLINK_DATA_DIR='/var/lib/raylink' \
 RAYLINK_PUBLIC_ORIGIN='https://panel.example.com' \
 RAYLINK_SUBSCRIPTION_ORIGIN='https://sub.example.com' \
 RAYLINK_PROXY_HOST='node.example.com' \
-RAYLINK_LOCAL_CLIENT_ADDRESS='203.0.113.10' \
+RAYLINK_LOCAL_HOST_DIAL_ADDRESS='203.0.113.10' \
 SING_BOX_BIN='/usr/local/bin/raylink-sing-box' \
 npm start
 ```
 
-`RAYLINK_LOCAL_CLIENT_ADDRESS` 只覆盖本地 Runtime 在客户端配置中的拨号地址；协议配置中的
+`RAYLINK_LOCAL_HOST_DIAL_ADDRESS` 只覆盖本地 Runtime 在客户端配置中的拨号地址；协议配置中的
 TLS SNI 不变。对于启用 Fake-IP DNS 的客户端，建议填写服务器公网 IP。
 
 ## 验证

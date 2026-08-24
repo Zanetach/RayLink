@@ -175,7 +175,7 @@ else
   [ -f "$installer" ] || fail "发布包缺少控制面安装器"
 fi
 
-if [ "$action" = install ] && [ -z "$public_ip" ] && [ "$dry_run" = false ]; then
+if [ -z "$public_ip" ] && [ "$dry_run" = false ]; then
   public_ip="$(
     curl -fsSL --connect-timeout 5 https://api64.ipify.org 2>/dev/null || true
   )"
@@ -187,7 +187,12 @@ fi
 if [ "$dry_run" = true ]; then
   printf 'Dry run 完成，未修改系统。将执行：\n'
   if [ "$action" = upgrade ]; then
-    printf 'RAYLINK_INSTALL_ROOT=%q bash %q\n' "$install_root" "$installer"
+    if [ -n "$public_ip" ]; then
+      printf 'RAYLINK_INSTALL_ROOT=%q RAYLINK_PUBLIC_IP=%q bash %q\n' \
+        "$install_root" "$public_ip" "$installer"
+    else
+      printf 'RAYLINK_INSTALL_ROOT=%q bash %q\n' "$install_root" "$installer"
+    fi
   elif [ -n "$public_ip" ]; then
     printf 'RAYLINK_PUBLIC_IP=%q bash %q\n' "$public_ip" "$installer"
   else
@@ -198,7 +203,9 @@ fi
 
 if [ "$action" = upgrade ]; then
   printf '发布包准备完成，开始安全升级控制面（sing-box Runtime 保持运行）…\n'
-  RAYLINK_INSTALL_ROOT="$install_root" bash "$installer"
+  RAYLINK_INSTALL_ROOT="$install_root" \
+    RAYLINK_PUBLIC_IP="$public_ip" \
+    bash "$installer"
 elif [ -n "$public_ip" ]; then
   printf '发布包准备完成，开始安装控制面与 Runtime…\n'
   RAYLINK_PUBLIC_IP="$public_ip" bash "$installer"

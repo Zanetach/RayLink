@@ -2040,10 +2040,10 @@ test("admin updates the single runtime host used by portal client configs", asyn
   assert.equal((await configResponse.json()).outbounds[0].server, "node.example.com");
 });
 
-test("local client address override avoids Fake-IP without replacing the Host address", async (t) => {
+test("local Host dial address avoids Fake-IP without replacing the Host address", async (t) => {
   const testApp = await startTestApp({
     proxyHost: "node.example.com",
-    localClientAddress: "203.0.113.10"
+    localHostDialAddress: "203.0.113.10"
   });
   t.after(() => testApp.close());
   const adminCookie = await login(testApp.baseUrl);

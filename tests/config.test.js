@@ -33,14 +33,23 @@ test("subscription origin is independent from the control-plane and Host address
     RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
     RAYLINK_SUBSCRIPTION_ORIGIN: "https://sub.example.com",
     RAYLINK_PROXY_HOST: "node.example.com",
-    RAYLINK_LOCAL_CLIENT_ADDRESS: "203.0.113.10",
+    RAYLINK_LOCAL_HOST_DIAL_ADDRESS: "203.0.113.10",
     ...productionSecrets
   });
 
   assert.equal(config.publicOrigin, "https://panel.example.com");
   assert.equal(config.subscriptionOrigin, "https://sub.example.com");
   assert.equal(config.proxyHost, "node.example.com");
-  assert.equal(config.localClientAddress, "203.0.113.10");
+  assert.equal(config.localHostDialAddress, "203.0.113.10");
+  assert.throws(
+    () => loadConfig({
+      NODE_ENV: "production",
+      RAYLINK_PUBLIC_ORIGIN: "https://panel.example.com",
+      RAYLINK_LOCAL_HOST_DIAL_ADDRESS: "not-an-ip",
+      ...productionSecrets
+    }),
+    /RAYLINK_LOCAL_HOST_DIAL_ADDRESS must be a valid IP address/
+  );
   assert.throws(
     () => loadConfig({
       NODE_ENV: "production",

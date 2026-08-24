@@ -935,6 +935,7 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   const nodeRoot = join(directory, "node");
   const fakeBin = join(directory, "bin");
   const serviceUnit = join(directory, "raylink.service");
+  const environmentFile = join(directory, "raylink.env");
   const orderLog = join(directory, "order.log");
   const cronetSource = join(directory, "raylink-libcronet.so");
   const cronetInstallPath = join(directory, "installed-libcronet.so");
@@ -953,7 +954,9 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   `);
   durableDatabase.close();
   const previousServiceUnit = "[Service]\nExecStart=/opt/raylink/server/old-index.js\n";
+  const previousEnvironment = "RAYLINK_PROXY_HOST=node.example.com\n";
   await writeFile(serviceUnit, previousServiceUnit);
+  await writeFile(environmentFile, previousEnvironment, { mode: 0o600 });
   const cronetArtifact = Buffer.from("approved-cronet-runtime");
   const cronetChecksum = createHash("sha256").update(cronetArtifact).digest("hex");
   await writeFile(cronetSource, cronetArtifact);
@@ -1019,6 +1022,8 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
         RAYLINK_BACKUP_ROOT: backupRoot,
         RAYLINK_NODE_ROOT: nodeRoot,
         RAYLINK_SERVICE_UNIT: serviceUnit,
+        RAYLINK_ENV_FILE: environmentFile,
+        RAYLINK_PUBLIC_IP: "203.0.113.10",
         RAYLINK_SOURCE_DIR: new URL("..", import.meta.url).pathname,
         RAYLINK_CRONET_SOURCE: cronetSource,
         RAYLINK_CRONET_PATH: cronetInstallPath,
@@ -1032,13 +1037,28 @@ async function runControlPlaneUpgradeHarness(t, { healthFails = false } = {}) {
   return {
     cronetInstallPath,
     dataRoot,
+    environmentFile,
     error,
     installRoot,
     operations,
+    previousEnvironment,
     previousServiceUnit,
     serviceUnit
   };
 }
+
+test("the control-plane upgrader backfills the local Host dial IP", async (t) => {
+  const { environmentFile, error } = await runControlPlaneUpgradeHarness(t);
+  assert.equal(error, null);
+  assert.equal(
+    await readFile(environmentFile, "utf8"),
+    [
+      "RAYLINK_PROXY_HOST=node.example.com",
+      "RAYLINK_LOCAL_HOST_DIAL_ADDRESS=203.0.113.10",
+      ""
+    ].join("\n")
+  );
+});
 
 test("the control-plane upgrader stops writers before backing up durable data", async (t) => {
   const { error, operations, dataRoot } = await runControlPlaneUpgradeHarness(t);
@@ -1071,9 +1091,11 @@ test("a failed control-plane health check restores application, data and service
   const {
     cronetInstallPath,
     dataRoot,
+    environmentFile,
     error,
     installRoot,
     operations,
+    previousEnvironment,
     previousServiceUnit,
     serviceUnit
   } = await runControlPlaneUpgradeHarness(t, { healthFails: true });
@@ -1096,6 +1118,7 @@ test("a failed control-plane health check restores application, data and service
     restoredDatabase.close();
   }
   assert.equal(await readFile(serviceUnit, "utf8"), previousServiceUnit);
+  assert.equal(await readFile(environmentFile, "utf8"), previousEnvironment);
   await assert.rejects(readFile(cronetInstallPath), (readError) => readError.code === "ENOENT");
   assert.equal(
     operations.filter((entry) => entry === "systemctl start raylink").length,
@@ -1133,7 +1156,7 @@ test("one-command bootstrap verifies and prepares the matching release package",
     join(packageDeployDirectory, "upgrade-control-plane.sh"),
     [
       "#!/usr/bin/env bash",
-      "printf '%s' \"${RAYLINK_INSTALL_ROOT:-}\" > \"${UPGRADE_RECORD_PATH:?}\"",
+      "printf '%s|%s' \"${RAYLINK_INSTALL_ROOT:-}\" \"${RAYLINK_PUBLIC_IP:-}\" > \"${UPGRADE_RECORD_PATH:?}\"",
       "exit \"${UPGRADE_EXIT_CODE:-0}\"",
       ""
     ].join("\n")
@@ -1242,7 +1265,10 @@ test("one-command bootstrap verifies and prepares the matching release package",
       UPGRADE_RECORD_PATH: upgradeRecordPath
     }
   });
-  assert.equal(await readFile(upgradeRecordPath, "utf8"), existingInstallRoot);
+  assert.equal(
+    await readFile(upgradeRecordPath, "utf8"),
+    `${existingInstallRoot}|203.0.113.10`
+  );
 
   await assert.rejects(
     () => execFile("bash", installerArguments, {

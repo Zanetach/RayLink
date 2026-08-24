@@ -233,7 +233,7 @@ umask 077
     "RAYLINK_SUBSCRIPTION_ENCRYPTION_KEY=${subscription_encryption_key}" \
     "RAYLINK_DATA_DIR=${data_root}" \
     "RAYLINK_PROXY_HOST=${public_ip}" \
-    "RAYLINK_LOCAL_CLIENT_ADDRESS=${public_ip}" \
+    "RAYLINK_LOCAL_HOST_DIAL_ADDRESS=${public_ip}" \
     'RAYLINK_PROXY_PORT=8388' \
     'RAYLINK_RUNTIME_MODE=systemd' \
     'RAYLINK_USER_METERING=true' \
