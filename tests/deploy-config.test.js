@@ -29,6 +29,7 @@ test("production Caddy entry point preserves private subscription URLs", async (
   assert.match(installer, /65760C51EDEA2017CEA2CA15155B6D79CA56EA34/);
   assert.match(installer, /Caddyfile\.before-raylink/);
   assert.match(installer, /RAYLINK_SUBSCRIPTION_ORIGIN=\$\{public_origin\}/);
+  assert.match(installer, /RAYLINK_LOCAL_CLIENT_ADDRESS=\$\{public_ip\}/);
   assert.match(installer, /caddy validate --config "\$managed_root\/Caddyfile" --adapter caddyfile/);
   assert.match(installer, /ufw allow 80\/tcp/);
   assert.match(installer, /ufw allow 443\/tcp/);
@@ -36,6 +37,7 @@ test("production Caddy entry point preserves private subscription URLs", async (
   assert.doesNotMatch(installer, /systemctl enable --now nginx/);
   assert.match(environmentExample, /RAYLINK_SUBSCRIPTION_ORIGIN=https:\/\/sub\.example\.com/);
   assert.match(environmentExample, /RAYLINK_PROXY_HOST=node\.example\.com/);
+  assert.match(environmentExample, /RAYLINK_LOCAL_CLIENT_ADDRESS=203\.0\.113\.10/);
 });
 
 test("systemd sandboxes permit only RayLink-managed UFW rule files", async () => {

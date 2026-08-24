@@ -91,6 +91,7 @@ export function loadConfig(env = process.env) {
     publicOrigin,
     subscriptionOrigin,
     proxyHost: env.RAYLINK_PROXY_HOST || new URL(publicOrigin).hostname,
+    localClientAddress: env.RAYLINK_LOCAL_CLIENT_ADDRESS || "",
     protocolProbeUrl,
     alertWebhookUrl,
     alertIntervalMs: nonNegativeInteger(

@@ -2040,6 +2040,44 @@ test("admin updates the single runtime host used by portal client configs", asyn
   assert.equal((await configResponse.json()).outbounds[0].server, "node.example.com");
 });
 
+test("local client address override avoids Fake-IP without replacing the Host address", async (t) => {
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    localClientAddress: "203.0.113.10"
+  });
+  t.after(() => testApp.close());
+  const adminCookie = await login(testApp.baseUrl);
+  const bootstrap = await (await api(
+    testApp.baseUrl,
+    adminCookie,
+    "/api/bootstrap"
+  )).json();
+  assert.equal(bootstrap.hosts.find((host) => host.id === "local").address, "node.example.com");
+
+  const portalLogin = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  assert.equal(portalLogin.status, 200);
+  const portalCookie = portalLogin.headers.getSetCookie()[0].split(";")[0];
+  const config = await (await fetch(`${testApp.baseUrl}/api/portal/config/sing-box`, {
+    headers: { cookie: portalCookie }
+  })).json();
+  const shadowsocks = config.outbounds.find((outbound) => outbound.type === "shadowsocks");
+
+  assert.equal(shadowsocks.server, "203.0.113.10");
+
+  const loonResponse = await fetch(`${testApp.baseUrl}/api/portal/config/loon`, {
+    headers: { cookie: portalCookie }
+  });
+  assert.equal(loonResponse.status, 200);
+  assert.match(await loonResponse.text(), /=shadowsocks,203\.0\.113\.10,8388,/);
+});
+
 test("admin creates a remote host and RayLink Node enrolls with a one-time token", async (t) => {
   const testApp = await startTestApp();
   t.after(() => testApp.close());

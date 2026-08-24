@@ -489,6 +489,7 @@ export async function createRayLinkApp(options) {
   const publicOrigin = new URL(options.publicOrigin);
   const configuredSubscriptionOrigin = new URL(options.subscriptionOrigin || publicOrigin);
   const proxyHost = options.proxyHost || publicOrigin.hostname;
+  const localClientAddress = String(options.localClientAddress || "").trim();
   const listenPort = options.listenPort || 8388;
   const store = new RayLinkStore({
     dbPath,
@@ -920,6 +921,9 @@ export async function createRayLinkApp(options) {
       return connected && regionAllowed;
     }).map((host) => ({
       ...host,
+      address: host.id === "local" && localClientAddress
+        ? localClientAddress
+        : host.address,
       protocols: host.appliedProtocols
     }));
     if (
