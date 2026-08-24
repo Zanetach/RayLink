@@ -229,7 +229,6 @@ function escapeHtml(value) {
 function sendSubscriptionLanding(request, response, subscriptionUrl) {
   const {
     mihomo: mihomoUrl,
-    loon: loonUrl,
     egern: egernUrl,
     egernProfile: egernProfileUrl,
     singbox: singBoxUrl
@@ -250,8 +249,9 @@ function sendSubscriptionLanding(request, response, subscriptionUrl) {
     main{width:min(820px,100%);border:1px solid #20342a;border-radius:12px;background:#0a100d;padding:34px}
     h1{margin:8px 0 10px;font-size:32px}p{color:#99aaa1;line-height:1.7}.eyebrow{color:#7ee2a5;font-size:12px;letter-spacing:.14em}
     .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:28px 0}
-    a{display:block;min-height:40px;border:1px solid #263d31;border-radius:8px;padding:16px;color:#edf7f1;text-decoration:none;background:#0e1712}
-    a:hover{border-color:#75d99b;background:#122218}a strong{display:block;margin-bottom:4px}a small{color:#91a49a}
+    a,.client-card{display:block;min-height:40px;border:1px solid #263d31;border-radius:8px;padding:16px;color:#edf7f1;text-decoration:none;background:#0e1712}
+    a:hover{border-color:#75d99b;background:#122218}a strong,.client-card strong{display:block;margin-bottom:4px}a small,.client-card small{color:#91a49a}
+    .client-card code{display:block;margin-top:8px;color:#7ee2a5;font-size:11px;overflow-wrap:anywhere;user-select:all}
     footer{border-top:1px solid #1b2b23;padding-top:18px;color:#718278;font-size:13px}
     @media(max-width:650px){.grid{grid-template-columns:1fr}main{padding:24px}}
   </style>
@@ -263,7 +263,7 @@ function sendSubscriptionLanding(request, response, subscriptionUrl) {
     <p>这是通用订阅入口。RayLink 会为不同客户端生成兼容配置；订阅地址包含访问凭据，请勿转发。</p>
     <div class="grid">
       <a href="${escapeHtml(clashImport)}"><strong>Clash Verge Rev / Mihomo</strong><small>Windows、macOS、Linux · 一键导入</small></a>
-      <a href="${escapeHtml(loonUrl)}"><strong>Loon 节点订阅</strong><small>iPhone、iPad、macOS · 保留客户端现有规则</small></a>
+      <div class="client-card"><strong>Loon 节点订阅</strong><small>复制下面的通用地址，在 Loon 中添加订阅</small><code>${escapeHtml(subscriptionUrl)}</code></div>
       <a href="${escapeHtml(egernProfileImport)}"><strong>Egern 智能配置</strong><small>iPhone、iPad · 智能选择、分流和 DNS</small></a>
       <a href="${escapeHtml(egernImport)}"><strong>Egern 节点订阅</strong><small>只导入节点，保留客户端现有规则</small></a>
       <a href="${escapeHtml(singBoxUrl)}"><strong>sing-box JSON</strong><small>官方客户端与 Hiddify 高级配置</small></a>

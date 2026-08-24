@@ -21,7 +21,9 @@ test("admin and user subscription views expose the same five client choices", ()
 
 test("user portal exposes the native Loon node subscription", () => {
   assert.match(portalMarkup, /id="portal-import-loon"/);
-  assert.match(portalSource, /formatUrl\("loon"\)/);
+  assert.match(portalMarkup, /subscription-client-url\.js/);
+  assert.match(portalSource, /subscriptionClientUrl\.forFormat/);
+  assert.match(portalSource, /importLoon\.href = formatUrl\("loon"\)/);
 });
 
 test("user portal keeps full-profile and node-only Egern imports distinct", () => {

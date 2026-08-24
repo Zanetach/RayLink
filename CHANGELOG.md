@@ -1,5 +1,16 @@
 # RayLink Changelog
 
+## 0.2.28 - 2026-08-24
+
+### Changed
+
+- Loon links in the subscription API, administrator console, user portal, and
+  browser landing page now use the clean universal URL without a format query
+  or filename suffix. Loon User-Agent negotiation selects the native node
+  format automatically.
+- Centralized subscription aliases, path suffixes, User-Agent priority, portal
+  aliases, and generated URLs in one server-side client format catalog.
+
 ## 0.2.27 - 2026-08-24
 
 ### Added

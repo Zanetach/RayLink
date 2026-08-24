@@ -14,6 +14,7 @@ const importLoon = document.querySelector("#portal-import-loon");
 const importEgern = document.querySelector("#portal-import-egern");
 const importEgernNodes = document.querySelector("#portal-import-egern-nodes");
 const downloadSingBox = document.querySelector("#portal-download-singbox");
+const subscriptionClientUrl = window.RayLinkSubscriptionClientUrl;
 let subscriptionLoadRequest = 0;
 
 async function portalApi(path, options = {}) {
@@ -64,7 +65,7 @@ function renderAccount(profile) {
 function revealSubscription(url, existing = false) {
   subscriptionUrl.value = url;
   subscriptionValue.hidden = false;
-  const formatUrl = (format) => `${url}?format=${encodeURIComponent(format)}`;
+  const formatUrl = (format) => subscriptionClientUrl.forFormat(url, format);
   importMihomo.href = `clash://install-config?url=${encodeURIComponent(formatUrl("mihomo"))}&name=RayLink`;
   importLoon.href = formatUrl("loon");
   importEgern.href = `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(formatUrl("egern-profile"))}`;

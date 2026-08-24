@@ -1615,7 +1615,7 @@ test("one universal subscription URL negotiates Mihomo, Loon, Egern and sing-box
 
   assert.match(subscription.pathname, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/);
   assert.equal(created.formats.mihomo, `${created.subscriptionUrl}?format=mihomo`);
-  assert.equal(created.formats.loon, `${created.subscriptionUrl}?format=loon`);
+  assert.equal(created.formats.loon, created.subscriptionUrl);
   assert.equal(created.formats.egern, `${created.subscriptionUrl}?format=egern`);
   assert.equal(created.formats.singbox, `${created.subscriptionUrl}?format=singbox`);
 
@@ -1727,6 +1727,8 @@ test("one universal subscription URL negotiates Mihomo, Loon, Egern and sing-box
   const landingHtml = await landing.text();
   assert.match(landingHtml, /Clash Verge Rev/);
   assert.match(landingHtml, /Loon/);
+  assert.ok(landingHtml.includes(`<code>${created.subscriptionUrl}</code>`));
+  assert.ok(!landingHtml.includes(`href="${created.subscriptionUrl}"`));
   assert.match(landingHtml, /Egern 智能配置/);
   assert.match(landingHtml, /Egern 节点订阅/);
   assert.match(landingHtml, /sing-box/);

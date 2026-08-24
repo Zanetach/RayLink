@@ -7,6 +7,10 @@ const sessionSource = await readFile(
   new URL("../web/subscription-session.js", import.meta.url),
   "utf8"
 );
+const clientUrlSource = await readFile(
+  new URL("../web/subscription-client-url.js", import.meta.url),
+  "utf8"
+);
 const quickSource = await readFile(
   new URL("../web/subscription-quick.js", import.meta.url),
   "utf8"
@@ -15,6 +19,7 @@ const quickSource = await readFile(
 function loadHelpers() {
   const context = { window: {} };
   vm.runInNewContext(sessionSource, context);
+  vm.runInNewContext(clientUrlSource, context);
   vm.runInNewContext(quickSource, context);
   return {
     quick: context.window.RayLinkSubscriptionQuick,
@@ -27,6 +32,7 @@ function createPanel() {
   const input = { value: "" };
   const qr = { rendered: "" };
   const mihomo = { dataset: { subscriptionFormat: "mihomo" }, href: "" };
+  const loon = { dataset: { subscriptionFormat: "loon" }, href: "" };
   const egernProfile = {
     dataset: { subscriptionFormat: "egern-profile", subscriptionImport: "egern-profile" },
     href: ""
@@ -35,7 +41,7 @@ function createPanel() {
     dataset: { subscriptionFormat: "egern", subscriptionImport: "egern" },
     href: ""
   };
-  const links = [mihomo, egernProfile, egernNodes];
+  const links = [mihomo, loon, egernProfile, egernNodes];
   const fields = new Map([
     ["[data-user-subscription-result]", result],
     ["#user-subscription-url", input],
@@ -45,7 +51,7 @@ function createPanel() {
     querySelector: (selector) => fields.get(selector) || null,
     querySelectorAll: (selector) => selector === "[data-subscription-format]" ? links : []
   };
-  return { panel, result, input, qr, mihomo, egernNodes, egernProfile };
+  return { panel, result, input, qr, mihomo, loon, egernNodes, egernProfile };
 }
 
 test("quick subscription controller reveals and rehydrates a generated QR link", () => {
@@ -68,6 +74,7 @@ test("quick subscription controller reveals and rehydrates a generated QR link",
   assert.equal(first.input.value, url);
   assert.equal(first.qr.rendered, url);
   assert.equal(first.mihomo.href, `${url}?format=mihomo`);
+  assert.equal(first.loon.href, url);
   assert.equal(
     first.egernProfile.href,
     `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(`${url}?format=egern-profile`)}`

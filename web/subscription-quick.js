@@ -1,12 +1,9 @@
-function clientUrl(universalUrl, format) {
-  const separator = universalUrl.includes("?") ? "&" : "?";
-  return `${universalUrl}${separator}format=${encodeURIComponent(format)}`;
-}
+const subscriptionClientUrl = window.RayLinkSubscriptionClientUrl;
 
 function hydrateClientLinks(panel, url) {
   panel.querySelectorAll("[data-subscription-format]").forEach((link) => {
     const format = link.dataset.subscriptionFormat;
-    const target = clientUrl(url, format);
+    const target = subscriptionClientUrl.forFormat(url, format);
     if (link.dataset.subscriptionImport === "egern") {
       link.href = `egern:/subscriptions/new?url=${encodeURIComponent(target)}`;
     } else if (link.dataset.subscriptionImport === "egern-profile") {

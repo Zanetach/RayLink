@@ -14,6 +14,7 @@ const subscriptionFormats = Object.freeze([
     aliases: Object.freeze(["loon"]),
     portalAliases: Object.freeze(["loon"]),
     pathSuffix: "loon.list",
+    useUniversalUrl: true,
     userAgentPriority: 30,
     userAgent: /loon/
   }),
@@ -82,6 +83,7 @@ export function subscriptionFormatForUserAgent(userAgent) {
 
 export function buildSubscriptionFormatUrls(subscriptionUrl) {
   return Object.fromEntries(subscriptionFormats.map((format) => {
+    if (format.useUniversalUrl) return [format.responseKey, subscriptionUrl];
     const target = new URL(subscriptionUrl);
     target.searchParams.set("format", format.id);
     return [format.responseKey, target.toString()];
