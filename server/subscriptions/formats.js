@@ -347,6 +347,9 @@ function loonProxy(outbound) {
     return `${prefix}${outbound.type},${common},${credentials},${options.join(",")}`;
   }
   if (["trojan", "anytls"].includes(outbound.type)) {
+    if (outbound.type === "anytls" && outbound.transport && outbound.transport.type !== "tcp") {
+      return null;
+    }
     if (outbound.transport && !["tcp", "ws"].includes(outbound.transport.type)) return null;
     const options = [
       ...(outbound.transport?.type === "ws"

@@ -229,6 +229,15 @@ test("Loon node subscription uses native proxy lines and excludes unsupported pr
           uuid: "22222222-2222-4222-8222-222222222222",
           password: "tuic-password",
           tls: { enabled: true, server_name: "node.example.com" }
+        },
+        {
+          type: "anytls",
+          tag: "raylink-invalid-anytls-ws",
+          server: "node.example.com",
+          server_port: 8445,
+          password: "anytls-password",
+          transport: { type: "ws", path: "/anytls" },
+          tls: { enabled: true, server_name: "node.example.com" }
         }
       ]
     }
@@ -245,6 +254,7 @@ test("Loon node subscription uses native proxy lines and excludes unsupported pr
     /^raylink-tokyo-hysteria2=Hysteria2,node\.example\.com,8448,"hysteria-password",tls-name=node\.example\.com,skip-cert-verify=false,udp=true$/m
   );
   assert.doesNotMatch(artifact.body, /raylink-tokyo-tuic/);
+  assert.doesNotMatch(artifact.body, /raylink-invalid-anytls-ws/);
   assert.doesNotMatch(artifact.body, /^proxies:/m);
 });
 
