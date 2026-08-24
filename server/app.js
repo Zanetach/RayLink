@@ -41,6 +41,14 @@ import {
   V2RayStatsCollector
 } from "./usage/v2ray-stats.js";
 import { buildSubscriptionArtifact } from "./subscriptions/formats.js";
+import {
+  buildSubscriptionFormatUrls,
+  resolveSubscriptionFormat,
+  subscriptionFormatForPath,
+  subscriptionFormatForUserAgent,
+  subscriptionPathSuffixPattern,
+  subscriptionPortalAliasPattern
+} from "./subscriptions/catalog.js";
 
 const SESSION_COOKIE = "raylink_session";
 const PORTAL_SESSION_COOKIE = "raylink_portal_session";
@@ -219,16 +227,13 @@ function escapeHtml(value) {
 }
 
 function sendSubscriptionLanding(request, response, subscriptionUrl) {
-  const formatUrl = (format) => {
-    const target = new URL(subscriptionUrl);
-    target.searchParams.set("format", format);
-    return target.toString();
-  };
-  const mihomoUrl = formatUrl("mihomo");
-  const loonUrl = formatUrl("loon");
-  const egernUrl = formatUrl("egern");
-  const egernProfileUrl = formatUrl("egern-profile");
-  const singBoxUrl = formatUrl("singbox");
+  const {
+    mihomo: mihomoUrl,
+    loon: loonUrl,
+    egern: egernUrl,
+    egernProfile: egernProfileUrl,
+    singbox: singBoxUrl
+  } = buildSubscriptionFormatUrls(subscriptionUrl);
   const egernImport = `egern:/subscriptions/new?url=${encodeURIComponent(egernUrl)}`;
   const egernProfileImport = `egern:/profiles/new?name=RayLink&url=${encodeURIComponent(egernProfileUrl)}`;
   const clashImport = `clash://install-config?url=${encodeURIComponent(mihomoUrl)}&name=RayLink`;
@@ -283,26 +288,20 @@ function sendSubscriptionLanding(request, response, subscriptionUrl) {
   endRequestPayload(request, response, payload);
 }
 
-const subscriptionFormatAliases = new Map([
-  ["mihomo", "mihomo"],
-  ["clash", "mihomo"],
-  ["clash-meta", "mihomo"],
-  ["loon", "loon"],
-  ["egern", "egern"],
-  ["egern-profile", "egern-profile"],
-  ["singbox", "singbox"],
-  ["sing-box", "singbox"]
-]);
+const subscriptionPathRegex = new RegExp(
+  `^/sub/([A-Za-z0-9_-]{16,64})/([A-Za-z0-9_-]{32,128})(?:/(${subscriptionPathSuffixPattern}))?$`
+);
+const portalConfigRegex = new RegExp(
+  `^/api/portal/config/(${subscriptionPortalAliasPattern})$`
+);
 
 function subscriptionFormatForRequest(request, url, pathFormat = "") {
   const explicit = String(url.searchParams.get("format") || pathFormat || "").toLowerCase();
-  if (explicit) return subscriptionFormatAliases.get(explicit) || "unsupported";
+  if (explicit) return resolveSubscriptionFormat(explicit) || "unsupported";
   const userAgent = String(request.headers["user-agent"] || "").toLowerCase();
   const accept = String(request.headers.accept || "").toLowerCase();
-  if (userAgent.includes("egern")) return "egern";
-  if (userAgent.includes("loon")) return "loon";
-  if (/(?:clash|mihomo|flclash|stash)/.test(userAgent)) return "mihomo";
-  if (/(?:sing-box|singbox|hiddify)/.test(userAgent)) return "singbox";
+  const detected = subscriptionFormatForUserAgent(userAgent);
+  if (detected) return detected;
   if (accept.includes("text/html") && /mozilla|safari|chrome|firefox|edge/.test(userAgent)) {
     return "landing";
   }
@@ -518,14 +517,7 @@ export async function createRayLinkApp(options) {
     currentSubscriptionOrigin()
   ).toString();
   const subscriptionFormats = (subscription) => {
-    const universal = subscriptionUrl(subscription);
-    return {
-      mihomo: `${universal}?format=mihomo`,
-      loon: `${universal}?format=loon`,
-      egern: `${universal}?format=egern`,
-      egernProfile: `${universal}?format=egern-profile`,
-      singbox: `${universal}?format=singbox`
-    };
+    return buildSubscriptionFormatUrls(subscriptionUrl(subscription));
   };
   const subscriptionDetails = (subscription) => {
     const universal = subscriptionUrl(subscription);
@@ -1216,9 +1208,7 @@ export async function createRayLinkApp(options) {
         return;
       }
 
-      const subscriptionMatch = url.pathname.match(
-        /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})(?:\/(sing-box\.json|mihomo\.yaml|loon\.list|egern\.yaml|egern-profile\.yaml))?$/
-      );
+      const subscriptionMatch = url.pathname.match(subscriptionPathRegex);
       if (["GET", "HEAD"].includes(request.method) && subscriptionMatch) {
         const subscriptionUser = store.userForSubscription(subscriptionMatch[1], subscriptionMatch[2]);
         if (!subscriptionUser) {
@@ -1227,17 +1217,10 @@ export async function createRayLinkApp(options) {
           });
           return;
         }
-        const pathFormats = {
-          "sing-box.json": "singbox",
-          "mihomo.yaml": "mihomo",
-          "loon.list": "loon",
-          "egern.yaml": "egern",
-          "egern-profile.yaml": "egern-profile"
-        };
         const format = subscriptionFormatForRequest(
           request,
           url,
-          pathFormats[subscriptionMatch[3]] || ""
+          subscriptionFormatForPath(subscriptionMatch[3]) || ""
         );
         if (format === "unsupported") {
           sendJson(response, 400, {
@@ -1364,13 +1347,9 @@ export async function createRayLinkApp(options) {
           sendJson(response, 201, subscriptionDetails(subscription));
           return;
         }
-        const portalConfigMatch = url.pathname.match(
-          /^\/api\/portal\/config\/(sing-box|singbox|mihomo|loon|egern|egern-profile)$/
-        );
+        const portalConfigMatch = url.pathname.match(portalConfigRegex);
         if (request.method === "GET" && portalConfigMatch) {
-          const format = portalConfigMatch[1] === "sing-box"
-            ? "singbox"
-            : portalConfigMatch[1];
+          const format = resolveSubscriptionFormat(portalConfigMatch[1]);
           sendSubscriptionArtifact(
             request,
             response,

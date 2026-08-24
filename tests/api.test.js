@@ -1648,6 +1648,10 @@ test("one universal subscription URL negotiates Mihomo, Loon, Egern and sing-box
   assert.equal(loonDetected.status, 200);
   assert.match(loonDetected.headers.get("content-disposition"), /raylink-loon\.list/);
 
+  const loonPath = await fetch(`${testApp.baseUrl}${subscription.pathname}/loon.list`);
+  assert.equal(loonPath.status, 200);
+  assert.match(loonPath.headers.get("content-disposition"), /raylink-loon\.list/);
+
   const mihomoHead = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
     method: "HEAD",
     headers: { "user-agent": "clash-verge/v2.5.2" }
@@ -1682,7 +1686,7 @@ test("one universal subscription URL negotiates Mihomo, Loon, Egern and sing-box
   assert.match(await egern.text(), /^proxies:/m);
 
   const egernDetected = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
-    headers: { "user-agent": "Egern/1.26" }
+    headers: { "user-agent": "Egern/1.26 Clash-compatible" }
   });
   assert.equal(egernDetected.status, 200);
   assert.match(egernDetected.headers.get("content-disposition"), /raylink-egern\.yaml/);
