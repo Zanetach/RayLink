@@ -1,5 +1,16 @@
 # RayLink Changelog
 
+## 0.2.29 - 2026-08-24
+
+### Fixed
+
+- Local Host client subscriptions can publish a validated public IP as the
+  dial address while preserving the Host domain and protocol TLS SNI, avoiding
+  Fake-IP loops when clients resolve the node server through their tunnel.
+- Fresh installs and upgrades persist the local Host dial IP automatically;
+  failed upgrades restore the previous environment file together with the
+  application, data, and service unit.
+
 ## 0.2.28 - 2026-08-24
 
 ### Changed

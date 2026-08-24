@@ -89,20 +89,20 @@ flowchart LR
 服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.28/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.29/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.28/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.29/install.sh | sudo bash'
 ```
 
 脚本会检测公网 IP 和 CPU 架构，下载对应的 AMD64 或 ARM64 发布包及 SHA-256，校验后解压，再执行系统安装。
 若需要指定公网 IP：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.28/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.29/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 一键安装会自动完成：
@@ -211,9 +211,13 @@ npm start
 RAYLINK_ADMIN_PASSWORD='replace-with-a-long-random-secret' \
 RAYLINK_DATA_DIR='/var/lib/raylink' \
 RAYLINK_PROXY_HOST='node.example.com' \
+RAYLINK_LOCAL_HOST_DIAL_ADDRESS='203.0.113.10' \
 SING_BOX_BIN='/usr/local/bin/raylink-sing-box' \
 npm start
 ```
+
+`RAYLINK_LOCAL_HOST_DIAL_ADDRESS` 可将本地 Runtime 在客户端订阅中的连接地址固定为公网 IP，
+避免 Fake-IP DNS 把本地 Host 映射到保留地址；TLS SNI 仍使用协议配置中的服务器名称。
 
 运行自动化生产前检查。`check:production` 需要 PATH 中有 sing-box 1.13.14 与 OpenSSL；
 它覆盖代码回归、协议语法和短时内存烟测，但不替代干净 VPS、真实客户端、故障注入与

@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { join, resolve } from "node:path";
 
 import { DEFAULT_ROUTE_PROBE_URL } from "./routing/policy.js";
@@ -30,6 +31,13 @@ function optionalHttpUrl(value, name) {
     throw new Error(`${name} must be a valid HTTP or HTTPS URL`);
   }
   return parsed;
+}
+
+function optionalIpAddress(value, name) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (!isIP(normalized)) throw new Error(`${name} must be a valid IP address`);
+  return normalized;
 }
 
 export function loadConfig(env = process.env) {
@@ -91,6 +99,10 @@ export function loadConfig(env = process.env) {
     publicOrigin,
     subscriptionOrigin,
     proxyHost: env.RAYLINK_PROXY_HOST || new URL(publicOrigin).hostname,
+    localHostDialAddress: optionalIpAddress(
+      env.RAYLINK_LOCAL_HOST_DIAL_ADDRESS,
+      "RAYLINK_LOCAL_HOST_DIAL_ADDRESS"
+    ),
     protocolProbeUrl,
     alertWebhookUrl,
     alertIntervalMs: nonNegativeInteger(
