@@ -30,6 +30,14 @@ const egernCompatibleTypes = new Set([
   "hysteria2",
   "tuic"
 ]);
+const loonCompatibleTypes = new Set([
+  "shadowsocks",
+  "vmess",
+  "vless",
+  "trojan",
+  "anytls",
+  "hysteria2"
+]);
 const MIHOMO_SMART_HEALTH_TIMEOUT_MS = 8000;
 const MIHOMO_TCP_HEALTH_TIMEOUT_MS = 5000;
 const MIHOMO_UDP_HEALTH_TIMEOUT_MS = 12000;
@@ -283,6 +291,93 @@ function mihomoProxy(outbound) {
     password: outbound.password,
     udp: true
   }, outbound), outbound);
+}
+
+function loonQuote(value) {
+  return JSON.stringify(String(value));
+}
+
+function loonTlsOptions(outbound, { reality = false } = {}) {
+  if (!outbound.tls?.enabled) return [];
+  const serverName = outbound.tls.server_name || outbound.server;
+  if (reality && outbound.tls.reality?.enabled) {
+    return [
+      `sni=${serverName}`,
+      `public-key=${loonQuote(outbound.tls.reality.public_key)}`,
+      `short-id=${outbound.tls.reality.short_id || ""}`
+    ];
+  }
+  return [
+    `tls-name=${serverName}`,
+    "skip-cert-verify=false"
+  ];
+}
+
+function loonTransportOptions(outbound) {
+  const transport = outbound.transport;
+  if (!transport || transport.type === "tcp") return ["transport=tcp"];
+  if (!["ws", "http"].includes(transport.type)) return null;
+  return [
+    `transport=${transport.type}`,
+    ...(transport.path ? [`path=${transport.path}`] : []),
+    ...(transport.host ? [`host=${transport.host}`] : [])
+  ];
+}
+
+function loonProxy(outbound) {
+  const prefix = `${outbound.tag}=`;
+  const common = `${outbound.server},${outbound.server_port}`;
+  if (outbound.type === "shadowsocks") {
+    return `${prefix}shadowsocks,${common},${outbound.method},${loonQuote(outbound.password)},udp=true`;
+  }
+  if (["vmess", "vless"].includes(outbound.type)) {
+    const transport = loonTransportOptions(outbound);
+    if (!transport) return null;
+    const reality = Boolean(outbound.tls?.reality?.enabled);
+    const options = [
+      "udp=true",
+      ...transport,
+      ...(outbound.tls?.enabled ? ["over-tls=true"] : []),
+      ...(outbound.flow ? [`flow=${outbound.flow}`] : []),
+      ...loonTlsOptions(outbound, { reality })
+    ];
+    const credentials = outbound.type === "vmess"
+      ? `${outbound.security || "auto"},${loonQuote(outbound.uuid)}`
+      : loonQuote(outbound.uuid);
+    return `${prefix}${outbound.type},${common},${credentials},${options.join(",")}`;
+  }
+  if (["trojan", "anytls"].includes(outbound.type)) {
+    if (outbound.transport && !["tcp", "ws"].includes(outbound.transport.type)) return null;
+    const options = [
+      ...(outbound.transport?.type === "ws"
+        ? [
+            "transport=ws",
+            ...(outbound.transport.path ? [`path=${outbound.transport.path}`] : []),
+            ...(outbound.transport.host ? [`host=${outbound.transport.host}`] : [])
+          ]
+        : []),
+      ...loonTlsOptions(outbound, { reality: Boolean(outbound.tls?.reality?.enabled) }),
+      "udp=true"
+    ];
+    return `${prefix}${outbound.type},${common},${loonQuote(outbound.password)},${options.join(",")}`;
+  }
+  if (outbound.type === "hysteria2") {
+    const options = [
+      ...loonTlsOptions(outbound),
+      "udp=true"
+    ];
+    return `${prefix}Hysteria2,${common},${loonQuote(outbound.password)},${options.join(",")}`;
+  }
+  return null;
+}
+
+function buildLoonNodes(singBoxConfig) {
+  const nodes = nodeOutbounds(singBoxConfig)
+    .filter((outbound) => loonCompatibleTypes.has(outbound.type))
+    .map(loonProxy)
+    .filter(Boolean);
+  if (!nodes.length) throw subscriptionError("NO_COMPATIBLE_NODES", "当前没有 Loon 可用节点");
+  return `${nodes.join("\n")}\n`;
 }
 
 function buildMihomoConfig(singBoxConfig, inputPolicy) {
@@ -753,6 +848,13 @@ export function buildSubscriptionArtifact({ format, singBoxConfig, routePolicy }
       body: stringifyYaml(buildMihomoConfig(singBoxConfig, routePolicy))
     };
   }
+  if (format === "loon") {
+    return {
+      contentType: "text/plain; charset=utf-8",
+      filename: "raylink-loon.list",
+      body: buildLoonNodes(singBoxConfig)
+    };
+  }
   if (format === "egern") {
     const proxies = egernProxies(singBoxConfig);
     if (!proxies.length) throw subscriptionError("NO_COMPATIBLE_NODES", "当前没有 Egern 可用节点");
@@ -781,6 +883,7 @@ function subscriptionError(code, message, statusCode = 409) {
 
 export const subscriptionCompatibility = Object.freeze({
   mihomo: [...mihomoCompatibleTypes],
+  loon: [...loonCompatibleTypes],
   egern: [...egernCompatibleTypes],
   singbox: [...generatedNodeTypes, "naive"]
 });

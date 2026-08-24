@@ -8,14 +8,20 @@ const [adminSource, portalMarkup, portalSource] = await Promise.all([
   readFile(new URL("../web/portal.js", import.meta.url), "utf8")
 ]);
 
-test("admin and user subscription views expose the same four client choices", () => {
+test("admin and user subscription views expose the same five client choices", () => {
   for (const source of [adminSource, portalMarkup]) {
     assert.match(source, /Clash \/ Mihomo/);
+    assert.match(source, /Loon 节点/);
     assert.match(source, /Egern 完整配置/);
     assert.match(source, /Egern 节点/);
     assert.match(source, /sing-box JSON/);
     assert.match(source, /subscription-client-action recommended/);
   }
+});
+
+test("user portal exposes the native Loon node subscription", () => {
+  assert.match(portalMarkup, /id="portal-import-loon"/);
+  assert.match(portalSource, /formatUrl\("loon"\)/);
 });
 
 test("user portal keeps full-profile and node-only Egern imports distinct", () => {

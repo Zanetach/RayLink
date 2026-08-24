@@ -8,6 +8,11 @@ const requiredNodeAgentVersion = "0.7.0";
 
 const clientCatalog = {
   mihomo: { name: "Clash / Mihomo", platforms: "Windows / macOS / Android", action: "导入订阅" },
+  loon: {
+    name: "Loon 节点订阅",
+    platforms: "iPhone / iPad / macOS · 保留现有规则",
+    action: "下载节点订阅"
+  },
   "egern-profile": {
     name: "Egern 完整配置",
     platforms: "iPhone / iPad · 含智能策略、分流与 DNS",
@@ -20,7 +25,7 @@ const clientCatalog = {
   },
   "sing-box": { name: "sing-box", platforms: "iOS / Android / Desktop", action: "下载配置" }
 };
-const universalClientFormats = Object.freeze(["mihomo", "egern-profile", "egern", "sing-box"]);
+const universalClientFormats = Object.freeze(["mihomo", "loon", "egern-profile", "egern", "sing-box"]);
 
 const accountSummary = { totalUsers: 0 };
 
@@ -1442,6 +1447,10 @@ function userSubscriptionAccessMarkup(user) {
               <a class="subscription-client-action recommended" href="#" data-subscription-format="mihomo" data-subscription-import="clash">
                 <span><strong>Clash / Mihomo</strong><small>Windows · macOS · Android</small></span>
                 <span class="subscription-client-badge">推荐</span>
+              </a>
+              <a class="subscription-client-action" href="#" data-subscription-format="loon">
+                <span><strong>Loon 节点</strong><small>保留客户端现有规则</small></span>
+                <span class="subscription-client-badge">添加</span>
               </a>
               <a class="subscription-client-action" href="#" data-subscription-format="egern-profile" data-subscription-import="egern-profile">
                 <span><strong>Egern 完整配置</strong><small>智能策略、分流与 DNS</small></span>

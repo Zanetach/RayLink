@@ -89,20 +89,20 @@ flowchart LR
 服务器需要预先具备 `curl`。使用 root 登录时，直接复制执行这一条命令：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.26/install.sh | bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.27/install.sh | bash'
 ```
 
 普通用户登录时，把管道中的 `bash` 改为 `sudo bash`：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.26/install.sh | sudo bash'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.27/install.sh | sudo bash'
 ```
 
 脚本会检测公网 IP 和 CPU 架构，下载对应的 AMD64 或 ARM64 发布包及 SHA-256，校验后解压，再执行系统安装。
 若需要指定公网 IP：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.26/install.sh | bash -s -- --public-ip 203.0.113.10'
+bash -o pipefail -c 'curl -fsSL https://github.com/Zanetach/RayLink/releases/download/v0.2.27/install.sh | bash -s -- --public-ip 203.0.113.10'
 ```
 
 一键安装会自动完成：
@@ -142,7 +142,7 @@ sequenceDiagram
   participant A as 管理员
   participant R as RayLink
   participant U as 用户
-  participant C as Mihomo / Egern / sing-box
+  participant C as Mihomo / Loon / Egern / sing-box
 
   A->>R: 创建用户并设置配额、到期日、Host 范围
   A->>R: 发布 Deployment
@@ -156,10 +156,10 @@ sequenceDiagram
 配置 URL 的密钥按密码处理：服务端只保存 SHA-256 哈希，重置后旧地址立即失效；响应使用私有缓存策略和 ETag。用户停用、到期、超额或 Host 范围变化后，下一次更新会取得新的有效配置。
 
 同一个通用地址会根据客户端 User-Agent 返回对应格式，浏览器打开时显示客户端选择页；
-也可以显式使用 `?format=mihomo`、`?format=egern`、`?format=egern-profile` 或
-`?format=singbox`。用户中心和管理员用户详情同时提供订阅二维码、复制链接、Mihomo
-一键导入、Egern 一键导入及 sing-box JSON 下载。重新生成地址会让所有格式的旧地址一起
-失效，不需要分别管理多个密钥。
+也可以显式使用 `?format=mihomo`、`?format=loon`、`?format=egern`、
+`?format=egern-profile` 或 `?format=singbox`。用户中心和管理员用户详情同时提供订阅
+二维码、复制链接、Mihomo 一键导入、Loon 节点订阅、Egern 一键导入及 sing-box JSON
+下载。重新生成地址会让所有格式的旧地址一起失效，不需要分别管理多个密钥。
 
 ## 协议与路由
 

@@ -1592,7 +1592,7 @@ test("user creates a stable subscription URL and rotating it revokes the old URL
   assert.equal((await fetch(`${testApp.baseUrl}${secondSubscriptionPath}`)).status, 200);
 });
 
-test("one universal subscription URL negotiates Mihomo, Egern and sing-box formats", async (t) => {
+test("one universal subscription URL negotiates Mihomo, Loon, Egern and sing-box formats", async (t) => {
   const testApp = await startTestApp({
     proxyHost: "node.example.com",
     subscriptionOrigin: "https://sub.example.com"
@@ -1615,6 +1615,7 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
 
   assert.match(subscription.pathname, /^\/sub\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/);
   assert.equal(created.formats.mihomo, `${created.subscriptionUrl}?format=mihomo`);
+  assert.equal(created.formats.loon, `${created.subscriptionUrl}?format=loon`);
   assert.equal(created.formats.egern, `${created.subscriptionUrl}?format=egern`);
   assert.equal(created.formats.singbox, `${created.subscriptionUrl}?format=singbox`);
 
@@ -1634,6 +1635,18 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
     ].join("; ")
   );
   assert.match(await mihomo.text(), /^mixed-port: 7890/m);
+
+  const loon = await fetch(`${testApp.baseUrl}${subscription.pathname}?format=loon`);
+  assert.equal(loon.status, 200);
+  assert.match(loon.headers.get("content-type"), /text\/plain/);
+  assert.match(loon.headers.get("content-disposition"), /raylink-loon\.list/);
+  assert.match(await loon.text(), /^[^\n=]+=(?:shadowsocks|vmess|vless|trojan|anytls|Hysteria2),/m);
+
+  const loonDetected = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
+    headers: { "user-agent": "Loon/933" }
+  });
+  assert.equal(loonDetected.status, 200);
+  assert.match(loonDetected.headers.get("content-disposition"), /raylink-loon\.list/);
 
   const mihomoHead = await fetch(`${testApp.baseUrl}${subscription.pathname}`, {
     method: "HEAD",
@@ -1709,6 +1722,7 @@ test("one universal subscription URL negotiates Mihomo, Egern and sing-box forma
   assert.match(landing.headers.get("content-type"), /text\/html/);
   const landingHtml = await landing.text();
   assert.match(landingHtml, /Clash Verge Rev/);
+  assert.match(landingHtml, /Loon/);
   assert.match(landingHtml, /Egern 智能配置/);
   assert.match(landingHtml, /Egern 节点订阅/);
   assert.match(landingHtml, /sing-box/);

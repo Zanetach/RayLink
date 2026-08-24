@@ -1,5 +1,16 @@
 # RayLink Changelog
 
+## 0.2.27 - 2026-08-24
+
+### Added
+
+- Added a native Loon node subscription to the universal user URL, including
+  explicit `format=loon`, Loon User-Agent negotiation, and client links in the
+  administrator console and user portal.
+- Loon exports compatible Shadowsocks, VMess, VLESS, Trojan, AnyTLS, and
+  Hysteria 2 nodes while omitting TUIC and legacy Hysteria nodes that would
+  invalidate the subscription.
+
 ## 0.2.26 - 2026-08-07
 
 ### Changed

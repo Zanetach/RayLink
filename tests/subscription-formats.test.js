@@ -214,6 +214,40 @@ test("Egern node subscription uses its native proxy schema and excludes unsuppor
   assert.doesNotMatch(artifact.body, /policy_groups:/);
 });
 
+test("Loon node subscription uses native proxy lines and excludes unsupported protocols", () => {
+  const artifact = buildSubscriptionArtifact({
+    format: "loon",
+    singBoxConfig: {
+      ...singBoxConfig,
+      outbounds: [
+        ...singBoxConfig.outbounds,
+        {
+          type: "tuic",
+          tag: "raylink-tokyo-tuic",
+          server: "node.example.com",
+          server_port: 8447,
+          uuid: "22222222-2222-4222-8222-222222222222",
+          password: "tuic-password",
+          tls: { enabled: true, server_name: "node.example.com" }
+        }
+      ]
+    }
+  });
+
+  assert.equal(artifact.contentType, "text/plain; charset=utf-8");
+  assert.equal(artifact.filename, "raylink-loon.list");
+  assert.match(
+    artifact.body,
+    /^raylink-tokyo-vless=vless,node\.example\.com,443,"11111111-1111-4111-8111-111111111111",udp=true,transport=tcp,over-tls=true,sni=www\.microsoft\.com,public-key="public-key",short-id=a1b2c3d4$/m
+  );
+  assert.match(
+    artifact.body,
+    /^raylink-tokyo-hysteria2=Hysteria2,node\.example\.com,8448,"hysteria-password",tls-name=node\.example\.com,skip-cert-verify=false,udp=true$/m
+  );
+  assert.doesNotMatch(artifact.body, /raylink-tokyo-tuic/);
+  assert.doesNotMatch(artifact.body, /^proxies:/m);
+});
+
 test("Egern profile adds smart TCP UDP manual policies, routing and encrypted DNS", () => {
   const artifact = buildSubscriptionArtifact({
     format: "egern-profile",
@@ -352,7 +386,7 @@ test("Mihomo and Egern inherit the probe URL from the unified sing-box route pol
   assert.ok(!egern.includes("https://www.gstatic.com/generate_204"));
 });
 
-test("Mihomo and Egern exporters cover every shared RayLink public protocol", () => {
+test("Mihomo, Egern and Loon exporters cover every compatible RayLink public protocol", () => {
   const sharedConfig = {
     outbounds: [
       {
@@ -423,6 +457,16 @@ test("Mihomo and Egern exporters cover every shared RayLink public protocol", ()
     assert.match(egern, new RegExp(`- ${type}:`));
   }
   assert.doesNotMatch(egern, /hysteria:/);
+
+  const loon = buildSubscriptionArtifact({
+    format: "loon",
+    singBoxConfig: sharedConfig
+  }).body;
+  for (const type of ["shadowsocks", "vmess", "trojan", "anytls"]) {
+    assert.match(loon, new RegExp(`=${type},`));
+  }
+  assert.doesNotMatch(loon, /=tuic,/i);
+  assert.doesNotMatch(loon, /=hysteria,/i);
 });
 
 test("TUIC exporters do not require an ALPN the managed server did not advertise", () => {

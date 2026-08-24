@@ -225,6 +225,7 @@ function sendSubscriptionLanding(request, response, subscriptionUrl) {
     return target.toString();
   };
   const mihomoUrl = formatUrl("mihomo");
+  const loonUrl = formatUrl("loon");
   const egernUrl = formatUrl("egern");
   const egernProfileUrl = formatUrl("egern-profile");
   const singBoxUrl = formatUrl("singbox");
@@ -257,13 +258,14 @@ function sendSubscriptionLanding(request, response, subscriptionUrl) {
     <p>这是通用订阅入口。RayLink 会为不同客户端生成兼容配置；订阅地址包含访问凭据，请勿转发。</p>
     <div class="grid">
       <a href="${escapeHtml(clashImport)}"><strong>Clash Verge Rev / Mihomo</strong><small>Windows、macOS、Linux · 一键导入</small></a>
+      <a href="${escapeHtml(loonUrl)}"><strong>Loon 节点订阅</strong><small>iPhone、iPad、macOS · 保留客户端现有规则</small></a>
       <a href="${escapeHtml(egernProfileImport)}"><strong>Egern 智能配置</strong><small>iPhone、iPad · 智能选择、分流和 DNS</small></a>
       <a href="${escapeHtml(egernImport)}"><strong>Egern 节点订阅</strong><small>只导入节点，保留客户端现有规则</small></a>
       <a href="${escapeHtml(singBoxUrl)}"><strong>sing-box JSON</strong><small>官方客户端与 Hiddify 高级配置</small></a>
       <a href="${escapeHtml(mihomoUrl)}"><strong>下载 Mihomo YAML</strong><small>适用于 Clash Verge Rev、FlClash</small></a>
       <a href="${escapeHtml(egernUrl)}"><strong>下载 Egern YAML</strong><small>Egern 原生 proxies 节点集合</small></a>
     </div>
-    <footer>同一个订阅身份支持 Mihomo、Egern 与 sing-box；重新生成订阅后，旧地址会统一失效。</footer>
+    <footer>同一个订阅身份支持 Mihomo、Loon、Egern 与 sing-box；重新生成订阅后，旧地址会统一失效。</footer>
   </main>
 </body>
 </html>`;
@@ -285,6 +287,7 @@ const subscriptionFormatAliases = new Map([
   ["mihomo", "mihomo"],
   ["clash", "mihomo"],
   ["clash-meta", "mihomo"],
+  ["loon", "loon"],
   ["egern", "egern"],
   ["egern-profile", "egern-profile"],
   ["singbox", "singbox"],
@@ -297,6 +300,7 @@ function subscriptionFormatForRequest(request, url, pathFormat = "") {
   const userAgent = String(request.headers["user-agent"] || "").toLowerCase();
   const accept = String(request.headers.accept || "").toLowerCase();
   if (userAgent.includes("egern")) return "egern";
+  if (userAgent.includes("loon")) return "loon";
   if (/(?:clash|mihomo|flclash|stash)/.test(userAgent)) return "mihomo";
   if (/(?:sing-box|singbox|hiddify)/.test(userAgent)) return "singbox";
   if (accept.includes("text/html") && /mozilla|safari|chrome|firefox|edge/.test(userAgent)) {
@@ -517,6 +521,7 @@ export async function createRayLinkApp(options) {
     const universal = subscriptionUrl(subscription);
     return {
       mihomo: `${universal}?format=mihomo`,
+      loon: `${universal}?format=loon`,
       egern: `${universal}?format=egern`,
       egernProfile: `${universal}?format=egern-profile`,
       singbox: `${universal}?format=singbox`
@@ -1212,7 +1217,7 @@ export async function createRayLinkApp(options) {
       }
 
       const subscriptionMatch = url.pathname.match(
-        /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})(?:\/(sing-box\.json|mihomo\.yaml|egern\.yaml|egern-profile\.yaml))?$/
+        /^\/sub\/([A-Za-z0-9_-]{16,64})\/([A-Za-z0-9_-]{32,128})(?:\/(sing-box\.json|mihomo\.yaml|loon\.list|egern\.yaml|egern-profile\.yaml))?$/
       );
       if (["GET", "HEAD"].includes(request.method) && subscriptionMatch) {
         const subscriptionUser = store.userForSubscription(subscriptionMatch[1], subscriptionMatch[2]);
@@ -1225,6 +1230,7 @@ export async function createRayLinkApp(options) {
         const pathFormats = {
           "sing-box.json": "singbox",
           "mihomo.yaml": "mihomo",
+          "loon.list": "loon",
           "egern.yaml": "egern",
           "egern-profile.yaml": "egern-profile"
         };
@@ -1359,7 +1365,7 @@ export async function createRayLinkApp(options) {
           return;
         }
         const portalConfigMatch = url.pathname.match(
-          /^\/api\/portal\/config\/(sing-box|singbox|mihomo|egern|egern-profile)$/
+          /^\/api\/portal\/config\/(sing-box|singbox|mihomo|loon|egern|egern-profile)$/
         );
         if (request.method === "GET" && portalConfigMatch) {
           const format = portalConfigMatch[1] === "sing-box"

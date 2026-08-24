@@ -6,7 +6,7 @@
   <meta name="description" content="RayLink 用户中心">
   <title>用户中心 · RayLink</title>
   <link rel="icon" href="/assets/brand/raylink-mark.svg?v=20260726" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=0.2.26">
+  <link rel="stylesheet" href="/styles.css?v=0.2.27">
 </head>
 <body class="portal-page">
   <main class="portal-shell">
@@ -35,7 +35,7 @@
       </div>
       <p class="drawer-section-label">当前用户权益</p>
       <h1 id="portal-account-title">—</h1>
-      <p id="portal-entitlement-description">流量和节点范围由管理员设置；通用订阅统一支持 Clash/Mihomo、Egern 与 sing-box。</p>
+      <p id="portal-entitlement-description">流量和节点范围由管理员设置；通用订阅统一支持 Clash/Mihomo、Loon、Egern 与 sing-box。</p>
       <div class="entitlement-preview">
         <span><small>剩余流量</small><strong id="portal-remaining-quota">—</strong></span>
         <span><small>节点范围</small><strong id="portal-node-scope">—</strong></span>
@@ -44,7 +44,7 @@
         <div>
           <p class="drawer-section-label">客户端订阅</p>
           <h2 id="portal-subscription-title">一个地址，自动同步配置</h2>
-          <p id="portal-subscription-status">一个地址支持 Clash/Mihomo、Egern 和 sing-box；仅在重置时更换。</p>
+          <p id="portal-subscription-status">一个地址支持 Clash/Mihomo、Loon、Egern 和 sing-box；仅在重置时更换。</p>
         </div>
         <div class="portal-subscription-value" id="portal-subscription-value" hidden>
           <label for="portal-subscription-url">订阅地址</label>
@@ -62,6 +62,10 @@
               <a class="subscription-client-action recommended" id="portal-import-mihomo" href="#">
                 <span><strong>Clash / Mihomo</strong><small>Windows · macOS · Android</small></span>
                 <span class="subscription-client-badge">推荐</span>
+              </a>
+              <a class="subscription-client-action" id="portal-import-loon" href="#">
+                <span><strong>Loon 节点</strong><small>iPhone · iPad · macOS</small></span>
+                <span class="subscription-client-badge">添加</span>
               </a>
               <a class="subscription-client-action" id="portal-import-egern" href="#">
                 <span><strong>Egern 完整配置</strong><small>iPhone · iPad</small></span>
@@ -96,7 +100,7 @@
     </section>
   </main>
   <script src="/qrcode.min.js?v=1.0.0"></script>
-  <script src="/subscription-qr.js?v=0.2.26"></script>
-  <script src="/portal.js?v=0.2.26"></script>
+  <script src="/subscription-qr.js?v=0.2.27"></script>
+  <script src="/portal.js?v=0.2.27"></script>
 </body>
 </html>
