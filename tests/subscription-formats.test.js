@@ -56,6 +56,38 @@ const singBoxConfig = {
   ]
 };
 
+test("smart endpoint overrides adapt dialing without replacing the Host identity", () => {
+  const endpointOverrides = {
+    "node.example.com": "203.0.113.20"
+  };
+
+  const singBox = JSON.parse(buildSubscriptionArtifact({
+    format: "singbox",
+    singBoxConfig,
+    endpointOverrides
+  }).body);
+  const vless = singBox.outbounds.find((outbound) => outbound.type === "vless");
+  assert.equal(vless.server, "node.example.com");
+  assert.equal(vless.domain_resolver, "raylink-endpoint-hosts");
+  assert.deepEqual(
+    singBox.dns.servers.find((server) => server.tag === "raylink-endpoint-hosts"),
+    {
+      type: "hosts",
+      tag: "raylink-endpoint-hosts",
+      predefined: { "node.example.com": "203.0.113.20" }
+    }
+  );
+
+  const loon = buildSubscriptionArtifact({
+    format: "loon",
+    singBoxConfig,
+    endpointOverrides
+  }).body;
+  assert.match(loon, /raylink-tokyo-hysteria2=Hysteria2,203\.0\.113\.20,8448,/);
+  assert.match(loon, /tls-name=node\.example\.com/);
+  assert.doesNotMatch(loon, /=Hysteria2,node\.example\.com,8448,/);
+});
+
 test("Mihomo subscription contains compatible nodes, smart groups, routing and DNS", () => {
   const artifact = buildSubscriptionArtifact({
     format: "mihomo",

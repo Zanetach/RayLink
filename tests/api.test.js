@@ -48,6 +48,11 @@ async function startTestApp(overrides = {}) {
       available: () => false,
       get: async () => null
     },
+    endpointResolver: {
+      resolve: async ({ fallbackAddress }) => fallbackAddress
+        ? { address: fallbackAddress, source: "configured-fallback" }
+        : null
+    },
     ...overrides
   });
   await app.listen({ host: "127.0.0.1", port: 0 });
@@ -2009,6 +2014,49 @@ test("admin resets an existing user password without changing the entitlement or
   );
 });
 
+test("FlClash subscription keeps the Host domain while pinning its resolved dial address", async (t) => {
+  const testApp = await startTestApp({
+    proxyHost: "node.example.com",
+    localHostDialAddress: "203.0.113.10",
+    endpointResolver: {
+      resolve: async () => ({
+        address: "203.0.113.20",
+        source: "dns"
+      })
+    }
+  });
+  t.after(() => testApp.close());
+
+  const loginResponse = await fetch(`${testApp.baseUrl}/api/portal/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "priya@vantage-bioworks.in",
+      password: "raylink-demo"
+    })
+  });
+  assert.equal(loginResponse.status, 200);
+  const portalCookie = loginResponse.headers.getSetCookie()[0].split(";")[0];
+  const created = await (await fetch(`${testApp.baseUrl}/api/portal/subscription/rotate`, {
+    method: "POST",
+    headers: { cookie: portalCookie }
+  })).json();
+  const subscriptionPath = new URL(created.subscriptionUrl).pathname;
+
+  const response = await fetch(`${testApp.baseUrl}${subscriptionPath}`, {
+    headers: { "user-agent": "FlClash/v0.8.91 mihomo" }
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /application\/yaml/);
+  const body = await response.text();
+
+  assert.match(body, /server: "node\.example\.com"/);
+  assert.match(body, /hosts:\n  "node\.example\.com": "203\.0\.113\.20"/);
+  assert.match(body, /fake-ip-filter:\n    - "node\.example\.com"/);
+  assert.match(body, /proxy-server-nameserver-policy:\n    "node\.example\.com":/);
+  assert.doesNotMatch(body, /server: "203\.0\.113\.20"/);
+});
+
 test("admin updates the single runtime host used by portal client configs", async (t) => {
   const testApp = await startTestApp({ proxyHost: "old-node.example.com", listenPort: 8388 });
   t.after(() => testApp.close());
@@ -2040,7 +2088,7 @@ test("admin updates the single runtime host used by portal client configs", asyn
   assert.equal((await configResponse.json()).outbounds[0].server, "node.example.com");
 });
 
-test("local Host dial address avoids Fake-IP without replacing the Host address", async (t) => {
+test("configured endpoint fallback avoids Fake-IP without replacing the Host address", async (t) => {
   const testApp = await startTestApp({
     proxyHost: "node.example.com",
     localHostDialAddress: "203.0.113.10"
@@ -2069,7 +2117,12 @@ test("local Host dial address avoids Fake-IP without replacing the Host address"
   })).json();
   const shadowsocks = config.outbounds.find((outbound) => outbound.type === "shadowsocks");
 
-  assert.equal(shadowsocks.server, "203.0.113.10");
+  assert.equal(shadowsocks.server, "node.example.com");
+  assert.equal(shadowsocks.domain_resolver, "raylink-endpoint-hosts");
+  assert.deepEqual(
+    config.dns.servers.find((server) => server.tag === "raylink-endpoint-hosts")?.predefined,
+    { "node.example.com": "203.0.113.10" }
+  );
 
   const loonResponse = await fetch(`${testApp.baseUrl}/api/portal/config/loon`, {
     headers: { cookie: portalCookie }

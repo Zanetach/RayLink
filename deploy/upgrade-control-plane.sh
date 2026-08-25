@@ -110,6 +110,7 @@ fi
 "$node_root/bin/node" --check "$source_root/server/index.js"
 "$node_root/bin/node" --check "$source_root/server/app.js"
 "$node_root/bin/node" --check "$source_root/server/subscriptions/formats.js"
+"$node_root/bin/node" --check "$source_root/server/subscriptions/endpoint-resolver.js"
 "$node_root/bin/node" --check "$source_root/web/app.js"
 
 install_parent="$(dirname -- "$install_root")"

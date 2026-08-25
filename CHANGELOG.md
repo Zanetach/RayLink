@@ -1,5 +1,18 @@
 # RayLink Changelog
 
+## 0.2.30 - 2026-08-25
+
+### Changed
+
+- Host identity now remains a domain in stored and rendered configurations while
+  RayLink resolves and health-checks its current IPv4 dial endpoint through
+  trusted DNS with TTL caching.
+- Universal subscriptions adapt the resolved endpoint per client: Mihomo keeps
+  the domain with a pinned hosts mapping and Fake-IP exclusion, sing-box uses a
+  dedicated hosts resolver, and Loon/Egern dial the IP while retaining TLS SNI.
+- Endpoint resolution persists the last-known-good address and falls back to the
+  installation public IP when DNS or health checks are unavailable.
+
 ## 0.2.29 - 2026-08-24
 
 ### Fixed

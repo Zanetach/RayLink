@@ -42,6 +42,7 @@ const MIHOMO_SMART_HEALTH_TIMEOUT_MS = 8000;
 const MIHOMO_TCP_HEALTH_TIMEOUT_MS = 5000;
 const MIHOMO_UDP_HEALTH_TIMEOUT_MS = 12000;
 const MIHOMO_TUIC_REQUEST_TIMEOUT_MS = 8000;
+const ENDPOINT_HOSTS_DNS_TAG = "raylink-endpoint-hosts";
 
 function scalar(value) {
   if (value === null) return "null";
@@ -82,6 +83,52 @@ export function stringifyYaml(value) {
 
 function nodeOutbounds(config) {
   return (config?.outbounds || []).filter((outbound) => generatedNodeTypes.has(outbound.type));
+}
+
+function normalizedEndpointOverrides(endpointOverrides) {
+  return Object.fromEntries(
+    Object.entries(endpointOverrides || {}).filter(([hostname, address]) => (
+      hostname && address && hostname !== address
+    ))
+  );
+}
+
+function configWithDirectDialEndpoints(singBoxConfig, endpointOverrides) {
+  const pinnedEndpoints = normalizedEndpointOverrides(endpointOverrides);
+  return {
+    ...singBoxConfig,
+    outbounds: (singBoxConfig?.outbounds || []).map((outbound) => (
+      generatedNodeTypes.has(outbound.type) && pinnedEndpoints[outbound.server]
+        ? { ...outbound, server: pinnedEndpoints[outbound.server] }
+        : outbound
+    ))
+  };
+}
+
+function configWithSingBoxEndpointResolver(singBoxConfig, endpointOverrides) {
+  const pinnedEndpoints = normalizedEndpointOverrides(endpointOverrides);
+  if (!Object.keys(pinnedEndpoints).length) return singBoxConfig;
+  const existingDnsServers = (singBoxConfig?.dns?.servers || [])
+    .filter((server) => server.tag !== ENDPOINT_HOSTS_DNS_TAG);
+  return {
+    ...singBoxConfig,
+    dns: {
+      ...(singBoxConfig?.dns || {}),
+      servers: [
+        ...existingDnsServers,
+        {
+          type: "hosts",
+          tag: ENDPOINT_HOSTS_DNS_TAG,
+          predefined: pinnedEndpoints
+        }
+      ]
+    },
+    outbounds: (singBoxConfig?.outbounds || []).map((outbound) => (
+      generatedNodeTypes.has(outbound.type) && pinnedEndpoints[outbound.server]
+        ? { ...outbound, domain_resolver: ENDPOINT_HOSTS_DNS_TAG }
+        : outbound
+    ))
+  };
 }
 
 function groupMembers(config, tag, fallback = []) {
@@ -383,7 +430,7 @@ function buildLoonNodes(singBoxConfig) {
   return `${nodes.join("\n")}\n`;
 }
 
-function buildMihomoConfig(singBoxConfig, inputPolicy) {
+function buildMihomoConfig(singBoxConfig, inputPolicy, endpointOverrides = {}) {
   const routePolicy = normalizeRoutingPolicy(inputPolicy);
   const proxies = nodeOutbounds(singBoxConfig)
     .filter((outbound) => mihomoCompatibleTypes.has(outbound.type))
@@ -469,6 +516,8 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
       proxies: manualCandidates
     }
   ];
+  const pinnedEndpoints = normalizedEndpointOverrides(endpointOverrides);
+  const pinnedHostnames = Object.keys(pinnedEndpoints);
   return {
     "mixed-port": 7890,
     "allow-lan": false,
@@ -481,11 +530,14 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
       "store-selected": false,
       "store-fake-ip": true
     },
+    ...(pinnedHostnames.length ? { hosts: pinnedEndpoints } : {}),
     dns: {
       enable: true,
       ipv6: false,
+      ...(pinnedHostnames.length ? { "use-hosts": true } : {}),
       "enhanced-mode": "fake-ip",
       "fake-ip-range": "198.18.0.1/16",
+      ...(pinnedHostnames.length ? { "fake-ip-filter": pinnedHostnames } : {}),
       "respect-rules": true,
       "default-nameserver": ["223.5.5.5"],
       nameserver: routePolicy.mode === "direct"
@@ -499,7 +551,15 @@ function buildMihomoConfig(singBoxConfig, inputPolicy) {
       },
       "proxy-server-nameserver": [
         "https://223.5.5.5/dns-query"
-      ]
+      ],
+      ...(pinnedHostnames.length ? {
+        "proxy-server-nameserver-policy": Object.fromEntries(
+          pinnedHostnames.map((hostname) => [
+            hostname,
+            ["https://223.5.5.5/dns-query"]
+          ])
+        )
+      } : {})
     },
     proxies,
     "proxy-groups": proxyGroups,
@@ -836,30 +896,35 @@ function buildEgernProfile(singBoxConfig, inputPolicy) {
   };
 }
 
-export function buildSubscriptionArtifact({ format, singBoxConfig, routePolicy }) {
+export function buildSubscriptionArtifact({
+  format,
+  singBoxConfig,
+  routePolicy,
+  endpointOverrides = {}
+}) {
   if (format === "singbox") {
     return {
       contentType: "application/json; charset=utf-8",
       filename: "raylink-sing-box.json",
-      body: JSON.stringify(singBoxConfig)
+      body: JSON.stringify(configWithSingBoxEndpointResolver(singBoxConfig, endpointOverrides))
     };
   }
   if (format === "mihomo") {
     return {
       contentType: "application/yaml; charset=utf-8",
       filename: "raylink-mihomo.yaml",
-      body: stringifyYaml(buildMihomoConfig(singBoxConfig, routePolicy))
+      body: stringifyYaml(buildMihomoConfig(singBoxConfig, routePolicy, endpointOverrides))
     };
   }
   if (format === "loon") {
     return {
       contentType: "text/plain; charset=utf-8",
       filename: "raylink-loon.list",
-      body: buildLoonNodes(singBoxConfig)
+      body: buildLoonNodes(configWithDirectDialEndpoints(singBoxConfig, endpointOverrides))
     };
   }
   if (format === "egern") {
-    const proxies = egernProxies(singBoxConfig);
+    const proxies = egernProxies(configWithDirectDialEndpoints(singBoxConfig, endpointOverrides));
     if (!proxies.length) throw subscriptionError("NO_COMPATIBLE_NODES", "当前没有 Egern 可用节点");
     return {
       contentType: "application/yaml; charset=utf-8",
@@ -871,7 +936,10 @@ export function buildSubscriptionArtifact({ format, singBoxConfig, routePolicy }
     return {
       contentType: "application/yaml; charset=utf-8",
       filename: "raylink-egern-profile.yaml",
-      body: stringifyYaml(buildEgernProfile(singBoxConfig, routePolicy))
+      body: stringifyYaml(buildEgernProfile(
+        configWithDirectDialEndpoints(singBoxConfig, endpointOverrides),
+        routePolicy
+      ))
     };
   }
   throw subscriptionError("SUBSCRIPTION_FORMAT_UNSUPPORTED", "订阅格式不受支持", 400);
