@@ -75,6 +75,38 @@ test("endpoint resolver skips unhealthy DNS answers", async (t) => {
   });
 });
 
+test("endpoint resolver probes every candidate and TCP port in one health window", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "raylink-endpoints-"));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const releases = [];
+  let probeCalls = 0;
+  const resolver = new EndpointResolver({
+    cachePath: join(dataDir, "endpoint-cache.json"),
+    lookup: async () => [
+      { address: "203.0.113.20", ttl: 60 },
+      { address: "203.0.113.21", ttl: 60 }
+    ],
+    probe: async ({ address, port }) => new Promise((resolve) => {
+      probeCalls += 1;
+      releases.push(() => resolve(address === "203.0.113.21" && port === 8443));
+      if (releases.length === 4) queueMicrotask(() => releases.forEach((release) => release()));
+    })
+  });
+
+  assert.deepEqual(await resolver.resolve({
+    hostname: "node.example.com",
+    protocols: [
+      { type: "shadowsocks", port: 8388, enabled: true },
+      { type: "naive", port: 8443, enabled: true }
+    ],
+    fallbackAddress: "203.0.113.10"
+  }), {
+    address: "203.0.113.21",
+    source: "dns"
+  });
+  assert.equal(probeCalls, 4);
+});
+
 test("endpoint resolver reaches fallback within its trusted DNS deadline", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "raylink-endpoints-"));
   t.after(() => rm(dataDir, { recursive: true, force: true }));

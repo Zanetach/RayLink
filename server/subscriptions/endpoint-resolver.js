@@ -4,17 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { connect, isIP } from "node:net";
 import { dirname } from "node:path";
 
-const tcpProtocolTypes = new Set([
-  "shadowsocks",
-  "vmess",
-  "vless",
-  "trojan",
-  "naive",
-  "anytls",
-  "socks",
-  "http",
-  "mixed"
-]);
+import { protocolActivationPolicy } from "../protocol-activation.js";
 
 function trustedDnsLookup(servers) {
   const resolver = new Resolver();
@@ -42,8 +32,13 @@ function tcpProbe({ address, port, timeoutMs }) {
 
 function tcpPorts(protocols) {
   return [...new Set((protocols || []).flatMap((protocol) => {
-    const usesTcp = tcpProtocolTypes.has(protocol.type)
-      && protocol.transport?.type !== "quic";
+    let usesTcp = false;
+    try {
+      usesTcp = protocolActivationPolicy(protocol.type).network === "tcp"
+        && protocol.transport?.type !== "quic";
+    } catch {
+      usesTcp = false;
+    }
     const port = Number(protocol.port ?? protocol.listen_port ?? protocol.listenPort);
     return protocol.enabled !== false && usesTcp && Number.isInteger(port) && port > 0
       ? [port]
@@ -128,9 +123,11 @@ export class EndpointResolver {
       answers = [];
     }
     const ports = tcpPorts(protocols);
-    for (const answer of answers) {
-      const healthy = !ports.length || await this.#hasHealthyPort(answer.address, ports);
-      if (!healthy) continue;
+    const health = await Promise.all(answers.map((answer) => (
+      !ports.length || this.#hasHealthyPort(answer.address, ports)
+    )));
+    const answer = answers.find((_, index) => health[index]);
+    if (answer) {
       const ttlMs = Math.max(
         this.minCacheTtlMs,
         Math.min(this.maxCacheTtlMs, answer.ttl * 1_000)
@@ -158,14 +155,14 @@ export class EndpointResolver {
   }
 
   async #hasHealthyPort(address, ports) {
-    for (const port of ports) {
+    const results = await Promise.all(ports.map(async (port) => {
       try {
-        if (await this.probe({ address, port, timeoutMs: this.probeTimeoutMs })) return true;
+        return await this.probe({ address, port, timeoutMs: this.probeTimeoutMs });
       } catch {
-        // Try the next enabled TCP protocol before rejecting this DNS answer.
+        return false;
       }
-    }
-    return false;
+    }));
+    return results.some(Boolean);
   }
 
   async #load() {
