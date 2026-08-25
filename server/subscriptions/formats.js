@@ -370,7 +370,7 @@ function loonTlsOptions(outbound, { reality = false } = {}) {
     ];
   }
   return [
-    `tls-name=${serverName}`,
+    `sni=${serverName}`,
     "skip-cert-verify=false"
   ];
 }

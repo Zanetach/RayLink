@@ -84,7 +84,8 @@ test("smart endpoint overrides adapt dialing without replacing the Host identity
     endpointOverrides
   }).body;
   assert.match(loon, /raylink-tokyo-hysteria2=Hysteria2,203\.0\.113\.20,8448,/);
-  assert.match(loon, /tls-name=node\.example\.com/);
+  assert.match(loon, /sni=node\.example\.com/);
+  assert.doesNotMatch(loon, /tls-name=/);
   assert.doesNotMatch(loon, /=Hysteria2,node\.example\.com,8448,/);
 
   const implicitTlsNameConfig = {
@@ -102,7 +103,7 @@ test("smart endpoint overrides adapt dialing without replacing the Host identity
     singBoxConfig: implicitTlsNameConfig,
     endpointOverrides
   }).body;
-  assert.match(implicitLoon, /Hysteria2,203\.0\.113\.20,8448,[^\n]+tls-name=node\.example\.com/);
+  assert.match(implicitLoon, /Hysteria2,203\.0\.113\.20,8448,[^\n]+sni=node\.example\.com/);
   const implicitEgern = buildSubscriptionArtifact({
     format: "egern",
     singBoxConfig: implicitTlsNameConfig,
@@ -307,11 +308,75 @@ test("Loon node subscription uses native proxy lines and excludes unsupported pr
   );
   assert.match(
     artifact.body,
-    /^raylink-tokyo-hysteria2=Hysteria2,node\.example\.com,8448,"hysteria-password",tls-name=node\.example\.com,skip-cert-verify=false,udp=true$/m
+    /^raylink-tokyo-hysteria2=Hysteria2,node\.example\.com,8448,"hysteria-password",sni=node\.example\.com,skip-cert-verify=false,udp=true$/m
   );
+  assert.doesNotMatch(artifact.body, /tls-name=/);
   assert.doesNotMatch(artifact.body, /raylink-tokyo-tuic/);
   assert.doesNotMatch(artifact.body, /raylink-invalid-anytls-ws/);
   assert.doesNotMatch(artifact.body, /^proxies:/m);
+});
+
+test("Loon preserves the TLS Host identity when every supported protocol dials an IP", () => {
+  const tls = { enabled: true, server_name: "node.example.com" };
+  const artifact = buildSubscriptionArtifact({
+    format: "loon",
+    endpointOverrides: { "node.example.com": "203.0.113.20" },
+    singBoxConfig: {
+      outbounds: [
+        {
+          type: "vmess",
+          tag: "raylink-local-vmess",
+          server: "node.example.com",
+          server_port: 8443,
+          security: "auto",
+          uuid: "11111111-1111-4111-8111-111111111111",
+          tls
+        },
+        {
+          type: "vless",
+          tag: "raylink-local-vless",
+          server: "node.example.com",
+          server_port: 8444,
+          uuid: "22222222-2222-4222-8222-222222222222",
+          tls
+        },
+        {
+          type: "trojan",
+          tag: "raylink-local-trojan",
+          server: "node.example.com",
+          server_port: 9443,
+          password: "trojan-password",
+          tls
+        },
+        {
+          type: "anytls",
+          tag: "raylink-local-anytls",
+          server: "node.example.com",
+          server_port: 8445,
+          password: "anytls-password",
+          tls
+        },
+        {
+          type: "hysteria2",
+          tag: "raylink-local-hysteria2",
+          server: "node.example.com",
+          server_port: 8448,
+          password: "hysteria2-password",
+          tls
+        }
+      ]
+    }
+  });
+
+  const expectedLines = [
+    'raylink-local-vmess=vmess,203.0.113.20,8443,auto,"11111111-1111-4111-8111-111111111111",udp=true,transport=tcp,over-tls=true,sni=node.example.com,skip-cert-verify=false',
+    'raylink-local-vless=vless,203.0.113.20,8444,"22222222-2222-4222-8222-222222222222",udp=true,transport=tcp,over-tls=true,sni=node.example.com,skip-cert-verify=false',
+    'raylink-local-trojan=trojan,203.0.113.20,9443,"trojan-password",sni=node.example.com,skip-cert-verify=false,udp=true',
+    'raylink-local-anytls=anytls,203.0.113.20,8445,"anytls-password",sni=node.example.com,skip-cert-verify=false,udp=true',
+    'raylink-local-hysteria2=Hysteria2,203.0.113.20,8448,"hysteria2-password",sni=node.example.com,skip-cert-verify=false,udp=true'
+  ];
+  assert.deepEqual(artifact.body.trim().split("\n"), expectedLines);
+  assert.doesNotMatch(artifact.body, /tls-name=/);
 });
 
 test("Egern profile adds smart TCP UDP manual policies, routing and encrypted DNS", () => {
