@@ -86,6 +86,30 @@ test("smart endpoint overrides adapt dialing without replacing the Host identity
   assert.match(loon, /raylink-tokyo-hysteria2=Hysteria2,203\.0\.113\.20,8448,/);
   assert.match(loon, /tls-name=node\.example\.com/);
   assert.doesNotMatch(loon, /=Hysteria2,node\.example\.com,8448,/);
+
+  const implicitTlsNameConfig = {
+    outbounds: [{
+      type: "hysteria2",
+      tag: "raylink-implicit-sni",
+      server: "node.example.com",
+      server_port: 8448,
+      password: "hysteria-password",
+      tls: { enabled: true }
+    }]
+  };
+  const implicitLoon = buildSubscriptionArtifact({
+    format: "loon",
+    singBoxConfig: implicitTlsNameConfig,
+    endpointOverrides
+  }).body;
+  assert.match(implicitLoon, /Hysteria2,203\.0\.113\.20,8448,[^\n]+tls-name=node\.example\.com/);
+  const implicitEgern = buildSubscriptionArtifact({
+    format: "egern",
+    singBoxConfig: implicitTlsNameConfig,
+    endpointOverrides
+  }).body;
+  assert.match(implicitEgern, /server: "203\.0\.113\.20"/);
+  assert.match(implicitEgern, /sni: "node\.example\.com"/);
 });
 
 test("Mihomo subscription contains compatible nodes, smart groups, routing and DNS", () => {

@@ -31,6 +31,7 @@ test("production Caddy entry point preserves private subscription URLs", async (
   assert.match(installer, /RAYLINK_SUBSCRIPTION_ORIGIN=\$\{public_origin\}/);
   assert.match(installer, /RAYLINK_LOCAL_HOST_DIAL_ADDRESS=\$\{public_ip\}/);
   assert.match(installer, /RAYLINK_ENDPOINT_DNS_SERVERS=1\.1\.1\.1,8\.8\.8\.8/);
+  assert.match(installer, /RAYLINK_ENDPOINT_DNS_TIMEOUT_MS=2000/);
   assert.match(installer, /RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS=1500/);
   assert.match(installer, /caddy validate --config "\$managed_root\/Caddyfile" --adapter caddyfile/);
   assert.match(installer, /ufw allow 80\/tcp/);

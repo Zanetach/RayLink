@@ -224,7 +224,8 @@ DNS 或健康检查失败时，才使用 `RAYLINK_LOCAL_HOST_DIAL_ADDRESS` 作�
 无参数订阅会继续按客户端自动适配：FlClash/Mihomo 和 sing-box 保留节点域名并注入精确解析，
 Loon/Egern 使用已解析 IP 拨号但保留 TLS SNI 域名，从而避开 Fake-IP 自环。可信 DNS 默认是
 `1.1.1.1,8.8.8.8`，可用 `RAYLINK_ENDPOINT_DNS_SERVERS` 调整；TCP 检查超时默认 1500ms，
-可用 `RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS` 调整。
+可用 `RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS` 调整。可信 DNS 查询本身最多等待 2000ms，可用
+`RAYLINK_ENDPOINT_DNS_TIMEOUT_MS` 调整，确保更新请求能及时进入持久缓存或公网 IP 回退。
 
 运行自动化生产前检查。`check:production` 需要 PATH 中有 sing-box 1.13.14 与 OpenSSL；
 它覆盖代码回归、协议语法和短时内存烟测，但不替代干净 VPS、真实客户端、故障注入与

@@ -93,15 +93,30 @@ function normalizedEndpointOverrides(endpointOverrides) {
   );
 }
 
+function mapPinnedNodeOutbounds(singBoxConfig, pinnedEndpoints, transform) {
+  return (singBoxConfig?.outbounds || []).map((outbound) => {
+    const address = generatedNodeTypes.has(outbound.type)
+      ? pinnedEndpoints[outbound.server]
+      : null;
+    return address ? transform(outbound, address) : outbound;
+  });
+}
+
 function configWithDirectDialEndpoints(singBoxConfig, endpointOverrides) {
   const pinnedEndpoints = normalizedEndpointOverrides(endpointOverrides);
   return {
     ...singBoxConfig,
-    outbounds: (singBoxConfig?.outbounds || []).map((outbound) => (
-      generatedNodeTypes.has(outbound.type) && pinnedEndpoints[outbound.server]
-        ? { ...outbound, server: pinnedEndpoints[outbound.server] }
-        : outbound
-    ))
+    outbounds: mapPinnedNodeOutbounds(
+      singBoxConfig,
+      pinnedEndpoints,
+      (outbound, address) => ({
+        ...outbound,
+        server: address,
+        ...(outbound.tls?.enabled && !outbound.tls.server_name
+          ? { tls: { ...outbound.tls, server_name: outbound.server } }
+          : {})
+      })
+    )
   };
 }
 
@@ -123,11 +138,11 @@ function configWithSingBoxEndpointResolver(singBoxConfig, endpointOverrides) {
         }
       ]
     },
-    outbounds: (singBoxConfig?.outbounds || []).map((outbound) => (
-      generatedNodeTypes.has(outbound.type) && pinnedEndpoints[outbound.server]
-        ? { ...outbound, domain_resolver: ENDPOINT_HOSTS_DNS_TAG }
-        : outbound
-    ))
+    outbounds: mapPinnedNodeOutbounds(
+      singBoxConfig,
+      pinnedEndpoints,
+      (outbound) => ({ ...outbound, domain_resolver: ENDPOINT_HOSTS_DNS_TAG })
+    )
   };
 }
 

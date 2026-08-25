@@ -9,6 +9,7 @@ const tcpProtocolTypes = new Set([
   "vmess",
   "vless",
   "trojan",
+  "naive",
   "anytls",
   "socks",
   "http",
@@ -60,12 +61,30 @@ function normalizeAnswers(answers) {
   });
 }
 
+async function withDeadline(promise, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`trusted DNS lookup timed out after ${timeoutMs}ms`)),
+          timeoutMs
+        );
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class EndpointResolver {
   constructor({
     cachePath,
     dnsServers = ["1.1.1.1", "8.8.8.8"],
     lookup = trustedDnsLookup(dnsServers),
     probe = tcpProbe,
+    lookupTimeoutMs = 2_000,
     probeTimeoutMs = 1_500,
     minCacheTtlMs = 1_000,
     maxCacheTtlMs = 5 * 60_000,
@@ -74,6 +93,7 @@ export class EndpointResolver {
     this.cachePath = cachePath;
     this.lookup = lookup;
     this.probe = probe;
+    this.lookupTimeoutMs = lookupTimeoutMs;
     this.probeTimeoutMs = probeTimeoutMs;
     this.minCacheTtlMs = minCacheTtlMs;
     this.maxCacheTtlMs = maxCacheTtlMs;
@@ -100,7 +120,10 @@ export class EndpointResolver {
   async #resolveFresh({ hostname, protocols, fallbackAddress }) {
     let answers = [];
     try {
-      answers = normalizeAnswers(await this.lookup(hostname));
+      answers = normalizeAnswers(await withDeadline(
+        this.lookup(hostname),
+        this.lookupTimeoutMs
+      ));
     } catch {
       answers = [];
     }
@@ -114,10 +137,13 @@ export class EndpointResolver {
       );
       this.records.set(hostname, {
         address: answer.address,
-        expiresAt: this.now() + ttlMs,
-        lastKnownGoodAt: this.now()
+        expiresAt: this.now() + ttlMs
       });
-      await this.#save();
+      try {
+        await this.#save();
+      } catch (error) {
+        console.warn(`[RayLink] Endpoint cache could not be saved: ${error.message}`);
+      }
       return { address: answer.address, source: "dns" };
     }
 

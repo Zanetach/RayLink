@@ -125,6 +125,11 @@ export function loadConfig(env = process.env) {
       1_500,
       "RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS"
     ),
+    endpointDnsTimeoutMs: positiveInteger(
+      env.RAYLINK_ENDPOINT_DNS_TIMEOUT_MS,
+      2_000,
+      "RAYLINK_ENDPOINT_DNS_TIMEOUT_MS"
+    ),
     protocolProbeUrl,
     alertWebhookUrl,
     alertIntervalMs: nonNegativeInteger(

@@ -2015,12 +2015,13 @@ test("admin resets an existing user password without changing the entitlement or
 });
 
 test("FlClash subscription keeps the Host domain while pinning its resolved dial address", async (t) => {
+  let resolvedAddress = "203.0.113.20";
   const testApp = await startTestApp({
     proxyHost: "node.example.com",
     localHostDialAddress: "203.0.113.10",
     endpointResolver: {
       resolve: async () => ({
-        address: "203.0.113.20",
+        address: resolvedAddress,
         source: "dns"
       })
     }
@@ -2055,6 +2056,20 @@ test("FlClash subscription keeps the Host domain while pinning its resolved dial
   assert.match(body, /fake-ip-filter:\n    - "node\.example\.com"/);
   assert.match(body, /proxy-server-nameserver-policy:\n    "node\.example\.com":/);
   assert.doesNotMatch(body, /server: "203\.0\.113\.20"/);
+
+  resolvedAddress = "203.0.113.21";
+  const refreshed = await fetch(`${testApp.baseUrl}${subscriptionPath}`, {
+    headers: {
+      "if-none-match": response.headers.get("etag"),
+      "user-agent": "FlClash/v0.8.91 mihomo"
+    }
+  });
+  assert.equal(refreshed.status, 200);
+  assert.notEqual(refreshed.headers.get("etag"), response.headers.get("etag"));
+  assert.match(
+    await refreshed.text(),
+    /hosts:\n  "node\.example\.com": "203\.0\.113\.21"/
+  );
 });
 
 test("admin updates the single runtime host used by portal client configs", async (t) => {

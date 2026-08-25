@@ -426,9 +426,13 @@ function normalizeSetupInput(body) {
     throw httpError("INVALID_SETUP_INPUT", "管理员密码至少 12 位，并包含至少三类字符", 422);
   }
 
+  const submittedRuntimeAddress = String(body.runtime?.address || "").trim();
   const runtime = {
     name: String(body.runtime?.name || "").trim(),
-    address: String(body.runtime?.address || "").trim(),
+    address: accessMode === "domain"
+      && isIP(submittedRuntimeAddress.replace(/^\[|\]$/g, ""))
+      ? canonicalHost
+      : submittedRuntimeAddress,
     region: String(body.runtime?.region || "").trim()
   };
 
@@ -494,6 +498,7 @@ export async function createRayLinkApp(options) {
   const endpointResolver = options.endpointResolver || new EndpointResolver({
     cachePath: options.endpointCachePath || join(options.dataDir, "endpoint-cache.json"),
     dnsServers: options.endpointDnsServers,
+    lookupTimeoutMs: options.endpointDnsTimeoutMs,
     probeTimeoutMs: options.endpointProbeTimeoutMs
   });
   const listenPort = options.listenPort || 8388;
@@ -523,22 +528,19 @@ export async function createRayLinkApp(options) {
     (await Promise.all(hosts.map(async (host) => {
       if (isIP(host.address)) return null;
       const fallbackAddress = host.id === "local" ? localHostDialAddress : "";
+      const configuredFallback = isIP(fallbackAddress)
+        ? { address: fallbackAddress, source: "configured-fallback" }
+        : null;
       let resolved;
       try {
-        resolved = endpointResolver?.resolve
-          ? await endpointResolver.resolve({
-              hostname: host.address,
-              protocols: host.protocols,
-              fallbackAddress
-            })
-          : fallbackAddress
-            ? { address: fallbackAddress, source: "configured-fallback" }
-            : null;
+        resolved = await endpointResolver.resolve({
+          hostname: host.address,
+          protocols: host.protocols,
+          fallbackAddress
+        });
       } catch (error) {
         console.warn(`[RayLink] Endpoint resolution failed for ${host.address}: ${error.message}`);
-        resolved = fallbackAddress
-          ? { address: fallbackAddress, source: "configured-fallback" }
-          : null;
+        resolved = configuredFallback;
       }
       return isIP(resolved?.address) ? [host.address, resolved.address] : null;
     }))).filter(Boolean)

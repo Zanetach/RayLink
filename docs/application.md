@@ -46,7 +46,7 @@ RayLink 保留 Host 域名作为节点身份，并自动从可信 DNS 解析拨�
 订阅渲染会按客户端适配：Mihomo/FlClash 使用 `hosts`、节点 DNS 策略和 Fake-IP 排除；sing-box
 使用专用 hosts DNS 与 `domain_resolver`；Loon/Egern 直接拨号到解析 IP，但协议 TLS SNI 不变。
 `RAYLINK_ENDPOINT_DNS_SERVERS` 默认 `1.1.1.1,8.8.8.8`，
-`RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS` 默认 `1500`。
+`RAYLINK_ENDPOINT_DNS_TIMEOUT_MS` 默认 `2000`，`RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS` 默认 `1500`。
 
 ## 验证
 

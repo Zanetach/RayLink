@@ -64,10 +64,12 @@ test("subscription origin is independent from the control-plane and Host address
 test("smart endpoint resolution uses configurable trusted DNS and probe timeout", () => {
   const config = loadConfig({
     RAYLINK_ENDPOINT_DNS_SERVERS: "1.1.1.1, 8.8.8.8",
+    RAYLINK_ENDPOINT_DNS_TIMEOUT_MS: "1800",
     RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS: "2500"
   });
 
   assert.deepEqual(config.endpointDnsServers, ["1.1.1.1", "8.8.8.8"]);
+  assert.equal(config.endpointDnsTimeoutMs, 1_800);
   assert.equal(config.endpointProbeTimeoutMs, 2_500);
   assert.deepEqual(loadConfig({}).endpointDnsServers, ["1.1.1.1", "8.8.8.8"]);
   assert.throws(
