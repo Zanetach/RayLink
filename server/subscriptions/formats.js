@@ -187,14 +187,14 @@ function mihomoDnsPolicyRules(policy) {
   return {
     "domain:localhost": ["system"],
     ...Object.fromEntries(LOCAL_DOMAIN_SUFFIXES.map((suffix) => [
-      `domain:*.${suffix}`,
+      `+.${suffix}`,
       ["system"]
     ])),
     ...Object.fromEntries(policy.rules.flatMap((rule) => {
       if (!rule.enabled || !["domain", "domain_suffix"].includes(rule.match)) return [];
       const key = rule.match === "domain"
         ? `domain:${rule.value}`
-        : `domain:*.${rule.value}`;
+        : `+.${rule.value}`;
       return [[key, dnsPolicyValue(rule.dns)]];
     }))
   };
