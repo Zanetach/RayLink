@@ -41,6 +41,7 @@ import {
   V2RayStatsCollector
 } from "./usage/v2ray-stats.js";
 import { buildSubscriptionArtifact } from "./subscriptions/formats.js";
+import { EndpointResolver } from "./subscriptions/endpoint-resolver.js";
 import {
   buildSubscriptionFormatUrls,
   resolveSubscriptionFormat,
@@ -425,9 +426,13 @@ function normalizeSetupInput(body) {
     throw httpError("INVALID_SETUP_INPUT", "管理员密码至少 12 位，并包含至少三类字符", 422);
   }
 
+  const submittedRuntimeAddress = String(body.runtime?.address || "").trim();
   const runtime = {
     name: String(body.runtime?.name || "").trim(),
-    address: String(body.runtime?.address || "").trim(),
+    address: accessMode === "domain"
+      && isIP(submittedRuntimeAddress.replace(/^\[|\]$/g, ""))
+      ? canonicalHost
+      : submittedRuntimeAddress,
     region: String(body.runtime?.region || "").trim()
   };
 
@@ -490,6 +495,12 @@ export async function createRayLinkApp(options) {
   const configuredSubscriptionOrigin = new URL(options.subscriptionOrigin || publicOrigin);
   const proxyHost = options.proxyHost || publicOrigin.hostname;
   const localHostDialAddress = String(options.localHostDialAddress || "").trim();
+  const endpointResolver = options.endpointResolver || new EndpointResolver({
+    cachePath: options.endpointCachePath || join(options.dataDir, "endpoint-cache.json"),
+    dnsServers: options.endpointDnsServers,
+    lookupTimeoutMs: options.endpointDnsTimeoutMs,
+    probeTimeoutMs: options.endpointProbeTimeoutMs
+  });
   const listenPort = options.listenPort || 8388;
   const store = new RayLinkStore({
     dbPath,
@@ -513,6 +524,27 @@ export async function createRayLinkApp(options) {
     const configured = store.setupStatus().access?.subscriptionOrigin;
     return configured ? new URL(configured) : configuredSubscriptionOrigin;
   };
+  const resolveClientEndpointOverrides = async (hosts) => Object.fromEntries(
+    (await Promise.all(hosts.map(async (host) => {
+      if (isIP(host.address)) return null;
+      const fallbackAddress = host.id === "local" ? localHostDialAddress : "";
+      const configuredFallback = isIP(fallbackAddress)
+        ? { address: fallbackAddress, source: "configured-fallback" }
+        : null;
+      let resolved;
+      try {
+        resolved = await endpointResolver.resolve({
+          hostname: host.address,
+          protocols: host.protocols,
+          fallbackAddress
+        });
+      } catch (error) {
+        console.warn(`[RayLink] Endpoint resolution failed for ${host.address}: ${error.message}`);
+        resolved = configuredFallback;
+      }
+      return isIP(resolved?.address) ? [host.address, resolved.address] : null;
+    }))).filter(Boolean)
+  );
   const subscriptionUrl = (subscription) => new URL(
     `/sub/${subscription.publicId}/${subscription.secret}`,
     currentSubscriptionOrigin()
@@ -921,9 +953,6 @@ export async function createRayLinkApp(options) {
       return connected && regionAllowed;
     }).map((host) => ({
       ...host,
-      address: host.id === "local" && localHostDialAddress
-        ? localHostDialAddress
-        : host.address,
       protocols: host.appliedProtocols
     }));
     if (
@@ -935,7 +964,8 @@ export async function createRayLinkApp(options) {
     ) {
       throw httpError("ENTITLEMENT_INACTIVE", "账号当前不可使用", 403);
     }
-    return buildUserClientConfig({
+    const endpointOverrides = await resolveClientEndpointOverrides(eligibleHosts);
+    const singBoxConfig = buildUserClientConfig({
       credential,
       hosts: eligibleHosts,
       probeUrl: options.protocolProbeUrl,
@@ -944,6 +974,7 @@ export async function createRayLinkApp(options) {
         ? new URL("/rule-sets/", currentSubscriptionOrigin()).toString()
         : null
     });
+    return { singBoxConfig, endpointOverrides };
   };
   const reconcileUserEntitlements = async (publisherAdminId, reconcileOptions = {}) => {
     try {
@@ -1243,12 +1274,13 @@ export async function createRayLinkApp(options) {
           sendSubscriptionLanding(request, response, universalUrl);
           return;
         }
+        const artifactInput = await buildClientConfigForUser(subscriptionUser.id);
         sendSubscriptionArtifact(
           request,
           response,
           buildSubscriptionArtifact({
             format,
-            singBoxConfig: await buildClientConfigForUser(subscriptionUser.id),
+            ...artifactInput,
             routePolicy: store.routingPolicy()
           }),
           subscriptionUser
@@ -1354,12 +1386,13 @@ export async function createRayLinkApp(options) {
         const portalConfigMatch = url.pathname.match(portalConfigRegex);
         if (request.method === "GET" && portalConfigMatch) {
           const format = resolveSubscriptionFormat(portalConfigMatch[1]);
+          const artifactInput = await buildClientConfigForUser(sessionUser.id);
           sendSubscriptionArtifact(
             request,
             response,
             buildSubscriptionArtifact({
               format,
-              singBoxConfig: await buildClientConfigForUser(sessionUser.id),
+              ...artifactInput,
               routePolicy: store.routingPolicy()
             }),
             profile.user

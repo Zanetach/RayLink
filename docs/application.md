@@ -34,12 +34,19 @@ RAYLINK_PUBLIC_ORIGIN='https://panel.example.com' \
 RAYLINK_SUBSCRIPTION_ORIGIN='https://sub.example.com' \
 RAYLINK_PROXY_HOST='node.example.com' \
 RAYLINK_LOCAL_HOST_DIAL_ADDRESS='203.0.113.10' \
+RAYLINK_ENDPOINT_DNS_SERVERS='1.1.1.1,8.8.8.8' \
 SING_BOX_BIN='/usr/local/bin/raylink-sing-box' \
 npm start
 ```
 
-`RAYLINK_LOCAL_HOST_DIAL_ADDRESS` 只覆盖本地 Runtime 在客户端配置中的拨号地址；协议配置中的
-TLS SNI 不变。对于启用 Fake-IP DNS 的客户端，建议填写服务器公网 IP。
+RayLink 保留 Host 域名作为节点身份，并自动从可信 DNS 解析拨号 IP。解析结果按 DNS TTL 缓存，
+经过已启用 TCP 入口的健康检查后写入 `RAYLINK_DATA_DIR/endpoint-cache.json`。DNS 不可用或新地址
+不健康时，依次使用最后一次可用 IP 和 `RAYLINK_LOCAL_HOST_DIAL_ADDRESS`。
+
+订阅渲染会按客户端适配：Mihomo/FlClash 使用 `hosts`、节点 DNS 策略和 Fake-IP 排除；sing-box
+使用专用 hosts DNS 与 `domain_resolver`；Loon/Egern 直接拨号到解析 IP，但协议 TLS SNI 不变。
+`RAYLINK_ENDPOINT_DNS_SERVERS` 默认 `1.1.1.1,8.8.8.8`，
+`RAYLINK_ENDPOINT_DNS_TIMEOUT_MS` 默认 `2000`，`RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS` 默认 `1500`。
 
 ## 验证
 

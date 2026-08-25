@@ -40,6 +40,18 @@ function optionalIpAddress(value, name) {
   return normalized;
 }
 
+function ipAddressList(value, fallback, name) {
+  const addresses = String(value || "")
+    .split(",")
+    .map((address) => address.trim())
+    .filter(Boolean);
+  const normalized = addresses.length ? addresses : fallback;
+  if (!normalized.length || normalized.some((address) => !isIP(address))) {
+    throw new Error(`${name} must contain valid IP addresses`);
+  }
+  return normalized;
+}
+
 export function loadConfig(env = process.env) {
   const host = env.RAYLINK_HOST || "127.0.0.1";
   const port = positiveInteger(env.RAYLINK_PORT, 4173, "RAYLINK_PORT");
@@ -102,6 +114,21 @@ export function loadConfig(env = process.env) {
     localHostDialAddress: optionalIpAddress(
       env.RAYLINK_LOCAL_HOST_DIAL_ADDRESS,
       "RAYLINK_LOCAL_HOST_DIAL_ADDRESS"
+    ),
+    endpointDnsServers: ipAddressList(
+      env.RAYLINK_ENDPOINT_DNS_SERVERS,
+      ["1.1.1.1", "8.8.8.8"],
+      "RAYLINK_ENDPOINT_DNS_SERVERS"
+    ),
+    endpointProbeTimeoutMs: positiveInteger(
+      env.RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS,
+      1_500,
+      "RAYLINK_ENDPOINT_PROBE_TIMEOUT_MS"
+    ),
+    endpointDnsTimeoutMs: positiveInteger(
+      env.RAYLINK_ENDPOINT_DNS_TIMEOUT_MS,
+      2_000,
+      "RAYLINK_ENDPOINT_DNS_TIMEOUT_MS"
     ),
     protocolProbeUrl,
     alertWebhookUrl,

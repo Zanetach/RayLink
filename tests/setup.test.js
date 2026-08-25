@@ -458,6 +458,49 @@ test("the one-time setup token initializes access, admin, and local runtime", as
   assert.equal(testApp.app.store.getHost("local").name, "Tokyo Gateway");
 });
 
+test("domain setup replaces the untouched installer IP with the canonical domain", async (t) => {
+  let runtimeAddress;
+  const testApp = await startSetupApp({
+    setupAccessManager: {
+      async preflight(input) {
+        runtimeAddress = input.runtime.address;
+        return { dns: "passed", caddy: "passed" };
+      }
+    }
+  });
+  t.after(() => testApp.close());
+
+  const response = await requestJson(testApp.baseUrl, "/api/setup/preflight", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: testApp.setupToken,
+      access: {
+        mode: "domain",
+        canonicalOrigin: "https://panel.example.com",
+        subscriptionOrigin: "https://sub.example.com",
+        allowedOrigins: [testApp.baseUrl]
+      },
+      certificate: {
+        mode: "caddy-auto",
+        email: "ops@example.com"
+      },
+      admin: {
+        username: "admin",
+        password: "Production@Admin2026"
+      },
+      runtime: {
+        name: "Domain Gateway",
+        address: "203.0.113.10",
+        region: "tokyo"
+      }
+    })
+  });
+
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  assert.equal(runtimeAddress, "panel.example.com");
+});
+
 test("domain setup activates Caddy from the IP initialization entry point", async (t) => {
   const calls = [];
   let releaseActivation;
