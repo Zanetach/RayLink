@@ -167,6 +167,44 @@ test("Mihomo subscription contains compatible nodes, smart groups, routing and D
   );
 });
 
+test("Mihomo DNS policies use valid suffix patterns for local and custom domains", () => {
+  const artifact = buildSubscriptionArtifact({
+    format: "mihomo",
+    singBoxConfig,
+    routePolicy: {
+      mode: "smart",
+      rules: [
+        {
+          id: "direct-work",
+          match: "domain_suffix",
+          value: "work.example",
+          action: "direct",
+          dns: "domestic",
+          priority: 10,
+          enabled: true
+        },
+        {
+          id: "direct-tracker",
+          match: "domain",
+          value: "tracker.example",
+          action: "direct",
+          dns: "system",
+          priority: 20,
+          enabled: true
+        }
+      ]
+    }
+  });
+
+  for (const suffix of ["local", "lan", "home.arpa", "work.example"]) {
+    assert.match(artifact.body, new RegExp(`"\\+\\.${suffix.replaceAll(".", "\\.")}":`));
+  }
+  assert.match(artifact.body, /"domain:localhost":/);
+  assert.match(artifact.body, /"domain:tracker\.example":/);
+  assert.doesNotMatch(artifact.body, /"\+\.tracker\.example":/);
+  assert.doesNotMatch(artifact.body, /"domain:\*\./);
+});
+
 test("all full subscription formats compile the same custom routing policy", () => {
   const routePolicy = {
     mode: "smart",
@@ -204,7 +242,7 @@ test("all full subscription formats compile the same custom routing policy", () 
 
   assert.match(mihomo, /DOMAIN-SUFFIX,work\.example,DIRECT/);
   assert.match(mihomo, /DOMAIN,tracker\.example,REJECT/);
-  assert.match(mihomo, /"domain:\*\.work\.example":[\s\S]*223\.5\.5\.5/);
+  assert.match(mihomo, /"\+\.work\.example":[\s\S]*223\.5\.5\.5/);
   assert.match(egern, /match: "work\.example"[\s\S]*policy: "DIRECT"/);
   assert.match(egern, /match: "tracker\.example"[\s\S]*policy: "REJECT"/);
   assert.doesNotMatch(egern, /no_resolve: true/);

@@ -1,5 +1,13 @@
 # RayLink Changelog
 
+## 0.2.32 - 2026-08-25
+
+### Fixed
+
+- Mihomo DNS suffix policies now use the supported `+.suffix` syntax for local
+  and custom domain suffixes, preventing Mihomo 1.19.30 from rejecting generated
+  subscription configurations while preserving exact-domain rules.
+
 ## 0.2.31 - 2026-08-25
 
 ### Fixed
