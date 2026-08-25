@@ -1,5 +1,13 @@
 # RayLink Changelog
 
+## 0.2.31 - 2026-08-25
+
+### Fixed
+
+- Loon subscriptions now emit the current `sni` TLS option for VMess, VLESS,
+  Trojan, AnyTLS, and Hysteria 2 nodes. IP dial endpoints therefore retain the
+  Host certificate identity instead of failing TLS validation in Loon.
+
 ## 0.2.30 - 2026-08-25
 
 ### Changed
